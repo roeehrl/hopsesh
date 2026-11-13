@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/host"
@@ -388,7 +389,16 @@ func Build(ctx context.Context, in Input, opt Options) (*Plan, error) {
 				continue
 			}
 			path := tgt.Machine.Path().Join(tgt.Install.Root(file.ToRoot), fromSlash(tgt.Machine.Path(), file.ToRel))
-			if _, e = fsys.Stat(path); errors.Is(e, fs.ErrNotExist) {
+			_, e = fsys.Stat(path)
+			if errors.Is(e, fs.ErrNotExist) && agent.IsVirtual(tgt.Module) {
+				// A missing anchor is no missing session: ask the agent.
+				if there, err := sessionPresent(ctx, tgt, p.Placement.Key); err != nil {
+					return nil, err
+				} else if there {
+					e = nil
+				}
+			}
+			if errors.Is(e, fs.ErrNotExist) {
 				p.ExpectedAbsent = append(p.ExpectedAbsent, path)
 			} else if e != nil {
 				return nil, e
@@ -493,7 +503,7 @@ func relate(ctx context.Context, p *Plan, in Input, opt Options) {
 	}
 	if conflict == "" {
 		if p.Options.Fork {
-			keepBoth(p)
+			keepBoth(p, in)
 		}
 		return
 	}
@@ -505,7 +515,7 @@ func relate(ctx context.Context, p *Plan, in Input, opt Options) {
 		if p.manifest != nil {
 			forkLine(p)
 		}
-		keepBoth(p)
+		keepBoth(p, in)
 	default:
 		p.Blockers = append(p.Blockers, conflict+"; choose --replace (the copy here is kept for undo) or --keep-both (bring this one in as a separate session)")
 	}
@@ -542,9 +552,10 @@ func changedSinceItLeft(ctx context.Context, p *Plan, in Input, c Copy) string {
 	return "the copy here has no verified causal history"
 }
 
-// keepBoth brings the incoming copy in under a new id, so both stay.
-func keepBoth(p *Plan) {
-	p.Placement.Key.Session = agent.SessionID(newID())
+// keepBoth brings the incoming copy in under a new id (in the target agent's own form), so
+// both stay.
+func keepBoth(p *Plan, in Input) {
+	p.Placement.Key.Session = agent.NewSessionID(in.Target.Module, in.Target.Install, time.Now(), newID)
 	p.SetAside = nil
 	p.StopHere = false
 	kept := p.Blockers[:0]

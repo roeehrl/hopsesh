@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
+	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/convert"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
@@ -42,7 +43,7 @@ func portableWrite(ctx context.Context, h agent.Host, m agent.Module, in agent.I
 			return req, convert.Result{}, false, err
 		}
 		req.Mode = ir.WriteNew
-		req.SessionID = newID()
+		req.SessionID = string(agent.NewSessionID(m, in, time.Now(), newID))
 		req.Expect = ir.Cursor{}
 		r.Nodes = full
 	}

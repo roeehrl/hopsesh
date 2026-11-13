@@ -192,8 +192,9 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 		if j.Undone {
 			return nil, fmt.Errorf("this transfer was undone; use a new operation ID")
 		}
+		sessions := journal.Reach{FS: reach, Sessions: sessionsOf(p, in)}
 		if r.Phase == "complete" {
-			if e = j.RecoverReceipts(reach); e != nil {
+			if e = j.RecoverReceiptsWith(ctx, sessions); e != nil {
 				return r.Result, e
 			}
 			p.Placement = r.Plan.Placement
@@ -232,20 +233,36 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 			if e != nil {
 				return res, e
 			}
+			if e = recordVendorWritten(j, in.Target.Module, in.Target.Machine.Name, p.Placement.Key, *r.Request, w); e != nil {
+				return res, e
+			}
+			adoptWritten(p, in, j, w)
 			res.Files, res.Bytes = 1, w.To-w.From
+			if e = vendorInstall(ctx, in.Target, h, j, p.Placement); e != nil {
+				return res, e
+			}
 			if e = recordContinuation(ctx, p, in, j, w, r.NativeBackup, r.NativeBackupHead, res); e != nil {
 				return res, e
 			}
 		} else {
+			// An agent that installs its own sessions may not have imported the placed
+			// copy yet: its import runs again (it does nothing when it ran).
+			h, e := in.Target.Machine.For(ctx, in.Target.Module.Spec(), in.Target.Install, j)
+			if e != nil {
+				return res, e
+			}
+			if e = vendorInstall(ctx, in.Target, h, j, p.Placement); e != nil {
+				return res, e
+			}
 			if e = recordLineage(ctx, p, in, j, r.NativePath, ir.Cursor{Head: p.sourceState.Head, Offset: p.sourceState.Offset}, r.NativeCursor, res); e != nil {
 				return res, e
 			}
 		}
-		if e = j.RecoverReceipts(reach); e != nil {
+		if e = j.RecoverReceiptsWith(ctx, sessions); e != nil {
 			return res, e
 		}
 		res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
-		if e = j.Seal(reach); e != nil {
+		if e = j.SealWith(ctx, journal.Reach{FS: reach, Sessions: sessionsOf(p, in)}); e != nil {
 			return res, e
 		}
 		r.Phase = "complete"

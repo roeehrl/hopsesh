@@ -85,7 +85,7 @@ func applyCloudOperation(ctx context.Context, p *Plan, in Input, env Env) (*Resu
 				return stored.Result, e
 			}
 			if p.handoffIn != nil {
-				e = j.RecoverReceipts(func(string) (host.FS, error) { return p.handoffIn.Source.Machine.FS(ctx) })
+				e = j.RecoverReceiptsWith(ctx, journal.Reach{FS: func(string) (host.FS, error) { return p.handoffIn.Source.Machine.FS(ctx) }, Sessions: SideSessions{p.handoffIn.Source}})
 			}
 			if e != nil {
 				return stored.Result, e

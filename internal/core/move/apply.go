@@ -218,11 +218,19 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 			return res, err
 		}
 	}
+	// An agent that installs its own sessions imports the placed copy now: lineage is
+	// recorded only for a session that is there.
+	if err := vendorInstall(ctx, tgt, tgtHost, j, p.Placement); err != nil {
+		if e := j.SealWith(ctx, reachOf(ctx, p, in)); e != nil {
+			res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+e.Error())
+		}
+		return res, err
+	}
 	// 5. Lineage beside both copies.
 	if err := recordLineage(ctx, p, in, j, mainDst, srcHead, tgtHead, res); err != nil {
 		return res, err
 	}
-	if pi, ok := tgt.Module.(agent.PostInstaller); ok {
+	if pi, ok := tgt.Module.(agent.PostInstaller); ok && !agent.InstallsViaVendor(tgt.Module) {
 		if err := pi.AfterInstall(ctx, tgtHost, tgt.Install, p.Placement.Key, p.Placement); err != nil {
 			res.Warnings = append(res.Warnings, "after installing: "+err.Error())
 		}
@@ -234,7 +242,7 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 		res.PromptFile = promptFile
 	}
 	res.Command, res.Run = launch.Shell(p.Resume, res.PromptFile, launch.DefaultShell()), p.Resume
-	if err := j.Seal(machinesOf(ctx, in)); err != nil {
+	if err := j.SealWith(ctx, reachOf(ctx, p, in)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
 	}
 	step("done")
@@ -356,7 +364,8 @@ func DescribeSync(r repos.SyncResult, branch, source string) string {
 }
 
 // heads reads the conversation head of the copy as it left the source (the staged raw
-// file) and as it arrives (the staged rewritten file), when the module can read.
+// file) and as it arrives (the staged rewritten file), when the module can read. h reads
+// files only, so a module that keeps sessions in a database reads the staged files.
 func heads(ctx context.Context, p *Plan, in Input, h agent.Host, raw string, staged map[string]string) (src, tgt ir.Cursor) {
 	reader, ok := in.Target.Module.(agent.Reader)
 	if !ok {
@@ -397,7 +406,16 @@ func install(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal
 	step(fmt.Sprintf("copying %d file(s), %s", len(p.bundle.Files), Human(p.Bytes)))
 	for _, f := range p.Files.Files {
 		from := src.Machine.Path().Join(src.Install.Root(f.From.Root), fromSlash(src.Machine.Path(), f.From.Rel))
-		n, sum, err := copyStable(srcFS, from, filepath.Join(raw, f.From.Root, filepath.FromSlash(f.From.Rel)), f.From.Growable)
+		to := filepath.Join(raw, f.From.Root, filepath.FromSlash(f.From.Rel))
+		var n int64
+		var sum string
+		if f.From.Virtual && !src.Machine.IsSnapshot() {
+			// The agent keeps it in a database: the module makes its bytes. A peer's
+			// snapshot holds them already, made by the sender (packageOf).
+			n, sum, err = materialize(ctx, src, in.Session, f.From, to)
+		} else {
+			n, sum, err = copyStable(srcFS, from, to, f.From.Growable)
+		}
 		if err != nil {
 			return "", none, none, fmt.Errorf("copy %s: %w", from, err)
 		}
@@ -443,6 +461,8 @@ func install(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal
 	if err != nil {
 		return "", none, none, err
 	}
+	// Staged files are read as files, never through the agent's database.
+	stagedHost = host.FilesOnly(stagedHost)
 	if err := tgt.Module.Verify(ctx, stagedHost, p.Files, staged, p.Placement); err != nil {
 		return "", none, none, fmt.Errorf("verify: %w", err)
 	}
@@ -467,9 +487,24 @@ func install(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal
 			return "", none, none, fmt.Errorf("destination appeared since planning; refresh the plan")
 		}
 	}
+	if len(p.ExpectedAbsent) > 0 && agent.IsVirtual(tgt.Module) {
+		// Its anchor can be missing while the agent has the session.
+		if there, e := sessionPresent(ctx, tgt, p.Placement.Key); e != nil || there {
+			return "", none, none, fmt.Errorf("destination appeared since planning; refresh the plan")
+		}
+	}
 	// 4. Install, keeping what it replaces.
 	step("installing")
+	tgtHost, err := tgt.Machine.For(ctx, tgt.Module.Spec(), tgt.Install, j)
+	if err != nil {
+		return "", none, none, err
+	}
 	for _, c := range p.SetAside {
+		// A session the agent keeps in a database is backed up and deleted through its
+		// program; its anchor and lineage are set aside below like any file.
+		if err := setAsideSession(ctx, tgt, tgtHost, j, c.Key); err != nil {
+			return "", none, none, err
+		}
 		b, err := tgt.Module.Bundle(ctx, stagedHost, tgt.Install, c)
 		if err != nil {
 			continue
@@ -549,7 +584,7 @@ func recordLineage(ctx context.Context, p *Plan, in Input, j *journal.Journal, m
 	if err = m.Validate(); err != nil {
 		return err
 	}
-	if err = j.WriteReceipt(host.LocalFS(), p.Target.Location, lineage.PathFor(mainDst), m.ForBranch(p.targetLine).Encode(), true); err != nil {
+	if err = writeNativeReceipt(ctx, j, host.LocalFS(), in.Target, p.Target.Location, mainDst, p.Placement.Key, m.ForBranch(p.targetLine).Encode()); err != nil {
 		return fmt.Errorf("recording destination receipt: %w", err)
 	}
 	if p.Source.Location == p.Target.Location && in.Session.Path == mainDst {
@@ -599,6 +634,31 @@ func rewriteFile(in, out string, f agent.PlacedFile, maps []agent.Mapping, pol a
 		err = cerr
 	}
 	return st, err
+}
+
+// materialize stages a virtual file: the session as its module makes it from where the
+// agent keeps it.
+func materialize(ctx context.Context, src Side, s agent.Summary, f agent.BundleFile, dst string) (int64, string, error) {
+	mat, ok := src.Module.(agent.Materializer)
+	if !ok {
+		return 0, "", fmt.Errorf("%w: %s cannot make the session's file", agent.ErrUnsupported, src.Module.Spec().Name)
+	}
+	h, err := src.Machine.For(ctx, src.Module.Spec(), src.Install, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	b, err := mat.Materialize(ctx, h, src.Install, s, f)
+	if err != nil {
+		return 0, "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return 0, "", err
+	}
+	if err := os.WriteFile(dst, b, 0o600); err != nil {
+		return 0, "", err
+	}
+	sum := sha256.Sum256(b)
+	return int64(len(b)), hex.EncodeToString(sum[:]), nil
 }
 
 // copyStable copies a file here; a file still being appended to (an open session) is

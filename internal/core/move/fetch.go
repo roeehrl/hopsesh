@@ -692,7 +692,7 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		env.Audit.Write(audit.Entry{Action: "cloud.fetch", Session: p.Key.String(), Detail: map[string]any{"cloud": fp.Cloud, "code": true, "journal": j.ID}})
 	case fp.Write:
 		if err := writeFetched(ctx, p, env, j, base, branch, res); err != nil {
-			_ = j.Seal(func(string) (host.FS, error) { return host.LocalFS(), nil })
+			_ = j.SealWith(ctx, fetchReach(p))
 			return res, err
 		}
 	default:
@@ -719,11 +719,22 @@ func applyFetch(ctx context.Context, p *Plan, env Env) (*Result, error) {
 		res.Command, res.Run = fp.Command, fp.Run
 		env.Audit.Write(audit.Entry{Action: "cloud.fetch", Session: p.Key.String(), Detail: map[string]any{"cloud": fp.Cloud, "worktree": fp.Worktree, "journal": j.ID}})
 	}
-	if err := j.Seal(func(string) (host.FS, error) { return host.LocalFS(), nil }); err != nil {
+	if err := j.SealWith(ctx, fetchReach(p)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
 	}
 	step("done")
 	return res, nil
+}
+
+// fetchReach is how a fetch's journal reaches this machine and the sessions written into
+// its agents.
+func fetchReach(p *Plan) journal.Reach {
+	in := p.fetchIn
+	sides := SideSessions{{Machine: in.Machine, Module: in.Module, Install: in.Install}}
+	if in.Continue != nil {
+		sides = append(sides, Side{Machine: in.Machine, Module: in.Continue, Install: in.ContinueInstall})
+	}
+	return journal.Reach{FS: func(string) (host.FS, error) { return host.LocalFS(), nil }, Sessions: sides}
 }
 
 func union(a, b []string) []string {

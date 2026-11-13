@@ -241,7 +241,7 @@ func AdoptFetch(ctx context.Context, f *Fetch, side Side, env Env, exited bool) 
 		}
 	}
 	ad.Command = launch.Shell(ad.Resume, "", launch.DefaultShell())
-	if err := j.Seal(func(string) (host.FS, error) { return fsys, nil }); err != nil {
+	if err := j.SealWith(ctx, journal.Reach{FS: func(string) (host.FS, error) { return fsys, nil }, Sessions: SideSessions{side}}); err != nil {
 		ad.Warnings = append(ad.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
 	}
 	f.Adopted = ad
@@ -387,7 +387,7 @@ func recordFetchLineage(ctx context.Context, f *Fetch, side Side, j *journal.Jou
 	if err = m.Validate(); err != nil {
 		return err
 	}
-	if err = j.WriteReceipt(host.LocalFS(), side.Machine.Name, lineage.PathFor(ad.Path), m.Encode(), true); err != nil {
+	if err = writeNativeReceipt(ctx, j, host.LocalFS(), side, side.Machine.Name, ad.Path, ad.Key, m.Encode()); err != nil {
 		return err
 	}
 	f.Lineage = m
@@ -440,8 +440,14 @@ func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal
 	if err != nil {
 		return err
 	}
+	if err := recordVendorWrite(j, side.Module, side.Machine.Name, o.Key, req); err != nil {
+		return err
+	}
 	w, err := writer.Write(ctx, h, side.Install, req)
 	if err != nil {
+		return err
+	}
+	if err := recordVendorWritten(j, side.Module, side.Machine.Name, o.Key, req, w); err != nil {
 		return err
 	}
 	var rollover *lineage.Rollover
@@ -467,7 +473,7 @@ func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal
 	if err = m.Validate(); err != nil {
 		return err
 	}
-	if err = j.WriteReceipt(host.LocalFS(), side.Machine.Name, lineage.PathFor(o.Path), m.Encode(), true); err != nil {
+	if err = writeNativeReceipt(ctx, j, host.LocalFS(), side, side.Machine.Name, o.Path, o.Key, m.Encode()); err != nil {
 		return err
 	}
 	f.Lineage = m
