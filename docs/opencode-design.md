@@ -713,7 +713,7 @@ neutral names (`opencode/…`).
   `.exe` (`accounts_view.go`, `movement_hooks.go`), so a Linux desktop app needs its own rule.
 - PR 8: `style.css` agent tokens and chips (`--claude`, `--codex`, `.chip.agent-*`, `.msg-l.agent-*`),
   the Settings bell and trust texts, and the Playwright specs and webtest fixtures that name two agents.
-- PR 3: `internal/devtools/testbundle` stand-in names and the testkit stand-ins.
+- PR 3: `internal/devtools/testbundle` stand-in names and the testkit stand-ins (done in PR 3).
 - PR 9: the two-agent loops in `internal/e2e`, hsmatrix, `driftmanifest` (`agentWatch`),
   `skillcheck`, `scripts/matrix-*`, `ci/drift` and the nightly and drift workflows.
 - PR 10: the skill template's examples and `/cd` lines, the plugin files, READMEs, packaging, demo.
@@ -864,6 +864,61 @@ rows that tests prove are never read).
 - PR 9: the agenttest suite has no subtests yet for Previewer, LiveDetector, Stopper, AccountProber,
   ContextSizer, Renamer, HostResumer or SessionWatchProvider, and plan-move-identity checks only the
   first session; the drift entry has no real-agent `Tests` pattern until real-agent tests exist.
+
+**Left by PR 3 for later PRs.** The stand-in `opencode` is `internal/testkit/fakeopencode`
+(`fakeagent.OpenCode()`; the fakeagent program as `opencode`; in the test bundle). It keeps a
+modernc database with the 2.3.0 schema where OpenCode keeps it and plays `--version`, `debug
+paths`, `service status`, `session list|export|import|delete`, `auth list --format json` and
+the API calls hopsesh makes. Its export of the sandbox's rows is the 2.3.0 export byte for
+byte (all 14 fixtures), and an export imported and exported again is unchanged but for the
+update time, folder, project and fork. A differential run against the real 2.3.0
+(`--standalone`, a copy of the sandbox, 36 cases: import success, duplicate, child without
+parent, missing projectID, missing file, bad JSON, taken message ids, missing folder; export;
+list; API pages, get, rename, messages, active, interrupt, plugin, move; delete) matched in
+all 36 after two fixes. `DemoHome` has three OpenCode sessions (and one child) in `git/demo`;
+`demoseed -opencode`, `skillcheck`, the test bundle (stand-in, SQL and export fixtures with
+scrub checks, an `export/` slot, `opencode-transfer.schema.json`) and `opencode-list.txtar`
+use it.
+- Sandbox findings (F11 and others): an import whose message ids exist fails with "Error:
+  Failed to import session: Internal Server Error" (keep-both must re-mint `msg_` ids, PR 4);
+  a missing `--directory` is "LocationNotFoundError: Location not found: <dir>"; an unreadable
+  file is "Error: Failed to read session data: ENOENT…", bad JSON "SchemaError: Expected a
+  valid JSON string"; errors end with Bun stack lines (the stand-in prints the first line
+  only). `session delete` prints "Session <id> deleted". API errors print the body
+  (`{"_tag":…,"message":…}`) on stdout and "HTTP <code> <text>" on stderr, exit 1; an unknown
+  path prints no body. A fork is titled "<title> (fork #n)", its messages `<new msg id>_<n>`.
+  `session list` lists the working folder's project's top-level sessions, archived ones too.
+  The export prints a `location-switched` message's `projectID` and `subpath` before
+  `location`, against its schema's order; `subpath` is "" at the project root.
+- PR 4 (`cd`): `api POST …/move` with `--standalone` answers 204 but the move stays queued:
+  the private server exits before the next step boundary, and the session keeps `time.busy`
+  with no idle, so it then reads as busy. The stand-in applies a move at once. Decide how a
+  `cd` with the service stopped confirms (or refuse it).
+- The PR 2 note on `XDG_STATE_HOME` was imprecise: OpenCode reads the `XDG_*` variables with
+  `||` (empty is unset) but `OPENCODE_DB` and `OPENCODE_CONFIG_DIR` with `??`: an empty
+  `OPENCODE_DB` opens the data folder as the database, an empty `OPENCODE_CONFIG_DIR` is a
+  folder relative to where it runs. `testkit.Env` still marks them with "", and
+  `testkit.Setenv`, `Apply` and `Environ` unset what is empty (every caller uses them; the
+  Playwright real setup deletes empty values). The stand-in follows OpenCode's rules.
+- What the stand-in does not play: rows written before 2.1 (no `SessionLegacy` upgrade),
+  media in `blob` (refs stay), `--sanitize`, event rows, instruction state and jobs; members
+  it does not know are kept (OpenCode drops them). The service is make-believe
+  (`$FAKE_OPENCODE_SERVICE`); a command without `--standalone` "starts" it and logs that.
+  Turns are the ids in `$FAKE_OPENCODE_ACTIVE`; an interrupt adds an `idle` "interrupted"
+  message. The TUI (`opencode [dir] -s <id>`) prints one line and exits 0.
+- PR 6: `GET /api/plugin` lists no plugins (the sandbox listed none for a local plugin folder
+  either); teach it the real shape once captured. `skill.txtar` is unchanged: OpenCode has no
+  `Integration` yet, so `skill install` still prints "(Codex)". The plugin event payload slot
+  and `opencode-plugin-notice.schema.json` come with the plugin.
+- PR 4/5: the stand-in is not in `fakecloud.Programs` (it writes real files, and FakeHost
+  tests keep the module's own fake); an in-process program over `agenttest`'s `SQLFile` can
+  join it. The scenario's same-machine `pull --to` is refused by the generic "destination is
+  synchronized" rule before `Verify`; `opencode-move.txtar` comes with moves.
+- PR 8: the test world's `DemoHome` now lists OpenCode sessions; Playwright specs that count
+  the demo's sessions or agents may need updating (not run in this PR).
+- PR 9: the differential run is a script in the session's scratchpad; make it a devtool for
+  the nightly real-agent job. Tests using `testkit.Env` still find an installed real
+  `opencode` through its absolute `Candidates`.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
