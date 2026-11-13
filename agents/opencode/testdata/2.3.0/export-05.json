@@ -1,0 +1,96 @@
+{
+  "info": {
+    "id": "ses_e29a832f5ffebHEWUP5fBLspvU",
+    "parentID": "ses_e29a8385effeUhBGvRVeVFrDLo",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "agent": "general",
+    "cost": 0,
+    "tokens": {
+      "input": 7787,
+      "output": 2,
+      "reasoning": 22,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1794597440780,
+      "updated": 1794597446292,
+      "busy": 1794597440784,
+      "idle": 1794597446294
+    },
+    "title": "Reply pong",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d657cd0d0029i66CocZPBxgOs",
+      "time": {
+        "created": 1794597440786
+      },
+      "text": "You are a subagent spawned by another session.\nReply with the single word pong. Do not use any tools.",
+      "type": "user"
+    },
+    {
+      "id": "msg_1d657cd14001GKLIOaoyyFdUMk",
+      "time": {
+        "created": 1794597440789,
+        "firstToken": 1794597444678,
+        "streamed": 1794597446283,
+        "completed": 1794597446292
+      },
+      "type": "assistant",
+      "agent": "general",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user is telling me I'm a sub-agent and should reply with \"pong\". No tools.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597444679,
+            "completed": 1794597446282
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\npong"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 7787,
+        "output": 2,
+        "reasoning": 22,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d657e296001vux0TTBiUcW2dL",
+      "time": {
+        "created": 1794597446294
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

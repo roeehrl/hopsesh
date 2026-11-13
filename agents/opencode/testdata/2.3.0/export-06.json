@@ -1,0 +1,670 @@
+{
+  "info": {
+    "id": "ses_e29a7bdf0ffefEVrCCay4aaALo",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 1638,
+      "output": 448,
+      "reasoning": 264,
+      "cache": {
+        "read": 89020,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1794597470786,
+      "updated": 1794597517670,
+      "busy": 1794597505836,
+      "idle": 1794597517672
+    },
+    "title": "long session",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d658425b001OlNIkBr7PBuTLb",
+      "time": {
+        "created": 1794597470904
+      },
+      "text": "Remember the number 7. Reply 'noted'.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65842bc001ZDLLuiDgYAfJ14",
+      "time": {
+        "created": 1794597470910,
+        "firstToken": 1794597471528,
+        "streamed": 1794597472810,
+        "completed": 1794597472819
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user is asking me to remember the number 7 and reply with \"noted,\" which is a straightforward request I can handle directly in conversation without needing any tools.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597471529,
+            "completed": 1794597472808
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\nnoted"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 18,
+        "output": 3,
+        "reasoning": 36,
+        "cache": {
+          "read": 8722,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d6584a35001htjIL4ZTrsDKqq",
+      "time": {
+        "created": 1794597472821
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_1d6584c00001GS8PpP7J2dLcLv",
+      "time": {
+        "created": 1794597473396
+      },
+      "text": "Add 5 to the number. Reply with just the result.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d6584c790013kcADA0thSgDRB",
+      "time": {
+        "created": 1794597473403,
+        "firstToken": 1794597474380,
+        "streamed": 1794597474627,
+        "completed": 1794597474635
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nI'm adding 5 to 7 to get 12 as the result.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597474381,
+            "completed": 1794597474625
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n12"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 69,
+        "output": 3,
+        "reasoning": 19,
+        "cache": {
+          "read": 8735,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d658514d0013UNnYPwZX407z5",
+      "time": {
+        "created": 1794597474637
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_1d6585301001Wgsj5aAhYS1mPG",
+      "time": {
+        "created": 1794597475193
+      },
+      "text": "Use the shell tool to run 'echo $((12*2))' and reply with its output.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d658537f001UKnf8xNoObvO4C",
+      "time": {
+        "created": 1794597475201,
+        "firstToken": 1794597475559,
+        "streamed": 1794597476070,
+        "completed": 1794597476145
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nI need to run a shell command and share what it outputs.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597475560,
+            "completed": 1794597476066
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n"
+        },
+        {
+          "type": "tool",
+          "id": "call_e0a84b8d",
+          "name": "shell",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "echo $((12*2))"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "24\n"
+              }
+            ],
+            "metadata": {
+              "status": "completed",
+              "truncated": false,
+              "exit": 0
+            }
+          },
+          "time": {
+            "created": 1794597476057,
+            "ran": 1794597476068,
+            "completed": 1794597476136
+          }
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0,
+      "tokens": {
+        "input": 61,
+        "output": 33,
+        "reasoning": 15,
+        "cache": {
+          "read": 8799,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d6585736001ykTy46kv00ES9x",
+      "time": {
+        "created": 1794597476151,
+        "firstToken": 1794597476717,
+        "streamed": 1794597477105,
+        "completed": 1794597477113
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe answer is 24.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597476718,
+            "completed": 1794597477103
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n24"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 71,
+        "output": 3,
+        "reasoning": 9,
+        "cache": {
+          "read": 8855,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d6585afb001jCiOC1JgPJTRp5",
+      "time": {
+        "created": 1794597477115
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_1d6585caf0014xCjliokpxu7IY",
+      "time": {
+        "created": 1794597477663
+      },
+      "text": "Read notes.txt with the read tool and reply with its first word.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d6585d23001WK2qtnBB9Hd7fC",
+      "time": {
+        "created": 1794597477670,
+        "firstToken": 1794597478341,
+        "streamed": 1794597478965,
+        "completed": 1794597478977
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user is asking me to read the notes.txt file. Let's do that.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597478341,
+            "completed": 1794597478962
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n"
+        },
+        {
+          "type": "tool",
+          "id": "call_11645f2c",
+          "name": "read",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "path": "notes.txt"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Read file notes.txt, lines 1-1\n1: todo: add a farewell function"
+              }
+            ],
+            "metadata": {
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597478953,
+            "ran": 1794597478963,
+            "completed": 1794597478968
+          }
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0,
+      "tokens": {
+        "input": 43,
+        "output": 25,
+        "reasoning": 19,
+        "cache": {
+          "read": 8921,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d6586246001HMCpJdEFiPgJxx",
+      "time": {
+        "created": 1794597478983,
+        "firstToken": 1794597479423,
+        "streamed": 1794597480137,
+        "completed": 1794597480144
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe first word is \"todo:\"\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597479424,
+            "completed": 1794597480135
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\ntodo:\n\n\ntodo"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 84,
+        "output": 7,
+        "reasoning": 9,
+        "cache": {
+          "read": 8959,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65866d1002Ovg6c1MBmXaEjU",
+      "time": {
+        "created": 1794597480146
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_1d6586886001VaK4zsgkBzyK7K",
+      "time": {
+        "created": 1794597480698
+      },
+      "text": "Multiply the number from my second message's answer by 2. Reply with just the result.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65868ff001mjUVp1DfAkL4uW",
+      "time": {
+        "created": 1794597480706,
+        "firstToken": 1794597481477,
+        "streamed": 1794597483949,
+        "completed": 1794597483968
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nI'm trying to parse what the user means by \"second message\" — whether they're counting only user messages or including all messages in the conversation. Their second user message asked me to add 5 to 7, which gives 12, and multiplying that by 2 yields 24, though I'm also considering whether they meant the second message overall in the exchange.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597481478,
+            "completed": 1794597483946
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n24"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 50,
+        "output": 3,
+        "reasoning": 79,
+        "cache": {
+          "read": 9038,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65875c6001Fh6LwnYny0M4sV",
+      "time": {
+        "created": 1794597483974
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_1d65877e2001mknRAd5n1yQ3fF",
+      "time": {
+        "created": 1794597484911
+      },
+      "text": "Summarise this conversation in one sentence.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d6587974001VUtvBiUNAy3qtL",
+      "time": {
+        "created": 1794597484919,
+        "firstToken": 1794597485839,
+        "streamed": 1794597487030,
+        "completed": 1794597487037
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nI'm thinking about how to summarize a conversation in just one sentence, though the instruction itself is pretty straightforward.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597485839,
+            "completed": 1794597487028
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\nYou asked me to remember 7, then walked through a series of small tool-based steps — arithmetic (12, then 24), running a shell command, and reading notes.txt — each with a minimal reply, culminating in this summary."
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 108,
+        "output": 52,
+        "reasoning": 24,
+        "cache": {
+          "read": 9083,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65881bf001x2ZiQSoquxXH31",
+      "time": {
+        "created": 1794597487039
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "type": "compaction",
+      "id": "msg_1d658951f001fS5tYbxdt6Ejhj",
+      "metadata": {
+        "keepID": "msg_1d65877e2001mknRAd5n1yQ3fF"
+      },
+      "time": {
+        "created": 1794597505839
+      },
+      "status": "completed",
+      "reason": "manual",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "summary": "\n\n## Objective\n- A short exercise in which the user had the assistant track a number (starting at 7) through a sequence of minimal-reply arithmetic and single tool calls, ending with a conversation summary.\n\n## Requirements\n- Each reply must be only the requested output (e.g. \"noted\", just the number, just the first word).\n\n## Decisions\n- Number tracking chain: 7 → +5 = 12 → ×2 = 24 (via `echo $((12*2))`); the \"second message's answer\" was taken as 12, so ×2 = 24.\n\n## Work State\n### Completed\n- Remembered the number 7.\n- Computed 7 + 5 = 12 and 12 × 2 = 24 (shell and arithmetic).\n- Read `notes.txt` and reported its first word (\"todo:\").\n- Summarised the conversation in one sentence.\n\n### Active\n- (none)\n\n### Blocked\n- (none)\n\n## Next Move\n1. (none) — no outstanding request beyond the summary.\n\n## Relevant Files\n- `notes.txt`: only file touched; contains \"todo: add a farewell function\" (a possible hint at future work, not yet requested).\n\n## Important Context\n- Tracked number is 24 (originally 7).\n- `notes.txt` contains the task \"add a farewell function\", which the user has not asked to implement.",
+      "cost": 0,
+      "tokens": {
+        "input": 673,
+        "output": 317,
+        "reasoning": 32,
+        "cache": {
+          "read": 9186,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d658ca06001KIDt24bGr9pg7v",
+      "time": {
+        "created": 1794597516722
+      },
+      "text": "What number did I ask you to remember? Reply with just it.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d658f5b5001tPpnStILEa1Ksn",
+      "time": {
+        "created": 1794597516726,
+        "firstToken": 1794597517293,
+        "streamed": 1794597517662,
+        "completed": 1794597517670
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user initially asked me to memorize 7, and I should respond with just that number.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597517294,
+            "completed": 1794597517660
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n7"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 461,
+        "output": 2,
+        "reasoning": 22,
+        "cache": {
+          "read": 8722,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d658f968001Jrct2o3ECK666H",
+      "time": {
+        "created": 1794597517672
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "info": {
+    "id": "ses_e29a5d62effecLvjFnmTVDXAQ5",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 14,
+      "output": 3,
+      "reasoning": 16,
+      "cache": {
+        "read": 8722,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1794597595652,
+      "updated": 1794597596250,
+      "busy": 1794597595752,
+      "idle": 1794597596252,
+      "archived": 1794597595663
+    },
+    "title": "archived at start",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65a2a1a001gwgCCj4pVjOufG",
+      "time": {
+        "created": 1794597595757
+      },
+      "text": "Reply with the single word archived.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65a2a710011M513pHOM8HM7j",
+      "time": {
+        "created": 1794597595764,
+        "firstToken": 1794597596052,
+        "streamed": 1794597596241,
+        "completed": 1794597596250
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user is asking for a one-word response: \"archived\".\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597596053,
+            "completed": 1794597596236
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\narchived"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 14,
+        "output": 3,
+        "reasoning": 16,
+        "cache": {
+          "read": 8722,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65a2c5c001L5FeBatBuA3N9E",
+      "time": {
+        "created": 1794597596252
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}
