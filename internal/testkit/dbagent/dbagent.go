@@ -134,6 +134,11 @@ func Seed(data string, id agent.SessionID, dir, title string, msgs ...Message) e
 	})
 }
 
+// Init makes a data root's database with no sessions, as the agent does when it first runs.
+func Init(data string) error {
+	return program(data, func(*sql.Tx) error { return nil })
+}
+
 // Continue adds a message to a session, as using it in the agent does.
 func Continue(data string, id agent.SessionID, msg Message) error {
 	return program(data, func(tx *sql.Tx) error {
@@ -186,8 +191,8 @@ func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agen
 		return agent.Listing{}, nil // a snapshot: its sessions are the package's
 	}
 	r, err := sq.Query(ctx, dbOf(h, in), `SELECT s.id, s.directory, s.title, s.updated, (SELECT count(*) FROM message m WHERE m.session_id = s.id) AS n FROM session s ORDER BY s.updated`)
-	if errors.Is(err, agent.ErrNotFound) {
-		return agent.Listing{}, nil
+	if errors.Is(err, agent.ErrNotInstalled) {
+		return agent.Listing{}, nil // no database yet
 	}
 	if err != nil {
 		return agent.Listing{}, err

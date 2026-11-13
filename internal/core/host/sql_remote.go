@@ -21,20 +21,25 @@ import (
 // Remote SQL tiers: how a machine reached over SSH reads a SQLite database, chosen once
 // per machine (the first time a module asks) and kept.
 const (
-	tierSQLite3 = "sqlite3" // the sqlite3 shell, 3.37 or newer (-safe)
+	tierSQLite3 = "sqlite3" // the sqlite3 shell, 3.37 or newer (-safe), marking BLOBs
 	tierPython3 = "python3" // python3 -I with a fixed script, with SQLite's authorizer
 	tierNone    = "none"    // neither: the module falls back to its agent's own program
 )
 
 // sqlProbeScript says which of the tools a remote read can use are there: the sqlite3
 // shell's version and whether its JSON marks BLOBs (--blob-quote, which an older shell
-// prints as text), then, unless that shell does all a read needs, python3's.
+// prints as text), and python3's.
 const sqlProbeScript = `if command -v sqlite3 >/dev/null 2>&1; then
 printf 'sqlite3 %s\n' "$(sqlite3 -version 2>/dev/null)"
-case "$(sqlite3 -init /dev/null -cmd '.mode json --blob-quote sql' :memory: "SELECT x'01' AS b" 2>/dev/null)" in *"x'01'"*) echo 'sqlite3-blobs yes'; exit 0;; esac
+case "$(sqlite3 -init /dev/null -cmd '.mode json --blob-quote sql' :memory: "SELECT x'01' AS b" 2>/dev/null)" in *"x'01'"*) echo 'sqlite3-blobs yes';; esac
 fi
 if command -v python3 >/dev/null 2>&1; then python3 -I -c 'import sqlite3; print("python3 " + sqlite3.sqlite_version)' 2>/dev/null; fi
 exit 0`
+
+// maxShellScript is the most SQL a batch puts on the sqlite3 shell's command line: sshd
+// hands the whole line to the login shell as one argument, which Linux caps at 128 KiB.
+// A longer batch is read with python3 (its request goes on stdin), or refused.
+const maxShellScript = 96 << 10
 
 // sqlProbeRetry is how long a machine whose probe failed has no reader before it is
 // probed again.
@@ -48,7 +53,8 @@ code=$({ { "$@"; echo $? >&5; } | head -c "$lim" >&4; } 5>&1)
 exit "${code:-1}"`
 
 // SQL returns the machine's database reader, or nil when the machine has none: a
-// snapshot, Windows over SSH, or a machine with neither sqlite3 3.37+ nor python3.
+// snapshot, Windows over SSH, or a machine with neither a sqlite3 shell that marks BLOBs
+// (3.37+) nor python3.
 // agent.Confine limits it to a module's tables (Only); on another machine only a limited
 // reader reads.
 func (m *Machine) SQL() agent.SQL {
@@ -67,13 +73,13 @@ func (m *Machine) SQL() agent.SQL {
 }
 
 // sqlTierOf probes the machine for a remote tier the first time it is asked, and says
-// whether its sqlite3 shell marks BLOBs. A failed probe is kept for sqlProbeRetry, so a
-// machine out of reach is not probed again by every reader meanwhile.
+// whether it has python3 (for a batch too long for the shell). A failed probe is kept for
+// sqlProbeRetry, so a machine out of reach is not probed again by every reader meanwhile.
 func (m *Machine) sqlTierOf() (string, bool) {
 	m.sqlMu.Lock()
 	defer m.sqlMu.Unlock()
 	if m.sqlTier != "" {
-		return m.sqlTier, m.sqlBlobs
+		return m.sqlTier, m.sqlPython
 	}
 	if !m.sqlFailed.IsZero() && time.Since(m.sqlFailed) < sqlProbeRetry {
 		return tierNone, false
@@ -89,8 +95,8 @@ func (m *Machine) sqlTierOf() (string, bool) {
 		return tierNone, false
 	}
 	m.sqlFailed = time.Time{}
-	m.sqlTier, m.sqlBlobs = pickSQLTier(string(res.Stdout))
-	return m.sqlTier, m.sqlBlobs
+	m.sqlTier, m.sqlPython = pickSQLTier(string(res.Stdout))
+	return m.sqlTier, m.sqlPython
 }
 
 // sqlRunner runs the remote readers' programs: the machine's own Exec, or a stand-in.
@@ -103,9 +109,9 @@ func (m *Machine) sqlRunner() agent.Exec {
 
 // pickSQLTier reads sqlProbeScript's output: the sqlite3 shell when it has -safe and
 // -json and marks BLOBs; else python3, which sets SQLite's authorizer and returns BLOBs as
-// bytes; else an older sqlite3 shell (3.37+), which returns a BLOB as text; else none.
-// blobs says whether the shell picked marks BLOBs.
-func pickSQLTier(out string) (tier string, blobs bool) {
+// bytes; else none (an older shell would return a BLOB as text: the module uses its
+// agent's program instead). python says whether python3 is there.
+func pickSQLTier(out string) (tier string, python bool) {
 	shell, marks, python := false, false, false
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
@@ -123,11 +129,9 @@ func pickSQLTier(out string) (tier string, blobs bool) {
 	}
 	switch {
 	case shell && marks:
-		return tierSQLite3, true
+		return tierSQLite3, python
 	case python:
-		return tierPython3, false
-	case shell:
-		return tierSQLite3, false
+		return tierPython3, true
 	}
 	return tierNone, false
 }
@@ -183,10 +187,17 @@ func (s remoteSQL) Batch(ctx context.Context, db string, stmts []agent.Statement
 		}
 		texts[i] = strings.TrimSuffix(strings.TrimSpace(q), ";")
 	}
+	tier, python := s.m.sqlTierOf()
+	if tier == tierSQLite3 && shellScriptLen(texts) > maxShellScript {
+		if !python {
+			return nil, fmt.Errorf("%w: the batch is too long for the sqlite3 shell's command line on %s; read less at once", agent.ErrTooLarge, s.m.Name)
+		}
+		tier = tierPython3
+	}
 	var out []agent.Rows
 	err := s.read(ctx, db, func(uri string) error {
 		var err error
-		switch tier, _ := s.m.sqlTierOf(); tier {
+		switch tier {
 		case tierSQLite3:
 			out, err = s.sqlite3(ctx, db, uri, stmts, texts)
 		case tierPython3:
@@ -255,61 +266,41 @@ func (s remoteSQL) Columns(ctx context.Context, db, table string) ([]string, err
 	return cols, nil
 }
 
-// read runs a read with the database's URI, again while it is busy, and as immutable
-// while no program has it open (whenClosed), as the local reader does. The machine's
-// files are checked over SFTP, and a WAL database told from its header there, so a closed
-// one is never opened through a WAL (which some SQLite builds do by making its files).
+// read runs a read with the database's URI, read only (never immutable, as locally), again
+// while it is busy. A database SQLite cannot open is looked at over SFTP to say why: its
+// file missing is no database of the agent's there (ErrNotInstalled, never a missing
+// session); a WAL database with no -shm file is one no program has open, which SQLite
+// opens read only only where it may make that file, and the tools there may not: the
+// module then reads with its agent's own program (ErrUnsupported), as on a machine
+// without them.
 func (s remoteSQL) read(ctx context.Context, db string, run func(uri string) error) error {
-	stat := func(p string) (fileState, error) {
-		fsys, err := s.m.FS(ctx)
-		if err != nil {
-			return fileState{}, err
-		}
-		fi, err := fsys.Stat(p)
-		if errors.Is(err, fs.ErrNotExist) {
-			return fileState{missing: true}, nil
-		}
-		if err != nil {
-			return fileState{}, err
-		}
-		return fileState{size: fi.Size(), mod: fi.ModTime()}, nil
-	}
-	isWAL := func(p string) bool {
-		fsys, err := s.m.FS(ctx)
-		if err != nil {
-			return false
-		}
-		f, err := fsys.Open(p)
-		if err != nil {
-			return false
-		}
-		defer f.Close()
-		var h [20]byte
-		if _, err := io.ReadFull(f, h[:]); err != nil {
-			return false
-		}
-		return walHeader(h)
-	}
-	if s.m.Conn == nil && s.m.fs == nil {
-		stat = func(string) (fileState, error) { return fileState{}, errors.New("no filesystem") }
-		isWAL = nil
-	}
 	// A remote database path is always a POSIX one (Windows has no reader).
 	uri := "file:" + uriPath(db, false) + "?mode=ro"
-	err := retryBusy(ctx, func() error {
-		return whenClosed(db, stat, isWAL, func(immutable bool) error {
-			if immutable {
-				return run(uri + "&immutable=1")
-			}
-			return run(uri)
-		})
-	})
-	if errors.Is(err, errCantOpen) {
-		if st, e := stat(db); e == nil && st.missing {
-			return fmt.Errorf("%w: no database at %s", agent.ErrNotFound, db)
-		}
+	err := retryBusy(ctx, func() error { return run(uri) })
+	if !errors.Is(err, errCantOpen) || s.m.Conn == nil && s.m.fs == nil {
+		return err
+	}
+	fsys, e := s.m.FS(ctx)
+	if e != nil {
+		return err
+	}
+	if _, e := fsys.Stat(db); errors.Is(e, fs.ErrNotExist) {
+		return noDatabase(db)
+	}
+	if _, e := fsys.Stat(db + "-shm"); errors.Is(e, fs.ErrNotExist) {
+		return fmt.Errorf("%w: no program has %s open, and SQLite on %s cannot read it read only then (%v)", agent.ErrUnsupported, db, s.m.Name, err)
 	}
 	return err
+}
+
+// shellScriptLen is about how long a batch's script is on the sqlite3 shell's command line:
+// each statement goes in twice (sqlColumnsOf), with the separators.
+func shellScriptLen(texts []string) int {
+	n := 1 << 10
+	for _, q := range texts {
+		n += 2*len(q) + 2*len(sqlSeparator) + 256
+	}
+	return n
 }
 
 // outputCap is how many bytes of a batch's output are read before it is refused.
@@ -391,10 +382,7 @@ func (s remoteSQL) columnsSQLite3(ctx context.Context, db, uri, q string) ([]age
 func (s remoteSQL) runShell(ctx context.Context, db, uri string, stmts []agent.Statement, n int, scripts ...string) ([]agent.Rows, error) {
 	limit := outputCap(stmts)
 	argv := []string{"sh", "-c", capScript, "sh", strconv.FormatInt(limit+1, 10),
-		"sqlite3", "-readonly", "-safe", "-bail", "-init", "/dev/null", "-json"}
-	if _, blobs := s.m.sqlTierOf(); blobs {
-		argv = append(argv, "-cmd", ".mode json --blob-quote sql")
-	}
+		"sqlite3", "-readonly", "-safe", "-bail", "-init", "/dev/null", "-json", "-cmd", ".mode json --blob-quote sql"}
 	argv = append(argv, "-cmd", ".timeout 2000", "-cmd", ".limit length "+strconv.FormatInt(min(longestValue(stmts), 1<<30), 10), uri)
 	argv = append(argv, scripts...)
 	res, err := s.m.sqlRunner().Run(ctx, argv, agent.RunOptions{})
@@ -598,6 +586,8 @@ func remoteSQLError(db, stderr string, code int) error {
 		return fmt.Errorf("%w: %s", errBusy, msg)
 	case strings.Contains(lower, "unable to open database"):
 		return fmt.Errorf("%w: %s (%s)", errCantOpen, db, msg)
+	case strings.Contains(lower, "readonly database"):
+		return errReadOnlyFolder(fmt.Errorf("%s: %s", db, msg))
 	}
 	return fmt.Errorf("reading %s: %s", db, msg)
 }

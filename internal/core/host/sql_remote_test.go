@@ -2,8 +2,10 @@ package host
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,18 +20,19 @@ import (
 
 func TestPickSQLTier(t *testing.T) {
 	for out, want := range map[string]string{
-		"sqlite3 3.54.0 2026-04-09 x\nsqlite3-blobs yes\n":         tierSQLite3 + "+blobs",
-		"sqlite3 3.43.2 2023-10-10 13:08:14 abc\npython3 3.43.2\n": tierPython3, // BLOBs read as text
-		"sqlite3 3.43.2 2023-10-10 13:08:14 abc\n":                 tierSQLite3,
-		"sqlite3 3.31.1 2020-01-27 19:55:54 abc\npython3 3.31.1\n": tierPython3, // no -safe
-		"python3 3.40.1\n": tierPython3,
-		"sqlite3 \n":       tierNone,
-		"":                 tierNone,
-		"sqlite3 4.0.0\n":  tierSQLite3,
+		"sqlite3 3.54.0 2026-04-09 x\nsqlite3-blobs yes\n":                 tierSQLite3,
+		"sqlite3 3.54.0 2026-04-09 x\nsqlite3-blobs yes\npython3 3.54.0\n": tierSQLite3 + "+python3",
+		"sqlite3 3.43.2 2023-10-10 13:08:14 abc\npython3 3.43.2\n":         tierPython3 + "+python3", // BLOBs read as text
+		"sqlite3 3.43.2 2023-10-10 13:08:14 abc\n":                         tierNone,                 // the same, and no python3
+		"sqlite3 3.31.1 2020-01-27 19:55:54 abc\npython3 3.31.1\n":         tierPython3 + "+python3", // no -safe
+		"python3 3.40.1\n":                   tierPython3 + "+python3",
+		"sqlite3 \n":                         tierNone,
+		"":                                   tierNone,
+		"sqlite3 4.0.0\nsqlite3-blobs yes\n": tierSQLite3,
 	} {
-		tier, blobs := pickSQLTier(out)
-		if blobs {
-			tier += "+blobs"
+		tier, python := pickSQLTier(out)
+		if python {
+			tier += "+python3"
 		}
 		if tier != want {
 			t.Errorf("%q: %s, want %s", out, tier, want)
@@ -220,7 +223,8 @@ func toolsOnly(t *testing.T, tools ...string) string {
 // The real tools read a real database over a stand-in ssh that runs the command line here,
 // with only that tool on PATH: rows, types, empty results, the batch split, and the guards
 // (a denied table, a view over one, a value over its limit, a missing file). The database
-// is in WAL mode and closed, so it has no -shm file to open it read only with.
+// is in WAL mode and open in a program, as an agent's is while it runs; once that program
+// closed it, the tools cannot read it read only, and the module is told to use its agent.
 func TestRemoteSQLTiersOnRealTools(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the remote tiers run on POSIX machines")
@@ -229,6 +233,7 @@ func TestRemoteSQLTiersOnRealTools(t *testing.T) {
 	for _, tier := range []string{tierSQLite3, tierPython3} {
 		t.Run(tier, func(t *testing.T) {
 			db := sqlDB(t, true)
+			agentConn := openWAL(t, db)
 			tools := toolsOnly(t, tier)
 			conn := fakeSSH(t)
 			shim, _, _ := strings.Cut(os.Getenv("PATH"), string(os.PathListSeparator))
@@ -268,7 +273,8 @@ func TestRemoteSQLTiersOnRealTools(t *testing.T) {
 			if _, err := r.Batch(ctx, db, []agent.Statement{{Query: "SELECT text FROM message", Limits: agent.SQLLimits{MaxBytes: 8}}}); !errors.Is(err, agent.ErrTooLarge) {
 				t.Fatalf("a value over its limit: %v", err)
 			}
-			if _, err := r.Query(ctx, filepath.Join(filepath.Dir(db), "missing.db"), "SELECT id FROM session"); !errors.Is(err, agent.ErrNotFound) {
+			// A missing database is no agent's database here, never a missing session.
+			if _, err := r.Query(ctx, filepath.Join(filepath.Dir(db), "missing.db"), "SELECT id FROM session"); !errors.Is(err, agent.ErrNotInstalled) || errors.Is(err, agent.ErrNotFound) {
 				t.Fatalf("a missing database: %v", err)
 			}
 			cols, err := r.Columns(ctx, db, "message")
@@ -287,22 +293,48 @@ func TestRemoteSQLTiersOnRealTools(t *testing.T) {
 			if got, err := r.Query(ctx, db, "SELECT 'héllo, 日本' AS t FROM session"); err != nil || got.Rows[0].String("t") != "héllo, 日本" {
 				t.Fatalf("text: %+v %v", got, err)
 			}
-			// A BLOB comes back as its bytes where the tier can tell it from text.
-			if _, blobs := m.sqlTierOf(); tier == tierPython3 || blobs {
-				got, err := r.Query(ctx, db, "SELECT data FROM session")
-				if b, ok := got.Rows[0]["data"].([]byte); err != nil || !ok || string(b) != "\x00\xffA" {
-					t.Fatalf("a BLOB: %#v %v", got.Rows[0]["data"], err)
-				}
+			// A BLOB comes back as its bytes.
+			got, err := r.Query(ctx, db, "SELECT data FROM session")
+			if b, ok := got.Rows[0]["data"].([]byte); err != nil || !ok || string(b) != "\x00\xffA" {
+				t.Fatalf("a BLOB: %#v %v", got.Rows[0]["data"], err)
 			}
-			// The database is closed (WAL, no -shm): it is read as immutable from the start,
-			// and nothing is made beside it.
+			// Closed: never read as immutable, which takes no lock.
+			agentConn()
 			for _, f := range []string{db + "-wal", db + "-shm"} {
-				if _, err := os.Stat(f); err == nil {
-					t.Fatalf("a read made %s", f)
-				}
+				os.Remove(f)
+			}
+			_, err = r.Query(ctx, db, "SELECT id FROM session")
+			if err != nil && !errors.Is(err, agent.ErrUnsupported) {
+				t.Fatalf("a closed WAL database: %v", err)
+			}
+			if _, e := os.Stat(db + "-wal"); err != nil && e == nil {
+				t.Fatal("a failed read left a -wal file")
 			}
 		})
 	}
+}
+
+// openWAL opens a WAL database as its agent does while it runs (its -wal and -shm files
+// are there until it closes); the function returned closes it.
+func openWAL(t *testing.T, db string) func() {
+	t.Helper()
+	d, err := sql.Open("sqlite", "file:"+uriPath(db, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.SetMaxOpenConns(1)
+	if _, err := d.Exec("UPDATE session SET title = title"); err != nil {
+		t.Fatal(err)
+	}
+	closed := false
+	done := func() {
+		if !closed {
+			closed = true
+			d.Close()
+		}
+	}
+	t.Cleanup(done)
+	return done
 }
 
 // A reader refuses output over its cap before decoding it, on both tiers.
@@ -315,6 +347,46 @@ func TestRemoteSQLOutputCap(t *testing.T) {
 		if !errors.Is(err, agent.ErrTooLarge) {
 			t.Errorf("%q: %v", probe, err)
 		}
+	}
+}
+
+// A batch too long for the sqlite3 shell's command line (Linux caps one argument at 128
+// KiB) is read with python3, whose request goes on stdin; without python3 it is refused
+// before anything is sent.
+func TestRemoteSQLLongBatch(t *testing.T) {
+	ids := make([]any, 0, 9000)
+	marks := make([]string, 0, 9000)
+	for i := range 9000 {
+		ids = append(ids, fmt.Sprintf("ses_%08d", i))
+		marks = append(marks, "?")
+	}
+	long := "SELECT id FROM session WHERE id IN (" + strings.Join(marks, ", ") + ")"
+	for probe, want := range map[string]string{
+		"sqlite3 3.54.0 x\nsqlite3-blobs yes\npython3 3.54.0\n": tierPython3,
+		"sqlite3 3.54.0 x\nsqlite3-blobs yes\n":                 "",
+	} {
+		f := &fakeTools{probe: probe, reply: func([]string) agent.Result {
+			return agent.Result{Stdout: []byte(`{"results":[{"columns":["id"],"rows":[]}]}`)}
+		}}
+		r := remoteMachine("linux", f).SQL().(agent.SQLTableLimiter).Only([]string{"session"}, nil)
+		_, err := r.Query(context.Background(), "/db", long, ids...)
+		switch {
+		case want == "" && !errors.Is(err, agent.ErrTooLarge):
+			t.Errorf("%q: %v", probe, err)
+		case want == "" && len(f.calls) != 1:
+			t.Errorf("%q: a refused batch was sent: %d calls", probe, len(f.calls))
+		case want != "" && (err != nil || f.ran(want) != 1 || f.ran(tierSQLite3) != 0):
+			t.Errorf("%q: %v, calls %d", probe, err, len(f.calls))
+		}
+	}
+	// A short one still goes to the shell.
+	f := &fakeTools{probe: "sqlite3 3.54.0 x\nsqlite3-blobs yes\npython3 3.54.0\n", reply: func([]string) agent.Result {
+		end := `[{"~hopsesh-end~":"hopsesh"}]` + "\n"
+		return agent.Result{Stdout: []byte(`[{"~hopsesh-views~":null}]` + "\n" + end + `[{"~hopsesh-cols~":1,"id":null}]` + "\n" + end + end)}
+	}}
+	r := remoteMachine("linux", f).SQL().(agent.SQLTableLimiter).Only([]string{"session"}, nil)
+	if _, err := r.Query(context.Background(), "/db", "SELECT id FROM session"); err != nil || f.ran(tierSQLite3) != 1 {
+		t.Fatalf("%v %v", err, f.calls)
 	}
 }
 

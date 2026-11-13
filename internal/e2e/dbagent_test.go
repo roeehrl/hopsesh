@@ -200,7 +200,9 @@ func TestVirtualSessionInstallRecovery(t *testing.T) {
 	root = t.TempDir()
 	box, here = newLocation(t, "box", root), newLocation(t, "here", root)
 	seedDB(t, box)
-	os.MkdirAll(dbInstall(here).Main(), 0o700)
+	if err := dbagent.Init(dbInstall(here).Main()); err != nil {
+		t.Fatal(err)
+	}
 	in = dbInput(t, m, box, here)
 	if p, err = move.Build(ctx, in, move.Options{TargetDir: here.repo}); err != nil {
 		t.Fatal(err)
@@ -225,6 +227,30 @@ func TestVirtualSessionInstallRecovery(t *testing.T) {
 	}
 	if _, err := os.Stat(anchor); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("undo left the placed copy")
+	}
+
+	// The agent there has no database: that is not "the session is gone", so undo cannot
+	// tell unforced, and says so when forced.
+	root = t.TempDir()
+	box, here = newLocation(t, "box", root), newLocation(t, "here", root)
+	seedDB(t, box)
+	os.MkdirAll(dbInstall(here).Main(), 0o700)
+	in = dbInput(t, m, box, here)
+	if p, err = move.Build(ctx, in, move.Options{TargetDir: here.repo}); err != nil {
+		t.Fatal(err)
+	}
+	m.FailImport.Store(true)
+	res, err = move.Apply(ctx, p, in, move.Env{StateDir: state})
+	m.FailImport.Store(false)
+	if err == nil {
+		t.Fatal("the import did not fail")
+	}
+	j, _ = journal.Load(state, res.Journal)
+	if err := j.Undo(ctx, reachDB(m, box, here), false); !errors.Is(err, journal.ErrChanged) {
+		t.Fatalf("undo with no database there: %v", err)
+	}
+	if err := j.Undo(ctx, reachDB(m, box, here), true); err != nil || len(j.Left) != 1 || !strings.Contains(j.Left[0], "no database") {
+		t.Fatalf("a forced undo with no database there: %v %v", err, j.Left)
 	}
 }
 

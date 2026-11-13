@@ -22,6 +22,12 @@ type SQLHost interface {
 // vacuums. db is the database file's absolute path. The confined Host a module gets lets it
 // read only its Spec's SQLTables, from the files its SQLFiles name, and gives each call
 // at most DefaultSQLTimeout (less when ctx ends sooner).
+//
+// A database file that is not there is ErrNotInstalled: ErrNotFound is left to the module
+// for a session the database does not hold, since the core takes it to mean the session
+// was deleted. A read the machine's tools cannot do (another machine's WAL database that
+// no program has open, which its SQLite cannot open read only) is ErrUnsupported: the
+// module then reads with its agent's own program.
 type SQL interface {
 	// Query runs one SELECT and returns its rows, refusing more than the default limits.
 	Query(ctx context.Context, db, q string, args ...any) (Rows, error)
@@ -91,10 +97,7 @@ func (l SQLLimits) WithDefaults() SQLLimits {
 var ErrTooLarge = errors.New("more data than hopsesh reads at once")
 
 // Rows are a query's rows, read into memory. Values are int64 (INTEGER), float64 (REAL),
-// string (TEXT), []byte (BLOB) or nil (NULL), keyed by column name. One reader cannot tell
-// a BLOB from text: another machine's sqlite3 shell older than the one that marks BLOBs,
-// used where python3 is missing, gives a BLOB as a string that may differ from its bytes,
-// so a module that reads a BLOB column selects hex(col) and decodes it.
+// string (TEXT), []byte (BLOB) or nil (NULL), keyed by column name.
 type Rows struct {
 	Columns []string `json:"columns"`
 	Rows    []Row    `json:"rows"`

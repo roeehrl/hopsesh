@@ -19,11 +19,13 @@ import (
 )
 
 // localSQL reads SQLite databases on this machine for agents that keep their sessions in
-// one (OpenCode). It opens a database read only (immutable only while it has no WAL at
-// all, see whenClosed), reads one batch in one transaction and closes the connection after
-// every call, so no reader of hopsesh's holds a checkpoint back. It never writes,
-// checkpoints or vacuums. Once limited (Only), SQLite's authorizer refuses reads of any
-// table outside the module's list, and every read of a denied one, below the text check.
+// one (OpenCode). It opens a database read only, never immutable: SQLite's WAL read lock
+// keeps the snapshot it reads whole while the agent writes and checkpoints. A WAL
+// database no program has open gets its -wal and -shm files from that open, as from any
+// reader's. It reads one batch in one transaction and closes the connection after every
+// call, so no reader of hopsesh's holds a checkpoint back. It never writes, checkpoints or
+// vacuums. Once limited (Only), SQLite's authorizer refuses reads of any table outside the
+// module's list, and every read of a denied one, below the text check.
 type localSQL struct {
 	limited     bool
 	allow, deny []string
@@ -44,17 +46,15 @@ func (s localSQL) Query(ctx context.Context, db, q string, args ...any) (agent.R
 func (s localSQL) Batch(ctx context.Context, db string, stmts []agent.Statement) ([]agent.Rows, error) {
 	var out []agent.Rows
 	err := retryBusy(ctx, func() error {
-		return whenClosed(db, localStat, localWAL, func(immutable bool) error {
-			var err error
-			out, err = s.batch(ctx, db, stmts, immutable)
-			return err
-		})
+		var err error
+		out, err = s.batch(ctx, db, stmts)
+		return err
 	})
 	return out, err
 }
 
-func (s localSQL) batch(ctx context.Context, db string, stmts []agent.Statement, immutable bool) ([]agent.Rows, error) {
-	conn, done, err := openReadOnly(ctx, db, immutable)
+func (s localSQL) batch(ctx context.Context, db string, stmts []agent.Statement) ([]agent.Rows, error) {
+	conn, done, err := openReadOnly(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -108,39 +108,37 @@ func (s localSQL) Columns(ctx context.Context, db, table string) ([]string, erro
 	}
 	var cols []string
 	err := retryBusy(ctx, func() error {
-		return whenClosed(db, localStat, localWAL, func(immutable bool) error {
-			conn, done, err := openReadOnly(ctx, db, immutable)
-			if err != nil {
-				return err
-			}
-			defer done()
-			rs, err := conn.QueryContext(ctx, "SELECT name FROM pragma_table_info(?) ORDER BY cid", table)
-			if err != nil {
-				return sqlError(err)
-			}
-			r, err := agent.ScanRows(rs, agent.SQLLimits{})
-			if err != nil {
-				return sqlError(err)
-			}
-			cols = cols[:0]
-			for _, row := range r.Rows {
-				cols = append(cols, row.String("name"))
-			}
-			return nil
-		})
+		conn, done, err := openReadOnly(ctx, db)
+		if err != nil {
+			return err
+		}
+		defer done()
+		rs, err := conn.QueryContext(ctx, "SELECT name FROM pragma_table_info(?) ORDER BY cid", table)
+		if err != nil {
+			return sqlError(err)
+		}
+		r, err := agent.ScanRows(rs, agent.SQLLimits{})
+		if err != nil {
+			return sqlError(err)
+		}
+		cols = cols[:0]
+		for _, row := range r.Rows {
+			cols = append(cols, row.String("name"))
+		}
+		return nil
 	})
 	return cols, err
 }
 
-// openReadOnly opens one connection to the database at db, read only (immutable: see
-// whenClosed). done closes it.
-func openReadOnly(ctx context.Context, db string, immutable bool) (*sql.Conn, func(), error) {
+// openReadOnly opens one connection to the database at db, read only. done closes it. A
+// missing database is ErrNotInstalled, never ErrNotFound, which means a missing session.
+func openReadOnly(ctx context.Context, db string) (*sql.Conn, func(), error) {
 	if !filepath.IsAbs(db) {
 		return nil, nil, fmt.Errorf("%w: %q is not a database path", agent.ErrDenied, db)
 	}
 	fi, err := os.Stat(db)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil, fmt.Errorf("%w: no database at %s", agent.ErrNotFound, db)
+		return nil, nil, noDatabase(db)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -148,11 +146,7 @@ func openReadOnly(ctx context.Context, db string, immutable bool) (*sql.Conn, fu
 	if !fi.Mode().IsRegular() {
 		return nil, nil, fmt.Errorf("%w: %s is not a database file", agent.ErrDenied, db)
 	}
-	dsn := readOnlyDSN(db, runtime.GOOS == "windows")
-	if immutable {
-		dsn += "&immutable=1"
-	}
-	d, err := sql.Open("sqlite", dsn)
+	d, err := sql.Open("sqlite", readOnlyDSN(db, runtime.GOOS == "windows"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -265,87 +259,25 @@ func longestValue(stmts []agent.Statement) int64 {
 // errBusy is a database another program holds locked past SQLite's own wait.
 var errBusy = errors.New("the database is busy")
 
-// errCantOpen is a database SQLite cannot open read only: one in WAL mode whose -shm file
-// is gone because no program has it open (the agent closed it cleanly).
-var errCantOpen = errors.New("the database cannot be opened read only")
+// errCantOpen is a database SQLite cannot open.
+var errCantOpen = errors.New("the database cannot be opened")
 
-// fileState is what whenClosed compares: a file's size and time, or that it is missing.
-type fileState struct {
-	size    int64
-	mod     time.Time
-	missing bool
+// noDatabase is a database file that is not there: its agent has none (or another one),
+// which is not a missing session.
+func noDatabase(db string) error {
+	return fmt.Errorf("%w: no database at %s", agent.ErrNotInstalled, db)
 }
 
-func localStat(p string) (fileState, error) {
-	fi, err := os.Stat(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return fileState{missing: true}, nil
-	}
-	if err != nil {
-		return fileState{}, err
-	}
-	return fileState{size: fi.Size(), mod: fi.ModTime()}, nil
-}
-
-// whenClosed reads the database read only. A WAL database that no program has open has no
-// -shm file, and SQLite cannot then open it read only. With no -wal and no -shm, the
-// database file holds everything, so it is read as immutable, never through a WAL; if any
-// of the three changed by the end of the read (a program opened it meanwhile), the read
-// counts as busy and is done again, also when it failed (an immutable read of a file
-// being checkpointed can look corrupt).
-// isWAL, when given, tells a WAL database from its header without opening it, so a closed
-// one is read as immutable from the start: some SQLite builds open it read only by making
-// empty -wal and -shm files, which hopsesh leaves to the agent.
-func whenClosed(db string, stat func(string) (fileState, error), isWAL func(string) bool, read func(immutable bool) error) error {
-	before, ok := closedState(db, stat)
-	if !ok || isWAL == nil || !isWAL(db) {
-		err := read(false)
-		if !errors.Is(err, errCantOpen) {
-			return err
-		}
-		if before, ok = closedState(db, stat); !ok {
-			return err
-		}
-	}
-	err := read(true)
-	if after, ok := closedState(db, stat); !ok || after != before {
-		return fmt.Errorf("%w: it was opened while hopsesh read it", errBusy)
-	}
-	return err
-}
-
-// localWAL reads a database file's header: format versions 2 are WAL mode.
-func localWAL(db string) bool {
-	f, err := os.Open(db)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	var h [20]byte
-	if _, err := f.ReadAt(h[:], 0); err != nil {
-		return false
-	}
-	return walHeader(h)
-}
-
-// walHeader reports whether a database file's first 20 bytes are those of one in WAL mode.
-func walHeader(h [20]byte) bool {
-	return string(h[:16]) == "SQLite format 3\x00" && h[18] == 2 && h[19] == 2
-}
-
-// closedState is the database file's state while it has neither a -wal nor a -shm file.
-func closedState(db string, stat func(string) (fileState, error)) (fileState, bool) {
-	for _, side := range []string{db + "-wal", db + "-shm"} {
-		if st, err := stat(side); err != nil || !st.missing {
-			return fileState{}, false
-		}
-	}
-	st, err := stat(db)
-	return st, err == nil && !st.missing
+// errReadOnlyFolder is a WAL database SQLite cannot read because it cannot make the -wal
+// and -shm files it reads through in the database's folder.
+func errReadOnlyFolder(err error) error {
+	return fmt.Errorf("%w: SQLite reads this database only with its -wal and -shm files, and cannot make them in its folder (%v)", errCantOpen, err)
 }
 
 // sqlError names SQLite's refusals the way the SDK does: a read the authorizer refused
-// is ErrDenied, a value over the length limit ErrTooLarge, a lock errBusy.
+// is ErrDenied, a value over the length limit ErrTooLarge, a lock errBusy. A read only
+// connection that would write (SQLITE_READONLY) is a WAL database in a folder hopsesh
+// cannot write: SQLite needs its -wal and -shm files there to read it safely.
 func sqlError(err error) error {
 	if err == nil {
 		return nil
@@ -361,6 +293,8 @@ func sqlError(err error) error {
 			return fmt.Errorf("%w: %v", agent.ErrTooLarge, err)
 		case sqlite3.SQLITE_CANTOPEN:
 			return fmt.Errorf("%w: %v", errCantOpen, err)
+		case sqlite3.SQLITE_READONLY:
+			return errReadOnlyFolder(err)
 		}
 	}
 	msg := err.Error()
@@ -373,6 +307,8 @@ func sqlError(err error) error {
 		return fmt.Errorf("%w: %v", errBusy, err)
 	case strings.Contains(msg, "unable to open database file"):
 		return fmt.Errorf("%w: %v", errCantOpen, err)
+	case strings.Contains(msg, "readonly database"):
+		return errReadOnlyFolder(err)
 	}
 	return err
 }

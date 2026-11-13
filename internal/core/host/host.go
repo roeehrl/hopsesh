@@ -62,7 +62,7 @@ type Machine struct {
 
 	sqlMu     sync.Mutex
 	sqlTier   string     // the remote SQL tier, once probed (sql_remote.go)
-	sqlBlobs  bool       // its sqlite3 shell marks BLOBs
+	sqlPython bool       // it has python3 (sql_remote.go)
 	sqlFailed time.Time  // when the last probe failed
 	sqlExec   agent.Exec // stands in for SSH in tests of the remote SQL tiers
 }

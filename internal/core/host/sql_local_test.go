@@ -124,7 +124,8 @@ func TestLocalSQLReadsTypesAndColumns(t *testing.T) {
 	if _, err := r.Columns(ctx, db, "credential"); !errors.Is(err, agent.ErrDenied) {
 		t.Fatalf("the columns of a denied table: %v", err)
 	}
-	if _, err := r.Query(ctx, filepath.Join(filepath.Dir(db), "missing.db"), "SELECT 1"); !errors.Is(err, agent.ErrNotFound) {
+	// No database is no agent's database there, never a missing session (ErrNotFound).
+	if _, err := r.Query(ctx, filepath.Join(filepath.Dir(db), "missing.db"), "SELECT 1"); !errors.Is(err, agent.ErrNotInstalled) || errors.Is(err, agent.ErrNotFound) {
 		t.Fatalf("a missing database: %v", err)
 	}
 	if _, err := r.Query(ctx, "relative.db", "SELECT 1"); !errors.Is(err, agent.ErrDenied) {
@@ -242,8 +243,10 @@ func TestModuleHostSQLIsConfined(t *testing.T) {
 	}
 }
 
-// A WAL database no program has open has no -shm file: SQLite cannot open it read only, so
-// it is read as immutable while it stays that way, and read again when it changed.
+// A WAL database no program has open has no -shm file: it is opened read only all the
+// same, never as immutable (which takes no lock and could read pages a program writes
+// meanwhile), so SQLite makes its -wal and -shm files as for any reader. Where its folder
+// cannot be written, it cannot, and the read says why instead of guessing.
 func TestLocalSQLReadsAClosedWALDatabase(t *testing.T) {
 	db := sqlDB(t, true)
 	if _, err := os.Stat(db + "-shm"); err == nil {
@@ -253,32 +256,67 @@ func TestLocalSQLReadsAClosedWALDatabase(t *testing.T) {
 	if err != nil || got.Rows[0].Int("n") != 2 {
 		t.Fatalf("%+v %v", got, err)
 	}
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		return // no read-only folder to try
+	}
 	for _, f := range []string{db + "-wal", db + "-shm"} {
-		if _, err := os.Stat(f); err == nil {
-			t.Fatalf("the read made %s", f)
-		}
+		os.Remove(f)
 	}
-	// A program opened it during the read: that read does not count.
-	calls := 0
-	err = whenClosed(db, localStat, nil, func(immutable bool) error {
-		calls++
-		if !immutable {
-			return errCantOpen
-		}
-		return os.WriteFile(db+"-shm", nil, 0o600)
-	})
-	if !errors.Is(err, errBusy) || calls != 2 {
-		t.Fatalf("a database opened during an immutable read: %v after %d reads", err, calls)
-	}
-	// An open WAL database is never read as immutable.
-	err = whenClosed(db, localStat, localWAL, func(immutable bool) error {
-		if immutable {
-			t.Fatal("read as immutable while a -shm file is there")
-		}
-		return errCantOpen
-	})
-	if !errors.Is(err, errCantOpen) {
+	dir := filepath.Dir(db)
+	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0o700)
+	_, err = localSQL{}.Query(context.Background(), db, "SELECT count(*) AS n FROM message")
+	if err == nil {
+		t.Skip("this SQLite reads a closed WAL database in a read-only folder")
+	}
+	if errors.Is(err, errBusy) || !strings.Contains(err.Error(), "-wal and -shm") {
+		t.Fatalf("a closed WAL database in a read-only folder: %v", err)
+	}
+}
+
+// The authorizer's own answers, apart from the text check and SQLite's planner.
+func TestSQLAuthorized(t *testing.T) {
+	stored := []string{"session", "message", "credential"}
+	allow, deny := []string{"session"}, []string{"credential"}
+	for _, c := range []struct {
+		action     int
+		arg1, arg2 string
+		limited    bool
+		want       bool
+	}{
+		{sqlSelect, "", "", true, true},
+		{sqlTransaction, "BEGIN", "", true, true},
+		{sqlRecursive, "", "", true, true},
+		{sqlFunction, "", "lower", true, true},
+		{sqlFunction, "", "load_extension", false, false},
+		{sqlFunction, "", "READFILE", false, false},
+		{sqlFunction, "", "writefile", false, false},
+		{sqlFunction, "", "fts3_tokenizer", false, false},
+		{sqlRead, "session", "id", true, true},
+		{sqlRead, "Session", "id", true, true},
+		{sqlRead, "message", "id", true, false},   // not the module's
+		{sqlRead, "message", "id", false, true},   // unlimited
+		{sqlRead, "credential", "", false, false}, // denied, even unlimited and column-less
+		{sqlRead, "CREDENTIAL", "value", true, false},
+		{sqlRead, "account", "", true, false},   // denied before it is a table
+		{sqlRead, "recent_cte", "", true, true}, // a WITH name
+		{sqlRead, "recent_cte", "id", true, false},
+		{sqlRead, "sqlite_schema", "", true, false},
+		{sqlRead, "pragma_table_info", "", true, false},
+		{sqlRead, "json_each", "value", true, true}, // a table function
+		{18, "session", "", false, false},           // SQLITE_INSERT
+		{19, "table_info", "", false, false},        // SQLITE_PRAGMA
+		{24, "", "", false, false},                  // SQLITE_ATTACH
+	} {
+		deny := deny
+		if c.arg1 == "account" {
+			deny = append(deny, "account")
+		}
+		if got := sqlAuthorized(c.action, c.arg1, c.arg2, stored, c.limited, allow, deny); got != c.want {
+			t.Errorf("%d %q %q limited=%v: %v", c.action, c.arg1, c.arg2, c.limited, got)
+		}
 	}
 }
 
@@ -325,24 +363,5 @@ func TestLocalSQLBackslashInPath(t *testing.T) {
 	got, err := localSQL{}.Query(context.Background(), odd, "SELECT title FROM session")
 	if err != nil || got.Rows[0].String("title") != "the named one" {
 		t.Fatalf("%+v %v", got, err)
-	}
-}
-
-// An immutable read that fails while a program opens the database is a busy read, done
-// again, not the failure it saw.
-func TestWhenClosedFailedImmutableRead(t *testing.T) {
-	db := sqlDB(t, true)
-	if _, err := os.Stat(db + "-shm"); err == nil {
-		t.Skip("the -shm file outlived its connection")
-	}
-	err := whenClosed(db, localStat, localWAL, func(immutable bool) error {
-		if !immutable {
-			t.Fatal("a closed WAL database read through its WAL")
-		}
-		os.WriteFile(db+"-wal", []byte("x"), 0o600)
-		return errors.New("database disk image is malformed")
-	})
-	if !errors.Is(err, errBusy) {
-		t.Fatalf("%v", err)
 	}
 }

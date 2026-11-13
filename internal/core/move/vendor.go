@@ -130,7 +130,7 @@ func StampNow(ctx context.Context, m agent.Module, h agent.Host, in agent.Instal
 }
 
 // sessionPresent reports whether a virtual module's agent has a session: its anchor file
-// may be missing while the session is there.
+// may be missing while the session is there. An agent with no database yet has none.
 func sessionPresent(ctx context.Context, side Side, key agent.SessionKey) (bool, error) {
 	h, err := side.Machine.For(ctx, side.Module.Spec(), side.Install, nil)
 	if err != nil {
@@ -138,7 +138,7 @@ func sessionPresent(ctx context.Context, side Side, key agent.SessionKey) (bool,
 	}
 	_, ok, err := StampNow(ctx, side.Module, h, side.Install, key)
 	switch {
-	case errors.Is(err, agent.ErrNotFound):
+	case errors.Is(err, agent.ErrNotFound), errors.Is(err, agent.ErrNotInstalled):
 		return false, nil
 	case err != nil:
 		return false, err
