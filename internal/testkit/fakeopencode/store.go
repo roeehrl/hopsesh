@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -276,20 +275,20 @@ func Import(file string, transfer []byte, dir string, now time.Time) (string, er
 	if err != nil {
 		return "", err
 	}
-	return importDoc(db, doc, dir, now, Version, nil)
+	return importDoc(db, doc, dir, now, Version, nil, Proc{}.isDir)
 }
 
 // importDoc is SessionTransfer.import (packages/core/src/session/transfer.ts): the id is
 // kept, the project, folder, slug and version come from here, settled messages are
 // numbered from 1, and it all happens in one transaction.
-func importDoc(db *sql.DB, doc *value, dir string, now time.Time, version string, getenv lookup) (string, error) {
+func importDoc(db *sql.DB, doc *value, dir string, now time.Time, version string, getenv lookup, isDir func(string) (bool, bool)) (string, error) {
 	doc, _, err := decodeTransfer(doc)
 	if err != nil {
 		return "", err
 	}
 	info, msgs := doc.get("info"), doc.get("messages").vals
 	sid := info.text("id")
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+	if _, d := isDir(dir); !d {
 		return "", errNoFolder
 	}
 	tx, err := db.Begin()
@@ -532,10 +531,12 @@ func appendMessage(tx *sql.Tx, sid string, m *value) error {
 }
 
 // move changes a session's folder (POST /api/session/{id}/move): a relative folder is
-// taken from the session's, "~" from the home folder. OpenCode queues the move and applies
-// it at the next step boundary; the stand-in applies it at once, with the
-// location-switched message OpenCode writes then.
-func move(db *sql.DB, sid, dir, home string, getenv lookup, now time.Time) error {
+// taken from the session's, "~" from the home folder. OpenCode queues the move and its
+// server applies it at the session's next step boundary: the background service does, at
+// once for an idle session, with the location-switched message it writes then (the
+// stand-in applies it at once); a private server (--standalone) exits first, leaving the
+// move queued and the session marked busy with no idle.
+func move(db *sql.DB, sid, dir, home string, getenv lookup, now time.Time, standalone bool, isDir func(string) (bool, bool)) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -552,14 +553,20 @@ func move(db *sql.DB, sid, dir, home string, getenv lookup, now time.Time) error
 	case strings.HasPrefix(dir, "~/"):
 		dir = filepath.Join(home, dir[2:])
 	}
-	if !filepath.IsAbs(dir) {
+	if !filepath.IsAbs(dir) && !strings.HasPrefix(dir, "/") {
 		dir = filepath.Join(filepath.FromSlash(r.directory), dir)
 	}
 	dir = filepath.Clean(dir)
-	if fi, err := os.Stat(dir); err != nil {
+	if exists, d := isDir(dir); !exists {
 		return &badRequest{msg: "Directory does not exist: " + dir}
-	} else if !fi.IsDir() {
+	} else if !d {
 		return &badRequest{msg: "Not a directory: " + dir}
+	}
+	if standalone {
+		if _, err := tx.Exec("UPDATE session_v2 SET time_busy = ? WHERE id = ?", now.UnixMilli(), sid); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	p := resolveProject(dir, getenv)
 	ms := now.UnixMilli()

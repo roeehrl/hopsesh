@@ -87,7 +87,7 @@ func (r *run) api(args []string) int {
 			} else if d.kind != 's' {
 				return r.invalidKind("Expected string, got "+string(d.compact())+"\n  at [\"directory\"]", "Payload")
 			}
-			return r.empty(sid, move(db, sid, d.s, r.paths().home, r.env, now))
+			return r.empty(sid, move(db, sid, d.s, r.paths().home, r.env, now, r.standalone, r.isDir))
 		case method == "POST" && rest == "fork":
 			before := body.get("before")
 			if before != nil && (before.kind != 's' || !strings.HasPrefix(before.s, "msg_")) {

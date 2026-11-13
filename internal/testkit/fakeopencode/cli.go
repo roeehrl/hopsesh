@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -65,10 +64,10 @@ func (r *run) importFile(db *sql.DB, args []string) int {
 	if strings.HasPrefix(file, "http://") || strings.HasPrefix(file, "https://") {
 		return r.fail("the OpenCode stand-in imports only files")
 	}
-	if !filepath.IsAbs(file) {
+	if !filepath.IsAbs(file) && !strings.HasPrefix(file, "/") {
 		file = filepath.Join(r.workdir(), file)
 	}
-	b, err := os.ReadFile(file)
+	b, err := r.readFile(file)
 	if err != nil {
 		return r.fail("Error: Failed to read session data: ENOENT: no such file or directory, open '%s'", file)
 	}
@@ -79,10 +78,10 @@ func (r *run) importFile(db *sql.DB, args []string) int {
 	dir := r.dir
 	if dir == "" {
 		dir = r.workdir()
-	} else if !filepath.IsAbs(dir) {
+	} else if !filepath.IsAbs(dir) && !strings.HasPrefix(dir, "/") {
 		dir = filepath.Join(r.workdir(), dir)
 	}
-	sid, err := importDoc(db, doc, dir, r.now(), r.serverVersion(), r.env)
+	sid, err := importDoc(db, doc, dir, r.now(), r.serverVersion(), r.env, r.isDir)
 	switch {
 	case errors.Is(err, errExists):
 		fmt.Fprintln(r.Stderr, "Session already exists")

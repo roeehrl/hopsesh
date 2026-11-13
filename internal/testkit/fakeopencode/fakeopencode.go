@@ -52,6 +52,30 @@ type Proc struct {
 	Stdout io.Writer
 	Stderr io.Writer
 	Now    func() time.Time // nil: the clock
+	// ReadFile and Stat reach the files a command names (an import's file, a folder):
+	// nil, this machine's. A test of a fake machine passes its own.
+	ReadFile func(string) ([]byte, error)
+	Stat     func(string) (os.FileInfo, error)
+}
+
+func (p Proc) readFile(f string) ([]byte, error) {
+	if p.ReadFile != nil {
+		return p.ReadFile(f)
+	}
+	return os.ReadFile(f)
+}
+
+// isDir reports whether dir is a folder.
+func (p Proc) isDir(dir string) (exists, isDir bool) {
+	stat := os.Stat
+	if p.Stat != nil {
+		stat = p.Stat
+	}
+	fi, err := stat(dir)
+	if err != nil {
+		return false, false
+	}
+	return true, fi.IsDir()
 }
 
 func (p Proc) env(k string) (string, bool) {
