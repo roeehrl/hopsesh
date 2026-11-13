@@ -21,7 +21,7 @@ import (
 // configuration, this machine named "studio", Tailscale left out of discovery, and (outside
 // Windows) a PATH of system folders only, so no real agent program runs. A variable with
 // an empty value is one to unset: Setenv, Apply and Environ do. (OpenCode reads an empty
-// OPENCODE_DB or OPENCODE_CONFIG_DIR as set, a folder relative to where it runs.)
+// OPENCODE_DB as set: the data folder itself, which no database opens.)
 func Env(h string) map[string]string {
 	env := map[string]string{
 		"HOME": h, "USERPROFILE": h, "HOPSESH_CONFIG_DIR": filepath.Join(h, "config"),
@@ -76,6 +76,32 @@ func Environ(base []string, env map[string]string) []string {
 		}
 	}
 	return out
+}
+
+// AgentVars are the variables that point the agents at their data. A test that builds its
+// own environment from this process's must not pass them on: on a machine that sets them,
+// hopsesh under test would read (and run the agents on) the machine's real sessions.
+var AgentVars = []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME",
+	"XDG_CACHE_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_DB"}
+
+// UnsetAgentEnv unsets AgentVars for a test (restored after it), for a test with a home of
+// its own: the agents then keep their data under that home. Set the variables a test
+// wants after calling it.
+func UnsetAgentEnv(t interface{ Setenv(k, v string) }) {
+	for _, k := range AgentVars {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+}
+
+// OpenCodeEnv points OpenCode's folders into dir, for a test that keeps this machine's
+// home: OpenCode's data, state and cache under dir, its configuration in dir/config, and
+// OPENCODE_DB unset. Use it with Environ, or Setenv.
+func OpenCodeEnv(dir string) map[string]string {
+	return map[string]string{
+		"XDG_DATA_HOME": filepath.Join(dir, "data"), "XDG_STATE_HOME": filepath.Join(dir, "state"),
+		"XDG_CACHE_HOME": filepath.Join(dir, "cache"), "OPENCODE_CONFIG_DIR": filepath.Join(dir, "config"), "OPENCODE_DB": "",
+	}
 }
 
 // DemoHome fills h (which should be empty) with a repository at git/demo whose remote is
@@ -149,7 +175,7 @@ func demoOpenCode(file, demo string) error {
 	if err != nil {
 		return err
 	}
-	dir := strings.ReplaceAll(filepath.ToSlash(demo), "'", "''") // OpenCode stores "/" on every OS
+	dir := strings.ReplaceAll(filepath.ToSlash(demo), "'", "''") // in the JSON columns, "/" needs no escaping
 	var rows []string
 	for _, l := range strings.Split(string(b), "\n") {
 		if strings.HasPrefix(l, `INSERT INTO "migration"`) {
@@ -165,6 +191,13 @@ func demoOpenCode(file, demo string) error {
 	defer db.Close()
 	if _, err := db.Exec(strings.Join(rows, "\n")); err != nil {
 		return fmt.Errorf("OpenCode's demo sessions: %w", err)
+	}
+	// A session's folder is as OpenCode resolved it: with the OS's separators (path.resolve
+	// gives "\" on Windows).
+	if native := filepath.FromSlash(demo); native != filepath.ToSlash(demo) {
+		if _, err := db.Exec("UPDATE session_v2 SET directory = ? WHERE directory = ?", native, filepath.ToSlash(demo)); err != nil {
+			return err
+		}
 	}
 	keep := "'" + strings.Join(append(DemoOpenCode, "ses_e29a832f5ffebHEWUP5fBLspvU"), "','") + "'"
 	for _, q := range []string{

@@ -14,6 +14,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
+	"github.com/roeehrl/hopsesh/internal/testkit"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakeagent"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -68,6 +69,7 @@ func newCloudWorld(t *testing.T, work bool) *cloudWorld {
 		t.Fatal(err)
 	}
 	gitConfig := filepath.Join(root, "gitconfig")
+	testkit.UnsetAgentEnv(t)
 	for k, v := range map[string]string{"HOME": w.home, "USERPROFILE": w.home, "PATH": bin + ":" + testPath(), "HOPSESH_MACHINE": "here",
 		"HOPSESH_CONFIG_DIR": filepath.Join(w.home, "config"), "HOPSESH_STATE_DIR": filepath.Join(w.home, "state"), "HOPSESH_TAILSCALE": "off", "HOPSESH_APP_RUNTIMES": "off",
 		"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "", "FAKE_CLOUD_DIR": w.store, "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok", "FAKE_AGENT_LOG": filepath.Join(root, "agents.log"),

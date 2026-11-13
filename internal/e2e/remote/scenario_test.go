@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/peer"
+	"github.com/roeehrl/hopsesh/internal/testkit"
 )
 
 // The scenarios need:
@@ -433,7 +434,9 @@ func (e *env) hs(t *testing.T, args ...string) ([]byte, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, e.bin, args...)
-	cmd.Env = append(os.Environ(), "HOPSESH_CONFIG_DIR="+e.config, "HOPSESH_STATE_DIR="+e.state, "HOPSESH_MACHINE=here",
+	// This machine's home stays, so OpenCode's folders go into the work folder.
+	cmd.Env = append(testkit.Environ(os.Environ(), testkit.OpenCodeEnv(filepath.Join(e.work, "opencode"))),
+		"HOPSESH_CONFIG_DIR="+e.config, "HOPSESH_STATE_DIR="+e.state, "HOPSESH_MACHINE=here",
 		"CLAUDE_CONFIG_DIR="+filepath.Join(e.work, "claude"), "CODEX_HOME="+filepath.Join(e.work, "codex"), "HOPSESH_APP_RUNTIMES=off")
 	cmd.Stdin = nil
 	var out, stderr bytes.Buffer
