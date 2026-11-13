@@ -35,6 +35,9 @@ type SpecData struct {
 	Desktop *DesktopData `json:"desktop,omitempty"`
 	// Plans names what a bare account plan belongs to ("Claude").
 	Plans string `json:"plans,omitempty"`
+	// SQLTables and SQLDenied are the database tables the module reads and never reads.
+	SQLTables []string `json:"sqlTables"`
+	SQLDenied []string `json:"sqlDenied"`
 }
 
 // DesktopData is agent.Desktop.
@@ -128,6 +131,7 @@ func Data(s agent.Spec) SpecData {
 		Instructions: list(s.Instructions), GlobalInstructions: list(s.GlobalInstructions), Tools: s.Tools,
 		Features: list(s.Features), Experimental: list(s.Experimental), DesktopApps: lists(s.Icon.Apps),
 		Binaries: []BinaryData{}, Roots: []RootData{}, Clouds: []CloudData{}, TerminalEnv: list(s.TerminalEnv), Kinds: []KindData{},
+		SQLTables: list(s.SQLTables), SQLDenied: list(s.SQLDenied),
 	}
 	for _, k := range s.Kinds {
 		d.Kinds = append(d.Kinds, KindData{ID: k.ID, Name: k.Name, Note: k.Note})

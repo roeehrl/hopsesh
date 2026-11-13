@@ -10,8 +10,10 @@ import (
 )
 
 // Confine wraps a Host so a module can write only under its install's roots, never opens
-// its Spec's Secrets (paths, or patterns with * ? [), and runs only its Spec's Binaries. The core gives every module a
-// confined Host; the conformance kit does the same.
+// its Spec's Secrets (paths, or patterns with * ? [), and runs only its Spec's Binaries.
+// When the Host reads databases (SQLHost), the module reads only its Spec's SQLTables, from
+// a database under its roots, even though the database file is a Secret. The core gives
+// every module a confined Host; the conformance kit does the same.
 func Confine(h Host, s Spec, in Install) Host {
 	c := &confined{h: h, spec: s}
 	for _, r := range s.Roots {
@@ -39,6 +41,19 @@ func (c *confined) Procs() Procs      { return c.h.Procs() }
 func (c *confined) Log() *slog.Logger { return c.h.Log() }
 func (c *confined) FS() FS            { return confinedFS{c} }
 func (c *confined) Exec() Exec        { return confinedExec{c} }
+
+// SQL is the Host's reader limited to the Spec's tables, or nil when the Host has none or
+// the Spec names no tables.
+func (c *confined) SQL() SQL {
+	inner, ok := HostSQL(c.h)
+	if !ok || len(c.spec.SQLTables) == 0 {
+		return nil
+	}
+	if l, ok := inner.(SQLTableLimiter); ok {
+		inner = l.Only(c.spec.SQLTables, c.spec.SQLDenied)
+	}
+	return confinedSQL{c, inner}
+}
 
 func (c *confined) under(p string, dirs []string) bool {
 	pa := c.h.Path()
@@ -143,6 +158,55 @@ func (f confinedFS) Rename(from, to string) error {
 		return err
 	}
 	return f.c.h.FS().Rename(from, to)
+}
+
+// confinedSQL checks every query's text and database before the Host's reader runs it.
+type confinedSQL struct {
+	c     *confined
+	inner SQL
+}
+
+func (s confinedSQL) database(db string) error {
+	if db == "" || !s.c.h.Path().IsAbs(db) {
+		return fmt.Errorf("%w: %q is not a database path", ErrDenied, db)
+	}
+	if !s.c.under(db, s.c.roots) {
+		return fmt.Errorf("%w: %s is outside %s's folders", ErrDenied, db, s.c.spec.Name)
+	}
+	return nil
+}
+
+func (s confinedSQL) check(db, q string) error {
+	if err := s.database(db); err != nil {
+		return err
+	}
+	return CheckSQLQuery(q, s.c.spec.SQLTables, s.c.spec.SQLDenied)
+}
+
+func (s confinedSQL) Query(ctx context.Context, db, q string, args ...any) (Rows, error) {
+	if err := s.check(db, q); err != nil {
+		return Rows{}, err
+	}
+	return s.inner.Query(ctx, db, q, args...)
+}
+
+func (s confinedSQL) Batch(ctx context.Context, db string, stmts []Statement) ([]Rows, error) {
+	for _, st := range stmts {
+		if err := s.check(db, st.Query); err != nil {
+			return nil, err
+		}
+	}
+	return s.inner.Batch(ctx, db, stmts)
+}
+
+func (s confinedSQL) Columns(ctx context.Context, db, table string) ([]string, error) {
+	if err := s.database(db); err != nil {
+		return nil, err
+	}
+	if !containsFold(s.c.spec.SQLTables, table) || containsFold(s.c.spec.SQLDenied, table) {
+		return nil, deniedSQL("the table " + table + " is not one this agent reads")
+	}
+	return s.inner.Columns(ctx, db, table)
 }
 
 type confinedExec struct{ c *confined }

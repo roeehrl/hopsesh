@@ -124,6 +124,13 @@ type Spec struct {
 	// terminal tabs, on top of the user's: settings that suit that terminal
 	// (CLAUDE_CODE_FORCE_SYNC_OUTPUT=1). Never a credential; not used in other terminals.
 	TerminalEnv []string
+	// SQLTables are the database tables the module may read through the Host's SQL
+	// (SQLHost), for an agent that keeps sessions in SQLite. Every other table is refused.
+	// The database file itself stays a Secret: no file read, copy or package reaches it.
+	SQLTables []string
+	// SQLDenied are tables that are never read, even through a view, and whose name
+	// refuses any query that mentions it (credentials, accounts).
+	SQLDenied []string
 }
 
 // Desktop is an agent's desktop app as the user interfaces show it.

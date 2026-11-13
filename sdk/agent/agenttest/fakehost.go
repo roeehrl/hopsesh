@@ -27,7 +27,7 @@ type FakeHost struct {
 	files map[string]*memFile
 	facts agent.Facts
 	// Programs answer Exec.Run by binary name (argv[0] after resolution is the fake path
-	// "/bin/<name>").
+	// "/bin/<name>"). A program may change a database with ExecSQL.
 	Programs map[string]func(argv []string, o agent.RunOptions) agent.Result
 	// LocksHeld and PIDs simulate lock files and processes; LockHolders and PIDNames say
 	// which process holds a lock and what it is (a terminated process releases its locks).
@@ -39,6 +39,10 @@ type FakeHost struct {
 	PIDCommands map[int]string
 	// Writes records every write, in order.
 	Writes []string
+
+	dbs      map[string]string // databases (LoadSQL): fake path → temporary file
+	sqlMu    sync.Mutex
+	sqlReads []string
 }
 
 type memFile struct {
