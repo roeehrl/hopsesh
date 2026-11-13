@@ -55,15 +55,7 @@ type SettingsDTO struct {
 // machines (the skill names the clouds itself); the command line renders the same files.
 func (a *App) skillFiles() (map[string][]byte, string) {
 	bin := integrate.SkillBin()
-	var names, ids []string
-	for _, s := range a.snapshot().Specs() {
-		if len(s.Roots) == 0 {
-			continue
-		}
-		names = append(names, s.Name)
-		ids = append(ids, string(s.ID))
-	}
-	files, _ := skill.Render(skill.NewParams(bin, version.Version, names, ids))
+	files, _ := skill.Render(skill.SpecParams(bin, version.Version, a.snapshot().Specs()))
 	return files, bin
 }
 

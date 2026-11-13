@@ -19,15 +19,7 @@ import (
 // machines (the skill names the clouds itself); the app renders the same files.
 func (r *run) skillFiles() (map[string][]byte, string) {
 	bin := integrate.SkillBin()
-	var names, ids []string
-	for _, m := range r.app.Modules() {
-		if len(m.Spec().Roots) == 0 {
-			continue
-		}
-		names = append(names, m.Spec().Name)
-		ids = append(ids, string(m.Spec().ID))
-	}
-	files, _ := skill.Render(skill.NewParams(bin, version.Version, names, ids))
+	files, _ := skill.Render(skill.SpecParams(bin, version.Version, r.app.Specs()))
 	return files, bin
 }
 
