@@ -696,6 +696,28 @@ neutral names (`opencode/…`).
   `skillcheck`, `scripts/matrix-*`, `ci/drift` and the nightly and drift workflows.
 - PR 10: the skill template's examples and `/cd` lines, the plugin files, READMEs, packaging, demo.
 
+**Left by PR 1a for later PRs.** PR 1a adds the SDK contracts as optional interfaces; no core code
+calls them yet, so Claude Code and Codex behave as before. Names differ slightly from §3.5: the
+stamp is `agent.SessionStamp` (a string) from an optional `SessionStamper`, `SessionStore` adds
+`Backup`, the install flag is `VendorInstaller.InstallsViaVendor()`, and `Spec.SQLDenied` lists the
+denied tables beside `Spec.SQLTables`.
+- PR 1b, host: `moduleHost` implements `agent.SQLHost`; its reader implements
+  `agent.SQLTableLimiter` (modernc authorizer, as `agenttest/sqlhost.go` does) and uses
+  `agent.ScanRows`; remote tiers check their JSON rows with `agent.CheckRows` and return whole
+  numbers as `int64`. `agent.Confine` already checks each query (`agent.CheckSQLQuery`) and the
+  database path. The snapshot host returns no reader.
+- PR 1b, move: stage, write and `packageOf` call `agent.Materializer` for `BundleFile.Virtual`;
+  `apply.go` checks `agent.InstallsViaVendor`; `keepBoth`, `repo.go`, `write.go` and `capacity.go`
+  use `agent.NewSessionID`; the journal's `OpVendorSession` uses `SessionStore`; `Seal`, the
+  receipts, `movement_read.go` and `movement_memo.go` use `agent.StampOf` and tolerate a missing
+  anchor when `agent.IsVirtual`.
+- PR 6: install `HookIntegration.Dir` with `agent.InstallHookDir` / `RemoveHookDir` over a local
+  `HookDirFS`, and check it with `HookDir.In`. The default staging folder sits beside the plugin
+  folder with a leading dot; the OpenCode module sets `Staging` outside `plugins/`.
+- PR 7: `movementHookProfile` and `PinMain` still take an account folder as the main root; with
+  `ProfileSpec.RootVars` the main root is inside it (`Spec.ProfileLocate`). Code that lists an
+  account's variables reads `ProfileSpec.Vars()`, not `RootEnv`.
+
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
 
