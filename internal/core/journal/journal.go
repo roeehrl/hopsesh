@@ -257,8 +257,10 @@ func (j *Journal) Seal(fsFor func(machine string) (host.FS, error)) error {
 }
 
 // SealWith is Seal that also records the stamp of each session the operation created in
-// an agent's database, through r.Sessions. One it cannot stamp keeps the stamp it had (a
-// session never made has none), and is named in the error: undoing it then needs force.
+// an agent's database and has no stamp yet, through r.Sessions. A stamp recorded already
+// (StampCreatedSession, right after the agent made the session) is kept: a later Seal, as
+// in a recovery, would otherwise take work done since for the operation's. One it cannot
+// stamp is named in the error: undoing it then needs force.
 func (j *Journal) SealWith(ctx context.Context, r Reach) error {
 	j.mu.Lock()
 	entries := append([]Entry(nil), j.Entries...)
@@ -266,7 +268,7 @@ func (j *Journal) SealWith(ctx context.Context, r Reach) error {
 	stamps := map[int]agent.SessionStamp{}
 	var unstamped []string
 	for i, e := range entries {
-		if e.Op != OpVendorSession || !e.Created || e.Key == nil {
+		if e.Op != OpVendorSession || !e.Created || e.Key == nil || e.Stamp != "" {
 			continue
 		}
 		if r.Sessions == nil {
@@ -304,7 +306,9 @@ func (j *Journal) SealWith(ctx context.Context, r Reach) error {
 	defer j.mu.Unlock()
 	j.After = after
 	for i, st := range stamps {
-		j.Entries[i].Stamp = st
+		if i < len(j.Entries) && sameSession(j.Entries[i], entries[i]) && j.Entries[i].Stamp == "" {
+			j.Entries[i].Stamp = st
+		}
 	}
 	if err := j.saveLocked(); err != nil {
 		return err
@@ -374,7 +378,7 @@ func (j *Journal) changed(ctx context.Context, r Reach, skip func(machine, p str
 			if skip(e.Machine, sessionMark(e)) {
 				continue
 			}
-			if err := vendorChanged(ctx, r, e); err != nil {
+			if err := vendorChanged(ctx, r, e, j.Entries); err != nil {
 				return err
 			}
 		case OpChangeDir:
@@ -475,10 +479,24 @@ func sessionMark(e Entry) string {
 var ErrOutOfReach = errors.New("not checked from here")
 
 // vendorChanged reports a session the operation created in an agent's database that was
-// used since (its stamp moved on), or whose state was never recorded.
-func vendorChanged(ctx context.Context, r Reach, e Entry) error {
-	if !e.Created || e.Key == nil || r.Sessions == nil {
+// used since (its stamp moved on), or whose state was never recorded; and a session it set
+// aside that is there with other work, unless the operation then made one at its id (whose
+// own check covers it, and which undo deletes first).
+func vendorChanged(ctx context.Context, r Reach, e Entry, all []Entry) error {
+	if e.Key == nil || r.Sessions == nil {
 		return nil
+	}
+	if !e.Created {
+		for _, o := range all {
+			if o.Op == OpVendorSession && o.Created && o.Machine == e.Machine && o.Key != nil && *o.Key == *e.Key {
+				return nil
+			}
+		}
+		now, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
+		if err != nil || now == e.Stamp {
+			return nil // gone (undo puts it back), or checked when undoing
+		}
+		return fmt.Errorf("%w: the %s session %s, which this set aside, holds other work now; undo with force to leave it as it is", ErrChanged, e.Key.Agent, e.Key.Session)
 	}
 	if e.Stamp == "" {
 		_, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
@@ -811,6 +829,66 @@ func (j *Journal) RecordCreatedSession(machine string, key agent.SessionKey) err
 	return j.record(Entry{Op: OpVendorSession, Machine: machine, Key: &key, Created: true})
 }
 
+// StampCreatedSession records the stamp of a session the operation created, right after the
+// agent made it, when it has none yet: what undo deletes without force is then that
+// session as the operation made it, also when a recovery runs Seal again later.
+func (j *Journal) StampCreatedSession(machine string, key agent.SessionKey, stamp agent.SessionStamp) error {
+	if stamp == "" {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for i, e := range j.Entries {
+		if e.Op == OpVendorSession && e.Created && e.Machine == machine && e.Key != nil && *e.Key == key {
+			if e.Stamp != "" {
+				return nil
+			}
+			j.Entries[i].Stamp = stamp
+			return j.saveLocked()
+		}
+	}
+	return nil
+}
+
+// ForgetSession drops the entry of a session the operation did not change after all: one
+// it was to create that the agent already had (its import found another session at that
+// id, and nothing stamped it as the operation's), or one it set aside whose delete the
+// agent refused. Undo then leaves that session as it is.
+func (j *Journal) ForgetSession(machine string, key agent.SessionKey, created bool) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for i := len(j.Entries) - 1; i >= 0; i-- {
+		e := j.Entries[i]
+		if e.Op != OpVendorSession || e.Created != created || e.Machine != machine || e.Key == nil || *e.Key != key {
+			continue
+		}
+		if created && e.Stamp != "" {
+			return nil // the operation made it
+		}
+		j.Entries = append(j.Entries[:i], j.Entries[i+1:]...)
+		return j.saveLocked()
+	}
+	return nil
+}
+
+// SetAsideSession reports whether the operation set aside (deleted after a backup) the
+// session on machine.
+func (j *Journal) SetAsideSession(machine string, key agent.SessionKey) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for _, e := range j.Entries {
+		if e.Op == OpVendorSession && !e.Created && e.Machine == machine && e.Key != nil && *e.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// sameSession reports whether two entries are the same session's of the same op.
+func sameSession(a, b Entry) bool {
+	return a.Op == b.Op && a.Created == b.Created && a.Machine == b.Machine && a.Key != nil && b.Key != nil && *a.Key == *b.Key
+}
+
 // DeletedSession records a session about to be deleted from an agent's database on machine
 // (set aside), backed up first to the file backup at stamp, so undo imports it again.
 func (j *Journal) DeletedSession(machine string, key agent.SessionKey, backup string, stamp agent.SessionStamp) error {
@@ -820,13 +898,32 @@ func (j *Journal) DeletedSession(machine string, key agent.SessionKey, backup st
 	return j.record(Entry{Op: OpVendorSession, Machine: machine, Key: &key, Backup: backup, Stamp: stamp})
 }
 
-// ChangedSessionDir is ChangedDir for a session an agent keeps in a database: its stamp
-// after the change guards undo, since its file (an anchor) does not change when it is used.
+// ChangedSessionDir is ChangedDir for a session an agent keeps in a database, recorded
+// before the change with the session's stamp then: its stamp guards undo, since its file
+// (an anchor) does not change when it is used. RestampSessionDir records the stamp the
+// change left.
 func (j *Journal) ChangedSessionDir(machine string, key agent.SessionKey, file, from, dir string, stamp agent.SessionStamp) error {
 	if stamp == "" {
 		return errors.New("a folder change of a session kept in a database names its stamp")
 	}
 	return j.record(Entry{Op: OpChangeDir, Machine: machine, Path: file, Key: &key, From: from, Dir: dir, Stamp: stamp})
+}
+
+// RestampSessionDir records the stamp a folder change (ChangedSessionDir) left the session
+// at.
+func (j *Journal) RestampSessionDir(machine string, key agent.SessionKey, stamp agent.SessionStamp) error {
+	if stamp == "" {
+		return errors.New("a folder change of a session kept in a database names its stamp")
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for i := len(j.Entries) - 1; i >= 0; i-- {
+		if e := j.Entries[i]; e.Op == OpChangeDir && e.Stamp != "" && e.Machine == machine && e.Key != nil && *e.Key == key {
+			j.Entries[i].Stamp = stamp
+			return j.saveLocked()
+		}
+	}
+	return fmt.Errorf("no folder change of %s is recorded", key.Session)
 }
 
 // Forget drops the entries for a machine whose own hopsesh journals those writes (the
@@ -1123,6 +1220,9 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 	captured := j.captureLineage(r)
 	var problems, kept, left []string
 	var manual []Manual
+	// Backups of sessions set aside that were not imported again: the operation wrote them
+	// (OpCreate, before the delete), and they are the only copy left.
+	keepBackup := map[string]bool{}
 	// Worktrees go first: a branch is only renamed or deleted once no worktree hopsesh made
 	// has it checked out.
 	for i := len(j.Entries) - 1; i >= 0; i-- {
@@ -1177,10 +1277,20 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 			}
 			continue
 		case OpVendorSession:
-			if err := undoVendorSession(ctx, r, e, force); err != nil {
+			restored, note, err := undoVendorSession(ctx, r, e, force)
+			if !e.Created && !restored && e.Backup != "" {
+				keepBackup[e.Machine+"\x00"+e.Backup] = true
+			}
+			if note != "" {
+				left = append(left, note)
+			}
+			if err != nil {
 				what := "deleting"
 				if !e.Created {
 					what = "restoring"
+				}
+				if e.Backup != "" && !e.Created {
+					err = fmt.Errorf("%w (its backup stays at %s)", err, e.Backup)
 				}
 				problems = append(problems, fmt.Sprintf("%s the %s session %s: %v", what, e.Key.Agent, e.Key.Session, err))
 			}
@@ -1204,6 +1314,9 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 		fsys, err := r.fs(e.Machine)
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s on %s: %v", e.Path, e.Machine, err))
+			continue
+		}
+		if e.Op == OpCreate && keepBackup[e.Machine+"\x00"+e.Path] {
 			continue
 		}
 		if e.Op == OpAdopt {
@@ -1234,38 +1347,58 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 }
 
 // undoVendorSession deletes a session the operation created in an agent's database, at the
-// stamp Seal recorded (forced: at its stamp now), or imports one it deleted from its backup.
-// A created session already gone is fine.
-func undoVendorSession(ctx context.Context, r Reach, e Entry, force bool) error {
+// stamp Seal recorded (forced: at its stamp now), or puts back one it set aside. A created
+// session already gone is fine.
+//
+// A session set aside is imported again from its backup only when it is gone; one there
+// at the stamp it was set aside at was never deleted (or was put back), which is fine too.
+// One there with other work is left as it is: unforced that is a problem, forced it is
+// noted (left). restored says the session set aside is as it was, so its backup may go.
+func undoVendorSession(ctx context.Context, r Reach, e Entry, force bool) (restored bool, left string, err error) {
 	if e.Key == nil {
-		return nil
+		return true, "", nil
 	}
 	if r.Sessions == nil {
-		return errors.New("its agent cannot be reached from here")
+		return false, "", errors.New("its agent cannot be reached from here")
 	}
 	if !e.Created {
-		_, err := r.Sessions.Restore(ctx, e.Machine, *e.Key, e.Backup)
-		return err
+		now, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
+		switch {
+		case errors.Is(err, agent.ErrNotFound):
+			_, err = r.Sessions.Restore(ctx, e.Machine, *e.Key, e.Backup)
+			return err == nil, "", err
+		case err != nil:
+			return false, "", err
+		case now == e.Stamp:
+			return true, "", nil
+		case force:
+			return false, fmt.Sprintf("the %s session %s holds other work than it held when it was set aside, so it stays as it is; its backup is %s", e.Key.Agent, e.Key.Session, e.Backup), nil
+		}
+		return false, "", fmt.Errorf("it holds other work than it held when it was set aside; undo with force to leave it as it is")
 	}
 	expect := e.Stamp
 	if force || expect == "" {
 		now, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
-		if errors.Is(err, agent.ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
+		switch {
+		case errors.Is(err, agent.ErrNotFound):
+			return true, "", nil
+		case force && errors.Is(err, agent.ErrNotInstalled):
+			// No database where the agent keeps it now: forced, there is nothing to delete
+			// here, which is said (it may be one the agent keeps elsewhere).
+			return true, fmt.Sprintf("the %s session %s was not deleted: %v", e.Key.Agent, e.Key.Session, err), nil
+		case err != nil:
+			return false, "", err
 		}
 		if expect == "" && !force {
-			return errors.New("its state was never recorded; undo with force to delete it")
+			return false, "", errors.New("its state was never recorded; undo with force to delete it")
 		}
 		expect = now
 	}
-	err := r.Sessions.Delete(ctx, e.Machine, *e.Key, expect)
+	err = r.Sessions.Delete(ctx, e.Machine, *e.Key, expect)
 	if errors.Is(err, agent.ErrNotFound) {
-		return nil
+		return true, "", nil
 	}
-	return err
+	return err == nil, "", err
 }
 
 // undoPushRef deletes a pushed ref while it still points at what was pushed; forced, at

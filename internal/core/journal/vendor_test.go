@@ -22,6 +22,9 @@ type fakeSessions struct {
 	backups  map[string]string
 	deletes  []agent.SessionStamp
 	dirs     []string
+	restores int
+	// failRestore makes every Restore fail (the import fails, the database is locked).
+	failRestore error
 }
 
 func newFakeSessions() *fakeSessions {
@@ -52,6 +55,10 @@ func (f *fakeSessions) Delete(_ context.Context, _ string, key agent.SessionKey,
 }
 
 func (f *fakeSessions) Restore(_ context.Context, _ string, key agent.SessionKey, backup string) (agent.SessionStamp, error) {
+	f.restores++
+	if f.failRestore != nil {
+		return "", f.failRestore
+	}
 	want := f.backups[backup]
 	if have, ok := f.sessions[key.Session]; ok {
 		if have != want {
@@ -185,14 +192,127 @@ func TestUndoVendorSessionReplaced(t *testing.T) {
 		t.Fatal("a delete without a backup was recorded")
 	}
 
-	// Continued in between: the restore refuses rather than report success over it.
+	// There with other work (made again since, or never deleted and then used): undo
+	// refuses rather than report success over it; forced, it leaves it and its backup.
 	f2 := newFakeSessions()
 	f2.backups[backup] = "old"
 	f2.sessions["ses_1"] = "someone else's"
 	j2, _ := New(t.TempDir(), KindMove, "set aside")
+	must(t, j2.WriteFile(host.LocalFS(), "here", backup, []byte("old"), 0o600))
 	must(t, j2.DeletedSession("here", vendorKey, backup, "v1:3"))
-	if err := j2.Undo(ctx, vendorReach(f2), false); err == nil || !strings.Contains(err.Error(), "restoring the dbagent session ses_1") || j2.Undone {
+	if err := j2.Undo(ctx, vendorReach(f2), false); !errors.Is(err, ErrChanged) || !strings.Contains(err.Error(), "holds other work") || j2.Undone {
 		t.Fatalf("restore over other work: %v", err)
+	}
+	must(t, j2.Undo(ctx, vendorReach(f2), true))
+	if f2.sessions["ses_1"] != "someone else's" || f2.restores != 0 || len(j2.Left) != 1 || !strings.Contains(j2.Left[0], backup) {
+		t.Fatalf("a forced undo over other work: %q, %d restores, left %v", f2.sessions["ses_1"], f2.restores, j2.Left)
+	}
+	if _, err := os.Stat(backup); err != nil {
+		t.Fatal("the backup of a session not put back was deleted")
+	}
+}
+
+// A restore that fails (the import fails, the database is locked) keeps the backup: it is
+// the only copy of the session set aside. Forced or not, undo is then incomplete, and a
+// retry once the agent can import puts the session back.
+func TestUndoKeepsBackupWhenRestoreFails(t *testing.T) {
+	ctx := context.Background()
+	for _, force := range []bool{false, true} {
+		t.Run(map[bool]string{false: "plain", true: "forced"}[force], func(t *testing.T) {
+			f := newFakeSessions()
+			backup := filepath.Join(t.TempDir(), "backup", "ses_1.jsonl")
+			f.sessions["ses_1"] = "old"
+			j, _ := New(t.TempDir(), KindMove, "replace")
+			must(t, j.WriteFile(host.LocalFS(), "here", backup, []byte("old"), 0o600))
+			f.backups[backup] = "old"
+			must(t, j.DeletedSession("here", vendorKey, backup, "v1:3"))
+			delete(f.sessions, "ses_1")
+			must(t, j.RecordCreatedSession("here", vendorKey))
+			f.sessions["ses_1"] = "newer"
+			must(t, j.SealWith(ctx, vendorReach(f)))
+			f.failRestore = errors.New("the database is locked")
+			err := j.Undo(ctx, vendorReach(f), force)
+			if err == nil || j.Undone || !strings.Contains(err.Error(), "its backup stays at "+backup) {
+				t.Fatalf("a failed restore: %v (undone %v)", err, j.Undone)
+			}
+			if _, err := os.Stat(backup); err != nil {
+				t.Fatal("the backup of a session not put back was deleted")
+			}
+			if _, ok := f.sessions["ses_1"]; ok {
+				t.Fatal("the imported copy is still there")
+			}
+			f.failRestore = nil
+			must(t, j.Undo(ctx, vendorReach(f), force))
+			if f.sessions["ses_1"] != "old" || !j.Undone {
+				t.Fatalf("the retry: %q", f.sessions["ses_1"])
+			}
+			if _, err := os.Stat(backup); !os.IsNotExist(err) {
+				t.Fatal("the backup outlived the session put back")
+			}
+		})
+	}
+}
+
+// A session set aside whose delete never happened (the agent refused it, or the move was
+// cut short) is there at the stamp it was backed up at: undo has nothing to put back.
+func TestUndoSetAsideNeverDeleted(t *testing.T) {
+	ctx := context.Background()
+	f := newFakeSessions()
+	backup := filepath.Join(t.TempDir(), "ses_1.jsonl")
+	f.sessions["ses_1"] = "old"
+	f.backups[backup] = "old"
+	j, _ := New(t.TempDir(), KindMove, "replace")
+	must(t, j.WriteFile(host.LocalFS(), "here", backup, []byte("old"), 0o600))
+	must(t, j.DeletedSession("here", vendorKey, backup, "v1:3"))
+	must(t, j.Undo(ctx, vendorReach(f), false))
+	if f.restores != 0 || f.sessions["ses_1"] != "old" || !j.Undone {
+		t.Fatalf("%d restores, %q", f.restores, f.sessions["ses_1"])
+	}
+}
+
+// A stamp recorded right after the agent made the session is the one undo keeps: a later
+// Seal (a recovery's) does not take work done since for the operation's.
+func TestSealKeepsRecordedStamp(t *testing.T) {
+	ctx := context.Background()
+	f := newFakeSessions()
+	j, _ := New(t.TempDir(), KindMove, "import")
+	must(t, j.RecordCreatedSession("here", vendorKey))
+	f.sessions["ses_1"] = "ab"
+	must(t, j.StampCreatedSession("here", vendorKey, "v1:2"))
+	f.sessions["ses_1"] = "abc" // continued before the recovery sealed
+	must(t, j.SealWith(ctx, vendorReach(f)))
+	must(t, j.StampCreatedSession("here", vendorKey, "v1:3"))
+	if j.Entries[0].Stamp != "v1:2" {
+		t.Fatalf("the stamp became %q", j.Entries[0].Stamp)
+	}
+	if err := j.Undo(ctx, vendorReach(f), false); !errors.Is(err, ErrChanged) {
+		t.Fatalf("an unforced undo over the work done since: %v", err)
+	}
+}
+
+// A session the operation was to create that the agent already had (its import found
+// another at the id) is dropped from the journal unless the operation stamped it as its
+// own; a set-aside the agent refused is dropped too, so undo leaves both alone.
+func TestForgetSession(t *testing.T) {
+	j, _ := New(t.TempDir(), KindMove, "import")
+	must(t, j.RecordCreatedSession("here", vendorKey))
+	must(t, j.ForgetSession("here", vendorKey, true))
+	if len(j.Entries) != 0 {
+		t.Fatalf("kept %+v", j.Entries)
+	}
+	must(t, j.RecordCreatedSession("here", vendorKey))
+	must(t, j.StampCreatedSession("here", vendorKey, "v1:2"))
+	must(t, j.ForgetSession("here", vendorKey, true))
+	if len(j.Entries) != 1 {
+		t.Fatal("a session the operation made was forgotten")
+	}
+	must(t, j.DeletedSession("here", vendorKey, "/b", "v1:1"))
+	if !j.SetAsideSession("here", vendorKey) {
+		t.Fatal("the set-aside is not reported")
+	}
+	must(t, j.ForgetSession("here", vendorKey, false))
+	if len(j.Entries) != 1 || !j.Entries[0].Created || j.SetAsideSession("here", vendorKey) {
+		t.Fatalf("the set-aside: %+v", j.Entries)
 	}
 }
 
@@ -218,6 +338,17 @@ func TestChangedSessionDirStampGuard(t *testing.T) {
 	}
 	if err := j.ChangedSessionDir("here", vendorKey, "x", "/a", "/b", ""); err == nil {
 		t.Fatal("a change without a stamp was recorded")
+	}
+	// Journaled before the change at the stamp then, and restamped after it.
+	j2, _ := New(t.TempDir(), KindChangeDir, "cd")
+	must(t, j2.ChangedSessionDir("here", vendorKey, "/nowhere/ses_1.jsonl", "/a", "/b", "v1:2"))
+	f.sessions["ses_1"] = "abcd"
+	must(t, j2.RestampSessionDir("here", vendorKey, "v1:4"))
+	if err := j2.Changed(ctx, vendorReach(f)); err != nil {
+		t.Fatal(err)
+	}
+	if err := j2.RestampSessionDir("here", agent.SessionKey{Agent: "dbagent", Session: "ses_2"}, "v1:1"); err == nil {
+		t.Fatal("restamped a change never recorded")
 	}
 }
 
