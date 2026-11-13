@@ -6,6 +6,11 @@ updates:
     cooldown: {default-days: 7} # a new release waits a week (supply-chain safety)
     groups:
       go-modules: {patterns: ["*"]}
+    ignore:
+      # pflag 1.1 prints every boolean flag as "--x [=true|false]" in help, which changes
+      # the CLI's help text and the skill's flag list; move to it on purpose, not via the group.
+      - dependency-name: github.com/spf13/pflag
+        versions: [">= 1.1.0"]
     commit-message: {prefix: deps}
   - package-ecosystem: github-actions
     directory: /

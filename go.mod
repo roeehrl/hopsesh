@@ -20,7 +20,7 @@ require (
 	github.com/pkg/sftp v1.13.12
 	github.com/rogpeppe/go-internal v1.16.0
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.1.0
+	github.com/spf13/pflag v1.0.10
 	github.com/tc-hib/winres v0.3.1
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/image v0.47.0
