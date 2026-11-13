@@ -785,6 +785,57 @@ packages and undo through it.
 - PR 11 (append into an existing session): the continue path reads an expected destination by its
   key (`Copies`), but appending and its rollback are not exercised with a virtual target yet.
 
+**Left by PR 2 for later PRs.** `agents/opencode` now lists, previews, reads (SQL, JSON lines
+and the API tier), renames, detects live turns, stops them, probes accounts and capacity, and is
+registered. Fixtures are the 2.3.0 sandbox capture plus `testdata/synthetic/` (part rows with
+inline content, unsettled messages, an unknown type, an attachment, a skill, and fake credential
+rows that tests prove are never read).
+- Resume: a new optional `agent.HostResumer` (`ResumeOn`) checks the session exists and picks a
+  program of the running service's version (PATH, the desktop's bundled `opencode-cli` with its
+  `.version` file, or a staged `{desktop}/cli/<ver>-<arch>/opencode-cli`). `app.Resume` uses it
+  for sessions on this machine. Commands made at plan time (moves, continues) still come from the
+  pure `Resume` with the PATH `opencode`: PR 4/5 should resolve the printed command after the
+  import. D2 is a refusal with an explanation (`restartError`); "ask, then resume anyway" needs a
+  confirmation in the user interfaces and a `ResumeOptions` field (PR 7/8).
+- Moves: `Verify` refuses every move (`ErrUnsupported`) until PR 4 adds the import
+  (`VendorInstaller`), `SessionStore`, children import and keep-both id remapping. `PlanMove`
+  already places the main file and `sessions/<id>.children/<child>.jsonl`, with the §3.8 policy.
+  Not expressible as a `RewritePolicy`: stripping `native` from content items and dropping
+  `compaction.native` for another account (only reasoning items are dropped); `uri` is not
+  protected (a `media:` ref holds no path).
+- Materialize leaves out the session's `permissions`: its column is named like the denied
+  `permission` table, which `CheckSQLQuery` refuses to mention. PR 4 decides (export for moves,
+  or a narrower rule).
+- API tier: `List` leaves `Size` 0 (counts need an export per session), `SessionStamp` exports.
+  `GET /api/session` is paged by `cursor.next`; untested beyond one page.
+- Reader: a subagent's answer arrives as a `synthetic` message and is skipped like all
+  synthetic messages; the child's reply is not folded into the `subagent` tool result (PR 5).
+  Tool inputs are re-encoded with sorted keys, because the export and the database order keys
+  differently and a node id covers the input bytes.
+- The reader's file mode is used only where nothing runs (Exec fails: a peer's package); a
+  machine without SQL reads OpenCode's export first, since an anchor hopsesh wrote may be
+  stale. PR 4's reads of staged files need a file-only entry (`decodeJSONL`).
+- `Summary.Size` counts messages, but `hopsesh ls` prints it as bytes ("4 B"): the user
+  interfaces should say messages for `VirtualSessions` modules (PR 8).
+- Live: TUI processes (`-s <id>`) are not detected: the Host lists no processes, and asking for
+  the holders of `opencode.db` would flock the database.
+- TitleSource is never "custom": a hopsesh rename is not recorded yet (sidecar, PR 4).
+- Account: providers configured only in `opencode.json` are not listed by `auth list`, so a
+  working local-model setup reads "no provider signed in" (PR 7).
+- No `desktop` root: roots are writable, and the staged CLIs are only read, by path.
+  `TerminalEnv` cannot hold `OPENCODE_SESSION_ID` (it takes `NAME=value`); resume commands unset
+  it instead, as Claude's unset its session markers.
+- Tests that use `testkit.Env` find the real `opencode` through its absolute `Candidates` (as
+  they find a real `codex`), so they may run `opencode --version`, `service status` or
+  `auth list --standalone` under the test's home. `testkit.Env` now empties the `XDG_*` and
+  `OPENCODE_*` variables; OpenCode reads an empty `XDG_STATE_HOME` (`??`) as a relative folder,
+  so PR 3's stand-in should unset them instead.
+- Drift: a minimal `agentWatch["opencode"]` (docs, releases, help, code paths, formats, the
+  2.1.0 floor in `service.go`); PR 9 adds migration ids, the OpenAPI hash, the plugin API and the
+  desktop app entry. The docs URLs assume the `dev` branch.
+- Sandbox finding: OpenCode mints a session id up to a few hundred milliseconds before the row's
+  `time_created`.
+
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
 
