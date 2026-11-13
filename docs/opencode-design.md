@@ -472,9 +472,9 @@ the anchor is computed from the data root (§3.5). Output for OpenCode:
 - Main-root accessor replacing `Root("home")` (§3.2).
 - `internal/app/machine_status.go:157,794,812-885`: Spec name; per-module hook `Has` instead of the regex.
 - `internal/app/accounts.go:87`, `account_folders.go:84`, `fetch.go:259`.
-- `internal/core/presence/presence.go:40-41,154-199`: generic `KindApp{Agent}`; OpenCode rules
+- `internal/core/presence/presence.go:40-41,154-199`: generic `KindApp{Agent}`. The OpenCode rules
   (`OpenCode`, `OpenCode Helper*`; `opencode-cli serve --service` and `opencode serve --service` are the
-  service, not sessions).
+  service, not sessions) move to PR 7, with the rest of desktop awareness.
 - `internal/core/profiles/store.go:331`; `internal/core/move/fetch.go:286`; `internal/config/config.go:60-80`
   (generic `Kinds` map).
 - `internal/ui/cli/{movement_hooks.go,accounts.go:14,71,serve.go:284,root.go,pull.go:26,cd.go:27-44,skill.go}`.
@@ -482,15 +482,27 @@ the anchor is computed from the data root (§3.5). Output for OpenCode:
 - `internal/ui/gui/{accounts_view.go:62-389,622,inspect.go:363,move_targets.go:115-122,protection.go:89,terminal_binding.go:18-60}`.
 - GUI JS: replace per-agent maps with `agentInfo(id)` and capability flags in `accounts.js`,
   `actions.js`, `guard.js`, `inspector.js`, `listview.js`, `quick.js`, `sessions.js`, `settings.js`,
-  `machines.js`, `term.js`; `style.css` `--opencode` token, chips, `.tgrid` column count from a variable.
-- `internal/core/scan/scan.go`: optional `sk-or-`, `gsk_`, `xai-` secret rules.
+  `machines.js`, `term.js`; `.tgrid` column count from a variable. The `style.css` `--opencode` token
+  and its chips move to PR 8, with the GUI copy; until then an unknown agent gets the default chip.
+- Roots are resolved in one place: `Root.Vars` (the variables that can set a root) and `Root.Locate`
+  (its folder on a machine), used by `DefaultInstall`, `host.SpecEnv`, the notice-hook resolver, the
+  owner ledger and the catalog key. PR 1a adds EnvSub there only.
+- Module facts the interfaces need are declared, not inferred: `ProfileSpec.InheritsSignIn` (not
+  "Inherit is non-empty"), `Spec.Desktop`, `Spec.Plans`.
+- A stand-in third agent (`internal/testkit/thirdagent`, several roots, accounts, a desktop app)
+  is registered beside Claude Code and Codex in app, CLI, TUI and GUI tests; agenttest checks that
+  Detect names the main root. The release plugin's skill is rendered from the registry.
+- Moved out of PR 0: the optional `sk-or-`, `gsk_`, `xai-` secret rules in
+  `internal/core/scan/scan.go` go to PR 2.
 
 **B. SDK contracts (PR 1a)**
 - `sdk/agent/agent.go`: `Root.EnvSub`, `Spec.SQLTables`, `MainRoot()`.
 - `sdk/agent/capability.go`: EnvSub in `DefaultInstall`; Rules unchanged (Allow/Ask).
 - `sdk/agent/session.go`: `BundleFile.Virtual`, `Materializer`, `VirtualSessions`, `SessionStore`,
   `SessionStamp`, `SessionIDMinter`, `InstallsViaVendor`.
-- `sdk/agent/hooks.go`: `HookDir`.
+- `sdk/agent/hooks.go`: `HookDir`. The checks that a hook file sits directly in the main root
+  (`internal/app/movement_hooks.go`, `remote_default.go`) use it, so a plugin under
+  `{config}/plugins/hopsesh` passes (PR 6 depends on this).
 - `sdk/agent/sql.go`, `sdk/agent/confine.go` (`confinedSQL`; the DB stays a Secret for FS access),
   `sdk/agent/listing.go` (`ListingSummaryKey`).
 - `sdk/agent/runtime_profile.go`: multi-var `RootEnv`, JSON `Inherit`.
@@ -654,7 +666,7 @@ neutral names (`opencode/…`).
 
 | PR | Content | Size (prod + tests) |
 |---|---|---|
-| 0 | N-agent refactor: registry and capability lookups in app, CLI, TUI, GUI Go/JS/CSS; generic app kind; config Kinds; **main-root accessor replacing `Root("home")`** | ~1.5k + 0.6k |
+| 0 | N-agent refactor: registry and capability lookups in app, CLI, TUI, GUI Go/JS/CSS; generic app kind; config Kinds; **main-root accessor replacing `Root("home")`**; one root resolver; third-agent tests | ~1.5k + 0.6k |
 | 1a | SDK contracts: EnvSub roots, SQL interface + confinement, Virtual/Materializer, SessionStore/Stamp/IDMinter/InstallsViaVendor, HookDir, ListingSummaryKey, multi-var profiles; agenttest + FakeHost SQL | ~1.4k + 0.9k |
 | 1b | Core: Host SQL local (authorizer) + remote tiers; journal `OpVendorSession` and stamp guards; apply order, fatal AfterInstall, recovery; id minter in move/write/capacity; peer materialisation; stamps in caches and receipts; cd journaling | ~1.5k + 1.0k |
 | 2 | `agents/opencode` read side: spec, paths, service probe, schema gate, list, summary, preview, rename, live/stop, capacity, account, reader (SQL + JSONL + remote API); fixtures; registration | ~2.0k + 1.3k |
@@ -668,6 +680,21 @@ neutral names (`opencode/…`).
 | 10 | Docs, READMEs (3 languages), plugin/marketplace, packaging, CHANGELOG | ~0.9k copy |
 | 11 *(optional, D4)* | PortableAppend into an existing session (idle- and stamp-gated delete + re-import with backup) | ~0.5k + 0.4k |
 | 12 *(optional, D1)* | OpenCode 1.x read support (list / preview / continue-from) | ~0.7k + 0.5k |
+
+**Left by PR 0 for later PRs** (from its review):
+- PR 2: the `sk-or-`, `gsk_`, `xai-` secret rules.
+- PR 6: the notice-hook output (`internal/ui/cli/movement_hooks.go`) is Claude/Codex JSON. And
+  `HookTrustReporter` means two things today, "reports trust" and "runs a new hook only after the
+  user approves it" (`HookReview`, the Settings and guard texts, `trustAtLogin`, the SSH reason in
+  `machine_status.go`); OpenCode will report hook state with no approval step, so PR 6 splits them.
+- PR 7: OpenCode process rules in `presence.go`; the desktop "installed" check accepts only `.app` or
+  `.exe` (`accounts_view.go`, `movement_hooks.go`), so a Linux desktop app needs its own rule.
+- PR 8: `style.css` agent tokens and chips (`--claude`, `--codex`, `.chip.agent-*`, `.msg-l.agent-*`),
+  the Settings bell and trust texts, and the Playwright specs and webtest fixtures that name two agents.
+- PR 3: `internal/devtools/testbundle` stand-in names and the testkit stand-ins.
+- PR 9: the two-agent loops in `internal/e2e`, hsmatrix, `driftmanifest` (`agentWatch`),
+  `skillcheck`, `scripts/matrix-*`, `ci/drift` and the nightly and drift workflows.
+- PR 10: the skill template's examples and `/cd` lines, the plugin files, READMEs, packaging, demo.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
