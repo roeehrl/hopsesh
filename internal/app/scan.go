@@ -515,7 +515,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					sum.Key.Profile = in.ProfileID()
 					batchMu.Lock()
 					defer batchMu.Unlock()
-					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: withRecords(m.records, in.Root("home"), a.withLedger(hm.Local, in.Root("home"), sum)), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
+					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: withRecords(m.records, in.Main(), a.withLedger(hm.Local, in.Main(), sum)), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
 					if firstBatch || len(batch) >= 25 {
 						partial := *m
 						partial.Agents = append([]AgentState(nil), m.Agents...)
@@ -544,7 +544,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					}
 					listed := listedEntries(ctx, hm, fsys, mod, ch, state, l, o.GitFor)
 					for i := range listed {
-						listed[i].Session = withRecords(m.records, in.Root("home"), a.withLedger(hm.Local, in.Root("home"), listed[i].Session))
+						listed[i].Session = withRecords(m.records, in.Main(), a.withLedger(hm.Local, in.Main(), listed[i].Session))
 					}
 					entries = append(entries, listed...)
 					if len(l.Errors) > 0 {

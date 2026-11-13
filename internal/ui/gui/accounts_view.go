@@ -239,7 +239,7 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 			}
 		}
 		signIn := func(id agent.ID, in agent.Install) SignInDTO {
-			s := SignInDTO{Folder: "default", Path: short(m, in.Root("home")), Status: "unknown", Profile: in.ProfileID()}
+			s := SignInDTO{Folder: "default", Path: short(m, in.Main()), Status: "unknown", Profile: in.ProfileID()}
 			if in.Profile == nil {
 				return s
 			}

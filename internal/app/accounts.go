@@ -44,7 +44,7 @@ func matchByEmail(ps []agent.RuntimeProfile) []agent.RuntimeProfile {
 	}
 	return ps
 }
-func (a *App) accountStore() profiles.Store              { return profiles.Store{Dir: a.StateDir} }
+func (a *App) accountStore() profiles.Store { return profiles.Store{Dir: a.StateDir} }
 func (a *App) EditAccount(id, name string, tags []string, generation int) error {
 	return a.accountStore().Edit(id, name, tags, generation)
 }
@@ -153,7 +153,7 @@ func (a *App) RegisterAccount(ctx context.Context, machine string, id agent.ID, 
 		if e != nil {
 			return p, e
 		}
-		if !rootsEqual(m, fsys, base.Root("home"), p.Root) {
+		if !rootsEqual(m, fsys, base.Main(), p.Root) {
 			return p, errors.New("register this custom root with hopsesh accounts add --root on its machine first, then scan accounts here")
 		}
 		p.ID = profiles.RootID(endpoint, id, p.Root)
@@ -216,7 +216,7 @@ func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Mo
 			return nil, err
 		}
 	}
-	root := base.Root("home")
+	root := base.Main()
 	if base.Present && root != "" {
 		root, err = fsys.RealPath(root)
 		if err != nil {
@@ -282,7 +282,7 @@ func (a *App) profileInstalls(ctx context.Context, m *host.Machine, mod agent.Mo
 		scoped := base
 		scoped.Accounts = mod.Spec().Accounts
 		scoped.Profile = &p
-		scoped.Roots = map[string]string{"home": p.Root}
+		scoped = mod.Spec().PinMain(scoped, p.Root)
 		// Detect recomputes derived roots against the pinned environment.
 		h, e := m.For(ctx, mod.Spec(), scoped, nil)
 		if e != nil {
@@ -381,7 +381,7 @@ func (a *App) AccountLogin(ctx context.Context, id string, elsewhere ...bool) (a
 		}
 		in.Accounts = mod.Spec().Accounts
 		in.Profile = &p
-		in.Roots = map[string]string{"home": p.Root}
+		in = mod.Spec().PinMain(in, p.Root)
 		if in.Binary == "" {
 			return agent.Command{}, fmt.Errorf("install %s first", mod.Spec().Name)
 		}
@@ -582,7 +582,7 @@ func (a *App) RefreshAccount(ctx context.Context, id string) (agent.RuntimeProfi
 				return p, nil
 			}
 		}
-		scoped := agent.Install{Agent: p.Agent, Accounts: mod.Spec().Accounts, Profile: &p, Roots: map[string]string{"home": p.Root}}
+		scoped := mod.Spec().PinMain(agent.Install{Agent: p.Agent, Accounts: mod.Spec().Accounts, Profile: &p}, p.Root)
 		fsys, err := m.FS(ctx)
 		if err != nil {
 			return failed(err)

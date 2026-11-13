@@ -53,7 +53,7 @@ func portableWrite(ctx context.Context, h agent.Host, m agent.Module, in agent.I
 	if req.SessionID == "" || req.SessionID == "." || req.SessionID == ".." || strings.ContainsAny(req.SessionID, "/\\") {
 		return req, convert.Result{}, rolled, fmt.Errorf("invalid session ID for portable archive")
 	}
-	path := h.Path().Join(in.Root(m.Spec().Roots[0].Name), "hopsesh", "archives", req.SessionID+".jsonl")
+	path := h.Path().Join(in.Main(), "hopsesh", "archives", req.SessionID+".jsonl")
 	r.Briefing.HistoryFile = path
 	r.Briefing.TargetOS = h.Facts().OS
 	sourceID := r.Briefing.SourceID
@@ -91,7 +91,7 @@ func portableWrite(ctx context.Context, h agent.Host, m agent.Module, in agent.I
 func preservedArchive(h agent.Host, m agent.Module, in agent.Install, id string, nodes []ir.Node, r convert.Request) ([]byte, error) {
 	w := convert.NewArchiveWriter(r)
 	if id != "" && !strings.ContainsAny(id, "/\\") && id != ".." {
-		path := h.Path().Join(in.Root(m.Spec().Roots[0].Name), "hopsesh", "archives", id+".jsonl")
+		path := h.Path().Join(in.Main(), "hopsesh", "archives", id+".jsonl")
 		f, err := h.FS().Open(path)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):

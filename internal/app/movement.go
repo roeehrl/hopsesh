@@ -670,10 +670,10 @@ func (a *App) noticeScope(ctx context.Context, id agent.ID, profile string) (age
 		if err != nil {
 			return empty, err
 		}
-		if len(mod.Spec().Roots) == 0 {
+		r := mod.Spec().MainRoot()
+		if r.Name == "" {
 			return empty, fmt.Errorf("agent has no local root")
 		}
-		r := mod.Spec().Roots[0]
 		for _, env := range r.Env {
 			if root = os.Getenv(env); root != "" {
 				break

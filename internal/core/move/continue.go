@@ -171,7 +171,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	if opt.Via == ViaImport {
 		fidelity = convert.Note // the importer brings the history; hopsesh adds only its briefing
 	}
-	archivePath := targetHost.Path().Join(tgt.Install.Root(spec.Roots[0].Name), "hopsesh", "archives", string(p.Placement.Key.Session)+".jsonl")
+	archivePath := targetHost.Path().Join(tgt.Install.Main(), "hopsesh", "archives", string(p.Placement.Key.Session)+".jsonl")
 	bf := briefingFor(p, srcHost, src, s, spec, tgt.Machine.Name, cwd, opt)
 	cp.archive, err = preservedArchive(srcHost, src.Module, src.Install, string(s.Key.Session), fullNodes, convert.Request{Mappings: p.Placement.Mappings, Redact: redact, Briefing: bf, Limits: opt.Limits})
 	if err != nil {
@@ -524,7 +524,7 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 	if importErr != nil {
 		return ir.WriteResult{}, importErr
 	}
-	newArchive := h.Path().Join(tgt.Install.Root(tgt.Module.Spec().Roots[0].Name), "hopsesh", "archives", string(id)+".jsonl")
+	newArchive := h.Path().Join(tgt.Install.Main(), "hopsesh", "archives", string(id)+".jsonl")
 	if err = agent.CheckSpace(h.FS(), newArchive, int64(len(cp.archive))); err != nil {
 		return ir.WriteResult{}, err
 	}

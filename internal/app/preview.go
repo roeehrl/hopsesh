@@ -192,7 +192,7 @@ func (a *App) PreviewSelected(ctx context.Context, e Entry, n int) (agent.Previe
 			}
 			in.Profile = &profile
 			in.Accounts = mod.Spec().Accounts
-			in.Roots = map[string]string{"home": profile.Root}
+			in = mod.Spec().PinMain(in, profile.Root)
 			h, err = m.For(ctx, mod.Spec(), in, nil)
 			if err != nil {
 				return agent.Preview{}, err
@@ -207,10 +207,8 @@ func (a *App) PreviewSelected(ctx context.Context, e Entry, n int) (agent.Previe
 			return agent.Preview{}, fmt.Errorf("account root changed or was removed; refresh this machine")
 		}
 	}
-	// An old catalog must not redirect a preview outside the selected state root.
-	root := in.Root("home")
-	rel, within := m.Path().Rel(root, e.Session.Path)
-	if !within || rel == ".." || strings.HasPrefix(rel, "../") || strings.HasPrefix(rel, `..\`) || filepath.IsAbs(rel) {
+	// An old catalog must not redirect a preview outside the selected state roots.
+	if !underRoot(m.Path(), mod.Spec(), in, e.Session.Path) {
 		return agent.Preview{}, fmt.Errorf("session path is outside its account root")
 	}
 	h, err = m.For(ctx, mod.Spec(), in, nil)
@@ -218,4 +216,19 @@ func (a *App) PreviewSelected(ctx context.Context, e Entry, n int) (agent.Previe
 		return agent.Preview{}, err
 	}
 	return p.Preview(ctx, h, in, e.Session, n)
+}
+
+// underRoot reports whether path is inside one of the install's roots.
+func underRoot(pa agent.Path, spec agent.Spec, in agent.Install, path string) bool {
+	for _, r := range spec.Roots {
+		root := in.Root(r.Name)
+		if root == "" {
+			continue
+		}
+		rel, within := pa.Rel(root, path)
+		if within && rel != ".." && !strings.HasPrefix(rel, "../") && !strings.HasPrefix(rel, `..\`) && !filepath.IsAbs(rel) {
+			return true
+		}
+	}
+	return false
 }

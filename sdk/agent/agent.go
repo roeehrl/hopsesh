@@ -156,30 +156,48 @@ type Root struct {
 	Default map[string]string
 }
 
+// MainRoot is the main data folder: the first declared root (zero for a cloud-only module).
+func (s Spec) MainRoot() Root {
+	if len(s.Roots) == 0 {
+		return Root{}
+	}
+	return s.Roots[0]
+}
+
+// PinMain returns in with its main root at path and no other root: an account folder,
+// before Detect resolves the other roots against the pinned environment.
+func (s Spec) PinMain(in Install, path string) Install {
+	in.MainRoot = s.MainRoot().Name
+	in.Roots = map[string]string{in.MainRoot: path}
+	return in
+}
+
 // Install is an agent as found on one machine.
 type Install struct {
 	// NativeDefaultRoot is launch metadata verified by the module from the detected
 	// machine's home and original environment. Empty means native config lookup is
 	// unverified or explicitly overridden. It grants no filesystem access.
-	NativeDefaultRoot string            `json:"nativeDefaultRoot,omitempty"`
-	Accounts          *ProfileSpec      `json:"-"`
-	OS                string            `json:"os,omitempty"`
-	Desktop           string            `json:"desktop,omitempty"`
-	DesktopVersion    string            `json:"desktopVersion,omitempty"`
-	DesktopWhy        string            `json:"desktopWhy,omitempty"`
+	NativeDefaultRoot string       `json:"nativeDefaultRoot,omitempty"`
+	Accounts          *ProfileSpec `json:"-"`
+	OS                string       `json:"os,omitempty"`
+	Desktop           string       `json:"desktop,omitempty"`
+	DesktopVersion    string       `json:"desktopVersion,omitempty"`
+	DesktopWhy        string       `json:"desktopWhy,omitempty"`
 	// DesktopAccount is who the desktop app is signed in as, when it keeps its own
 	// sign-in (Claude desktop): its account and user fingerprints, never more.
 	DesktopAccount *OwnerRun `json:"desktopAccount,omitempty"`
 	// DesktopEngine is the version of the agent the desktop app runs, its own copy
 	// (Claude desktop's Claude Code, the Codex app's codex).
-	DesktopEngine string `json:"desktopEngine,omitempty"`
-	Profile           *RuntimeProfile   `json:"profile,omitempty"`
-	Agent             ID                `json:"agent"`
-	Version           string            `json:"version,omitempty"` // "" when the binary was not found
-	Binary            string            `json:"binary,omitempty"`  // absolute path
-	Runtime           string            `json:"runtime,omitempty"` // RuntimeApp: Binary is the desktop app's bundled runtime, no CLI
-	Roots             map[string]string `json:"roots"`             // name → absolute path on that machine
-	Present           bool              `json:"present"`           // the main root exists
+	DesktopEngine string            `json:"desktopEngine,omitempty"`
+	Profile       *RuntimeProfile   `json:"profile,omitempty"`
+	Agent         ID                `json:"agent"`
+	Version       string            `json:"version,omitempty"` // "" when the binary was not found
+	Binary        string            `json:"binary,omitempty"`  // absolute path
+	Runtime       string            `json:"runtime,omitempty"` // RuntimeApp: Binary is the desktop app's bundled runtime, no CLI
+	Roots         map[string]string `json:"roots"`             // name → absolute path on that machine
+	// MainRoot names the main root in Roots (Spec.MainRoot); see Main.
+	MainRoot string `json:"mainRoot,omitempty"`
+	Present  bool   `json:"present"` // the main root exists
 }
 
 // RuntimeApp marks Install.Binary as the desktop app's bundled runtime.
@@ -187,6 +205,20 @@ const RuntimeApp = "app"
 
 // Root returns the path of a named root.
 func (in Install) Root(name string) string { return in.Roots[name] }
+
+// Main returns the path of the main root. An install that does not name it (one decoded
+// from an older peer) has a single root, which is the main one.
+func (in Install) Main() string {
+	if in.MainRoot != "" {
+		return in.Roots[in.MainRoot]
+	}
+	if len(in.Roots) == 1 {
+		for _, p := range in.Roots {
+			return p
+		}
+	}
+	return ""
+}
 
 // Module is what every agent module implements.
 type Module interface {

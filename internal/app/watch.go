@@ -156,8 +156,13 @@ func (a *App) sessionWatchRoots(ctx context.Context) []string {
 	endpoint, _ := hm.ReadIdentity(ctx)
 	profiles, _ := a.Accounts()
 	for _, p := range profiles {
-		if p.Machine == LocalName() || endpoint != "" && p.Endpoint == endpoint {
-			add(p.Agent, agent.Install{Agent: p.Agent, Profile: &p, Roots: map[string]string{"home": p.Root}})
+		if p.Machine != LocalName() && (endpoint == "" || p.Endpoint != endpoint) {
+			continue
+		}
+		if mod, ok := a.Module(p.Agent); ok {
+			add(p.Agent, mod.Spec().PinMain(agent.Install{Agent: p.Agent, Profile: &p}, p.Root))
+		} else {
+			roots = append(roots, p.Root)
 		}
 	}
 	return roots

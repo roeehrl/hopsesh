@@ -113,7 +113,7 @@ func (a *App) carryOwners(in move.Input, res *move.Result) {
 	if t.Machine == nil || !t.Machine.Local || t.Module == nil || res.Key.Session == "" || len(in.Session.Owners) == 0 {
 		return
 	}
-	a.addRuns(t.Module.Spec().ID, t.Install.Root("home"), string(res.Key.Session), in.Session.Owners...)
+	a.addRuns(t.Module.Spec().ID, t.Install.Main(), string(res.Key.Session), in.Session.Owners...)
 }
 
 // LedgerRecord is one session's record of the accounts it ran under, as hopsesh on its

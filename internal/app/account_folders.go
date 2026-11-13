@@ -110,7 +110,7 @@ func (a *App) addLocalAccount(ctx context.Context, id agent.ID, name string, tag
 	}
 	if h, err := m.For(ctx, mod.Spec(), agent.Install{}, nil); err == nil {
 		if base, err := mod.Detect(ctx, h); err == nil {
-			if err := inherit(base.Root("home"), root, spec.Inherit); err != nil {
+			if err := inherit(base.Main(), root, spec.Inherit); err != nil {
 				return agent.RuntimeProfile{}, err
 			}
 		}
