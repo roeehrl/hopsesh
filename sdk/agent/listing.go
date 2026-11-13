@@ -75,6 +75,38 @@ func ListingSummary(ctx context.Context, h Host, file string, info fs.FileInfo, 
 	return sum, ctx.Err()
 }
 
+// ListingSummaryKey is ListingSummary for a session that is not one file (a row of a
+// database): key names it in the cache ("<db>#<session id>") and signature is what the
+// module read that changes with it (OpenCode: id|time_updated|settled count|part count),
+// read before parse. Modules version their parsers in salt.
+func ListingSummaryKey(ctx context.Context, _ Host, key, signature, salt string, parse func() (*Summary, error)) (*Summary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	hooks, _ := ctx.Value(listingContextKey{}).(ListingHooks)
+	sig := salt + ":" + signature
+	var sum *Summary
+	var hit bool
+	if signature != "" && hooks.Load != nil {
+		sum, hit = hooks.Load(key, sig)
+	}
+	if !hit {
+		var err error
+		if sum, err = parse(); err != nil {
+			return nil, err
+		}
+		// A change after the signature was read leaves the entry under a signature that
+		// will not be asked for again.
+		if signature != "" && ctx.Err() == nil && hooks.Save != nil {
+			hooks.Save(key, sig, sum)
+		}
+	}
+	if sum != nil && hooks.Found != nil && ctx.Err() == nil {
+		hooks.Found(*sum)
+	}
+	return sum, ctx.Err()
+}
+
 // SessionWatchProvider narrows filesystem notifications to session and metadata
 // paths, excluding vendor diagnostics that a listing probe itself may write.
 // Paths are absolute and use the host's path rules; missing paths are supported.
