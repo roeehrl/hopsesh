@@ -206,20 +206,31 @@ func (a *App) ChangeDir(ctx context.Context, c *DirChange) (string, error) {
 	}
 	j.AddKey(e.Session.Key)
 	jh, err := m.host.For(ctx, mod.Spec(), in, j)
+	// A session kept in a database: its file is an anchor, which does not change when the
+	// session is used, so its stamp guards undo. The change is journaled before it is made,
+	// at the stamp then, and the stamp it leaves is recorded after it.
+	virtual := c.Plan.Method == agent.DirAgent && agent.IsVirtual(mod)
+	if err == nil && virtual {
+		var st agent.SessionStamp
+		if st, _, err = move.StampNow(ctx, mod, h, in, e.Session.Key); err == nil {
+			err = j.ChangedSessionDir(m.Name, e.Session.Key, c.Plan.Main, c.Plan.From, c.Plan.To, st)
+		}
+	}
 	if err == nil {
 		err = c.mod.ChangeDir(ctx, jh, in, e.Session, c.Plan)
 	}
-	if err == nil && c.Plan.Method == agent.DirAgent {
-		if agent.IsVirtual(mod) {
-			// Its file is an anchor, which does not change when the session is used: the
-			// session's stamp after the change guards undo.
-			var st agent.SessionStamp
-			if st, _, err = move.StampNow(ctx, mod, h, in, e.Session.Key); err == nil {
-				err = j.ChangedSessionDir(m.Name, e.Session.Key, c.Plan.Main, c.Plan.From, c.Plan.To, st)
-			}
-		} else {
-			err = j.ChangedDir(host.LocalFS(), m.Name, e.Session.Key, c.Plan.Main, c.Plan.From, c.Plan.To)
+	switch {
+	case err != nil:
+	case virtual:
+		var st agent.SessionStamp
+		if st, _, err = move.StampNow(ctx, mod, h, in, e.Session.Key); err == nil {
+			err = j.RestampSessionDir(m.Name, e.Session.Key, st)
 		}
+		if err != nil {
+			err = fmt.Errorf("the session's folder changed, but hopsesh could not record its state after the change, so undoing it will need force: %w", err)
+		}
+	case c.Plan.Method == agent.DirAgent:
+		err = j.ChangedDir(host.LocalFS(), m.Name, e.Session.Key, c.Plan.Main, c.Plan.From, c.Plan.To)
 	}
 	if err == nil && c.Plan.Main != e.Session.Path {
 		// The lineage file beside the transcript goes with it: the same session, the same

@@ -26,14 +26,16 @@ func sessionStamp(ctx context.Context, mod agent.Module, h agent.Host, in agent.
 	return st, ok && err == nil && st != ""
 }
 
-// undoSessions reaches, for undo and its checks, the sessions agents keep in databases on
-// this machine, through each module's SessionStore. Another machine's session is undone
-// there; a check that only lists what can be undone (checkOnly) leaves it to the undo.
+// undoSessions reaches, for undo and its checks, the sessions agents keep in databases,
+// through each module's SessionStore: on this machine, and on another one through connect
+// (over SSH, as the move that changed them did). A check that only lists what can be
+// undone (checkOnly) leaves another machine's to the undo.
 type undoSessions struct {
 	a         *App
 	checkOnly bool
+	connect   func(name string) (*host.Machine, error) // nil: no other machine is reached
 	mu        sync.Mutex
-	machine   *host.Machine
+	local     *host.Machine
 	found     map[string]undoSession
 }
 
@@ -43,16 +45,17 @@ type undoSession struct {
 	in  agent.Install
 }
 
-func (a *App) undoSessions(checkOnly bool) journal.Sessions {
-	return &undoSessions{a: a, checkOnly: checkOnly, found: map[string]undoSession{}}
+func (a *App) undoSessions(checkOnly bool, connect func(string) (*host.Machine, error)) journal.Sessions {
+	return &undoSessions{a: a, checkOnly: checkOnly, connect: connect, found: map[string]undoSession{}}
 }
 
 func (u *undoSessions) resolve(ctx context.Context, machine string, key agent.SessionKey) (undoSession, error) {
-	if machine != LocalName() {
-		if u.checkOnly {
-			return undoSession{}, fmt.Errorf("%w: the %s session %s is on %s", journal.ErrOutOfReach, key.Agent, key.Session, machine)
-		}
-		return undoSession{}, fmt.Errorf("the session is on %s; undo it there", machine)
+	remote := machine != LocalName()
+	switch {
+	case remote && u.checkOnly:
+		return undoSession{}, fmt.Errorf("%w: the %s session %s is on %s", journal.ErrOutOfReach, key.Agent, key.Session, machine)
+	case remote && u.connect == nil:
+		return undoSession{}, fmt.Errorf("the session is on %s, which cannot be reached from here", machine)
 	}
 	mod, ok := u.a.Module(key.Agent)
 	if !ok {
@@ -60,14 +63,23 @@ func (u *undoSessions) resolve(ctx context.Context, machine string, key agent.Se
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	id := string(key.Agent) + "\x00" + key.Profile
+	id := machine + "\x00" + string(key.Agent) + "\x00" + key.Profile
 	if s, ok := u.found[id]; ok {
 		return s, nil
 	}
-	if u.machine == nil {
-		u.machine = u.a.localMachine(ctx)
+	var m *host.Machine
+	if remote {
+		var err error
+		if m, err = u.connect(machine); err != nil {
+			return undoSession{}, err
+		}
+	} else {
+		if u.local == nil {
+			u.local = u.a.localMachine(ctx)
+		}
+		m = u.local
 	}
-	base, err := u.machine.For(ctx, mod.Spec(), agent.Install{}, nil)
+	base, err := m.For(ctx, mod.Spec(), agent.Install{}, nil)
 	if err != nil {
 		return undoSession{}, err
 	}
@@ -75,7 +87,7 @@ func (u *undoSessions) resolve(ctx context.Context, machine string, key agent.Se
 	if err != nil {
 		return undoSession{}, err
 	}
-	installs, err := u.a.profileInstalls(ctx, u.machine, mod, detected, false)
+	installs, err := u.a.profileInstalls(ctx, m, mod, detected, false)
 	if err != nil {
 		return undoSession{}, err
 	}
@@ -83,7 +95,7 @@ func (u *undoSessions) resolve(ctx context.Context, machine string, key agent.Se
 		if !in.Present || key.Profile == "" && in.Profile != nil && !in.Profile.Default || key.Profile != "" && in.ProfileID() != key.Profile {
 			continue
 		}
-		h, err := u.machine.For(ctx, mod.Spec(), in, nil)
+		h, err := m.For(ctx, mod.Spec(), in, nil)
 		if err != nil {
 			return undoSession{}, err
 		}

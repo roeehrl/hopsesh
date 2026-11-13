@@ -96,6 +96,11 @@ func TestChangeDirOfVirtualSession(t *testing.T) {
 	if len(j.Entries) != 1 || j.Entries[0].Op != journal.OpChangeDir || j.Entries[0].Stamp == "" {
 		t.Fatalf("journaled: %+v", j.Entries)
 	}
+	// Journaled before the change, then at the stamp the change left.
+	hh, _ := inv.Machines[0].host.For(ctx, m.Spec(), inv.Machines[0].Agents[0].Install, nil)
+	if now, err := m.SessionStamp(ctx, hh, inv.Machines[0].Agents[0].Install, "ses_a"); err != nil || j.Entries[0].Stamp != now {
+		t.Fatalf("journaled at %s, now %s (%v)", j.Entries[0].Stamp, now, err)
+	}
 	data := inv.Machines[0].Agents[0].Install.Main()
 	if err := dbagent.Continue(data, "ses_a", dbagent.Message{ID: "msg_3", Role: "user", Text: "more"}); err != nil {
 		t.Fatal(err)
@@ -231,5 +236,58 @@ func TestPeerPackageOfVirtualSession(t *testing.T) {
 	l, err := m.List(ctx, h, tgt.Install)
 	if err != nil || len(l.Sessions) != 1 || l.Sessions[0].CWD != to || l.Sessions[0].Size != 2 {
 		t.Fatalf("received: %+v %v", l, err)
+	}
+}
+
+// Undo reaches a session kept in a database on another machine through connect, as the
+// move that made it did; the activity list leaves it to the undo.
+func TestUndoReachesAnotherMachinesVirtualSession(t *testing.T) {
+	a, m, _, _, _ := dbFixture(t)
+	ctx := context.Background()
+	boxHome := t.TempDir()
+	boxData := filepath.Join(boxHome, ".local", "share", "dbagent")
+	if err := dbagent.Seed(boxData, "ses_b", boxHome, "There",
+		dbagent.Message{ID: "msg_1", Role: "user", Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	box := &host.Machine{Local: true, Name: "box", Facts: host.Facts{Home: boxHome, OS: runtime.GOOS, Env: map[string]string{}, Binaries: map[string]agent.BinaryFact{}}}
+	t.Cleanup(func() { box.Close() })
+	key := agent.SessionKey{Agent: dbagent.ID, Session: "ses_b"}
+	j, err := journal.New(a.StateDir, journal.KindMove, "move to box")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.RecordCreatedSession("box", key); err != nil {
+		t.Fatal(err)
+	}
+	connected := 0
+	connect := func(name string) (*host.Machine, error) {
+		connected++
+		if name != "box" {
+			return nil, errors.New("no such machine")
+		}
+		return box, nil
+	}
+	boxIn := agent.Install{Agent: dbagent.ID, Present: true, Version: "1.0", Roots: map[string]string{"data": boxData}, MainRoot: "data"}
+	h, _ := box.For(ctx, m.Spec(), boxIn, nil)
+	st, err := m.SessionStamp(ctx, h, boxIn, "ses_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.StampCreatedSession("box", key, st); err != nil {
+		t.Fatal(err)
+	}
+	local := func(string) (host.FS, error) { return host.LocalFS(), nil }
+	if err := j.Changed(ctx, journal.Reach{FS: local, Sessions: a.undoSessions(true, connect)}); err != nil || connected != 0 {
+		t.Fatalf("the activity check reached box: %v (%d connections)", err, connected)
+	}
+	if _, err := a.undoSessions(false, nil).Stamp(ctx, "box", key); err == nil {
+		t.Fatal("reached box with no way to connect")
+	}
+	if err := j.Undo(ctx, journal.Reach{FS: local, Sessions: a.undoSessions(false, connect)}, false); err != nil {
+		t.Fatal(err)
+	}
+	if dbagent.Exists(boxData, "ses_b") || connected != 1 {
+		t.Fatalf("undo on box: %d connections", connected)
 	}
 }
