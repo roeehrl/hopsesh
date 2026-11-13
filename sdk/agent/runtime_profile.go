@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -63,11 +64,13 @@ type ProfileSpec struct {
 	// and a code instead of opening a browser where it runs (empty: Login).
 	LoginElsewhere []string          `json:"loginElsewhere,omitempty"`
 	InitialFiles   map[string]string `json:"initialFiles,omitempty"`
-	// Inherit are settings a new folder copies from the agent's default folder, by
-	// root-relative file: top-level keys of a TOML file (Codex's
+	// Inherit are settings a new folder copies from the agent's default folders, by file:
+	// relative to the main root, or to another root when it starts with one
+	// ("{config}/opencode.json"). Top-level keys of a TOML file (Codex's
 	// cli_auth_credentials_store, so a new folder keeps its sign-in where the default one
-	// does), or dot paths into a .json file (InheritJSON). Only the listed settings are
-	// copied, never one that holds a credential.
+	// does), or dot paths into a .json or .jsonc file (InheritJSON). Only the listed
+	// settings are copied, never one that holds a credential, into the same root of the
+	// new folder (ProfileLocate), which must be inside it.
 	Inherit map[string][]string `json:"inherit,omitempty"`
 	// InheritsSignIn: a new folder keeps its sign-in where the default folder does, so
 	// the user interfaces say so (Codex). Inherit may carry other settings too.
@@ -222,15 +225,18 @@ func dropEnv(env, keys []string, goos string) []string {
 	return out
 }
 
-// InheritJSON picks settings out of a JSON settings file for a new account folder: each
-// field a dot path ("model", "tui.theme"), kept at the same place. Keys that name a
-// credential (apiKey, token, password, headers, env, …) are never copied: a field that is
-// one is an error, and ones inside a picked object are left out. It returns nil when none
-// of the fields is set. src is the default folder's file, which may hold credentials;
-// only the picked values leave the call.
+// InheritJSON picks settings out of a JSON (or JSONC, with comments) settings file for a
+// new account folder: each field a dot path to one plain value ("model", "tui.theme"),
+// kept at the same place, as plain JSON. Keys that name a credential (apiKey, token,
+// password, headers, env, environment, …) are never copied: a field that is one is an
+// error. A field whose value is an object or an array, or a string that looks like it
+// carries a credential (a URL with a password or key, a known token form), is left out,
+// since a credential can hide inside it under any name. It returns nil when none of the
+// fields is copied. src is the default folder's file, which may hold credentials; only
+// the picked values leave the call.
 func InheritJSON(src []byte, fields []string) ([]byte, error) {
 	var doc map[string]any
-	d := json.NewDecoder(bytes.NewReader(src))
+	d := json.NewDecoder(bytes.NewReader(stripJSONC(src)))
 	d.UseNumber()
 	if err := d.Decode(&doc); err != nil || doc == nil {
 		return nil, errors.New("settings must be a JSON object")
@@ -244,10 +250,10 @@ func InheritJSON(src []byte, fields []string) ([]byte, error) {
 			}
 		}
 		v, ok := jsonAt(doc, parts)
-		if !ok {
+		if !ok || !plainSetting(v) {
 			continue
 		}
-		jsonPut(out, parts, withoutCredentials(v))
+		jsonPut(out, parts, v)
 	}
 	if len(out) == 0 {
 		return nil, nil
@@ -256,11 +262,98 @@ func InheritJSON(src []byte, fields []string) ([]byte, error) {
 	return append(b, '\n'), err
 }
 
+// plainSetting reports whether v is a value InheritJSON copies: a number, a boolean, null,
+// or a string that does not look like a credential.
+func plainSetting(v any) bool {
+	switch x := v.(type) {
+	case map[string]any, []any:
+		return false
+	case string:
+		return !credentialValue(x)
+	}
+	return true
+}
+
+// credentialPrefixes start tokens of common services.
+var credentialPrefixes = []string{"sk-", "sk_", "pk_", "rk_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "glpat-",
+	"xoxb-", "xoxp-", "xoxa-", "xapp-", "AKIA", "ASIA", "AIza", "ya29.", "eyJ", "hf_", "gsk_", "xai-", "Bearer ", "Basic "}
+
+// credentialValue reports whether a setting's value looks like it carries a credential:
+// a known token form, or a URL with a password or a credential-named query parameter.
+func credentialValue(s string) bool {
+	t := strings.TrimSpace(s)
+	for _, p := range credentialPrefixes {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	if u, err := url.Parse(t); err == nil && u.Scheme != "" {
+		if _, has := u.User.Password(); has || u.User != nil && u.User.Username() != "" && u.Host != "" {
+			return true
+		}
+		for k := range u.Query() {
+			if credentialKey(k) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// stripJSONC turns JSON with comments (// and /* */) and trailing commas, as agents
+// write their settings (.jsonc), into plain JSON. Strings are kept as they are.
+func stripJSONC(b []byte) []byte {
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		switch {
+		case c == '"':
+			j := i + 1
+			for j < len(b) && b[j] != '"' {
+				if b[j] == '\\' {
+					j++
+				}
+				j++
+			}
+			if j >= len(b) {
+				return append(out, b[i:]...)
+			}
+			out = append(out, b[i:j+1]...)
+			i = j
+		case c == '/' && i+1 < len(b) && b[i+1] == '/':
+			for i < len(b) && b[i] != '\n' {
+				i++
+			}
+			i--
+		case c == '/' && i+1 < len(b) && b[i+1] == '*':
+			end := bytes.Index(b[i+2:], []byte("*/"))
+			if end < 0 {
+				return out
+			}
+			out = append(out, ' ')
+			i += end + 3
+		case c == ']' || c == '}':
+			// Drop a comma before the closing bracket.
+			k := len(out) - 1
+			for k >= 0 && (out[k] == ' ' || out[k] == '\t' || out[k] == '\n' || out[k] == '\r') {
+				k--
+			}
+			if k >= 0 && out[k] == ',' {
+				out = append(out[:k], out[k+1:]...)
+			}
+			out = append(out, c)
+		default:
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // credentialWords are words of setting names that hold credentials or carry them.
 var credentialWords = map[string]bool{"key": true, "keys": true, "apikey": true, "token": true, "tokens": true,
 	"secret": true, "secrets": true, "password": true, "passwd": true, "credential": true, "credentials": true,
 	"auth": true, "authorization": true, "cookie": true, "cookies": true, "bearer": true, "header": true,
-	"headers": true, "env": true, "oauth": true, "pat": true}
+	"headers": true, "env": true, "environment": true, "oauth": true, "pat": true}
 
 // credentialEnds end words that name credentials even when run together ("openAIKey").
 var credentialEnds = []string{"key", "token", "secret", "password"}
@@ -328,24 +421,4 @@ func jsonPut(m map[string]any, path []string, v any) {
 		m = next
 	}
 	m[path[len(path)-1]] = v
-}
-
-func withoutCredentials(v any) any {
-	switch x := v.(type) {
-	case map[string]any:
-		out := map[string]any{}
-		for k, e := range x {
-			if !credentialKey(k) {
-				out[k] = withoutCredentials(e)
-			}
-		}
-		return out
-	case []any:
-		out := make([]any, len(x))
-		for i, e := range x {
-			out[i] = withoutCredentials(e)
-		}
-		return out
-	}
-	return v
 }

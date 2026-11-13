@@ -41,7 +41,7 @@ func (*Module) Spec() agent.Spec {
 		// An account folder holds the data root and, inside it, the config root. Inherit
 		// carries settings that are not the sign-in, so InheritsSignIn stays off.
 		Accounts: &agent.ProfileSpec{RootEnv: []string{"THIRD_DATA_DIR"}, RootVars: []agent.ProfileVar{{Env: "THIRD_CONFIG_DIR", Sub: "config"}},
-			Login: []string{"login"}, Inherit: map[string][]string{"config.toml": {"theme"}, "settings.json": {"theme", "tui.scroll"}}},
+			Login: []string{"login"}, Inherit: map[string][]string{"config.toml": {"theme"}, "{config}/settings.json": {"theme", "tui.scroll"}}},
 		Desktop: &agent.Desktop{Tool: "Third desktop", Product: "Third"},
 		Plans:   "Third",
 	}

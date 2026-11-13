@@ -201,40 +201,50 @@ func TestProfileLocate(t *testing.T) {
 
 func TestInheritJSON(t *testing.T) {
 	src := []byte(`{
-  "model": "omlx/qwen",
+  // OpenCode writes JSONC: comments and trailing commas.
+  "model": "omlx/qwen", /* the LAN model */
   "theme": "dark",
-  "keybinds": {"leader": "ctrl+x"},
+  "keybinds": {"leader": "ctrl+x", "url": "https://example.com/a//b"},
   "provider": {"omlx": {"name": "LAN", "options": {"baseURL": "http://10.0.0.2:8080", "apiKey": "sk-secret", "headers": {"Authorization": "Bearer x"}}, "models": {"qwen": {"limit": {"context": 32768}}}}},
-  "mcp": {"tool": {"command": ["x"], "environment": {"TOKEN": "y"}, "env": {"A": "b"}}},
-  "big": 12345678901234567890
+  "mcp": {"tool": {"command": ["x", "--api-key", "sk-live-abc"], "environment": {"GH": "ghp_secret"}, "url": "https://u:p@h", "remote": "https://h/mcp?key=sk-q", "enabled": true}},
+  "share": "https://user@h",
+  "plain": "http://h:8080/path",
+  "big": 12345678901234567890,
 }`)
-	b, err := InheritJSON(src, []string{"model", "keybinds", "provider", "mcp.tool", "big", "absent.field"})
+	b, err := InheritJSON(src, []string{"model", "keybinds.leader", "keybinds.url", "provider.omlx.options.baseURL", "provider.omlx.models.qwen.limit.context",
+		"mcp.tool.enabled", "mcp.tool.url", "mcp.tool.remote", "mcp.tool.command", "provider", "keybinds", "share", "plain", "big", "absent.field"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := string(b)
-	for _, keep := range []string{`"model": "omlx/qwen"`, `"leader": "ctrl+x"`, `"baseURL": "http://10.0.0.2:8080"`, `"context": 32768`, `"command"`, `12345678901234567890`} {
+	for _, keep := range []string{`"model": "omlx/qwen"`, `"leader": "ctrl+x"`, `"url": "https://example.com/a//b"`, `"baseURL": "http://10.0.0.2:8080"`,
+		`"context": 32768`, `"enabled": true`, `"plain": "http://h:8080/path"`, `12345678901234567890`} {
 		if !strings.Contains(got, keep) {
 			t.Errorf("lost %s: %s", keep, got)
 		}
 	}
-	for _, drop := range []string{"sk-secret", `"TOKEN"`, "Bearer", "apiKey", "headers", `"env"`, "theme", "absent"} {
+	// Objects and arrays are not copied whole, nor values that carry credentials.
+	for _, drop := range []string{"sk-", "ghp_", "Bearer", "apiKey", "headers", "u:p", "user@", `"command"`, `"name"`, "theme", "absent"} {
 		if strings.Contains(got, drop) {
 			t.Errorf("copied %s: %s", drop, got)
 		}
 	}
-	for _, field := range []string{"provider.omlx.options.apiKey", "auth", "mcp.tool.env", "provider..x", "OPENAI_API_KEY"} {
+	for _, field := range []string{"provider.omlx.options.apiKey", "auth", "mcp.tool.env", "mcp.tool.environment", "mcp.tool.environment.GH", "provider..x", "OPENAI_API_KEY"} {
 		if _, err := InheritJSON(src, []string{field}); err == nil {
 			t.Errorf("%s is a credential and must be refused", field)
 		}
 	}
-	if b, err := InheritJSON(src, []string{"absent"}); b != nil || err != nil {
+	if b, err := InheritJSON(src, []string{"absent", "provider"}); b != nil || err != nil {
 		t.Fatalf("nothing to copy: %s, %v", b, err)
 	}
 	if _, err := InheritJSON([]byte(`[1]`), []string{"model"}); err == nil {
 		t.Fatal("not an object")
 	}
-	for name, want := range map[string]bool{"apiKey": true, "APIKey": true, "api_key": true, "accessToken": true, "Authorization": true, "keybinds": false, "author": false, "environment": false, "model": false, "openAIKey": true, "githubToken": true, "hotkey": true} {
+	// Comment marks inside strings are text.
+	if b, _ := InheritJSON([]byte(`{"a": "x // y /* z */", "b": "q\\", "c": 1,}`), []string{"a", "b"}); !strings.Contains(string(b), `"x // y /* z */"`) || !strings.Contains(string(b), `"q\\"`) {
+		t.Fatalf("strings changed: %s", b)
+	}
+	for name, want := range map[string]bool{"apiKey": true, "APIKey": true, "api_key": true, "accessToken": true, "Authorization": true, "keybinds": false, "author": false, "environment": true, "model": false, "openAIKey": true, "githubToken": true, "hotkey": true} {
 		if credentialKey(name) != want {
 			t.Errorf("credentialKey(%q) = %v", name, !want)
 		}
