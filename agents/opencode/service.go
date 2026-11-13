@@ -49,7 +49,7 @@ var runEnv = []string{"OPENCODE_DISABLE_AUTOUPDATE=1"}
 // Detect found). A program that could not run at all (none there, or a machine where
 // nothing runs: a peer's package) is an execError.
 func run(ctx context.Context, h agent.Host, argv []string, o agent.RunOptions) (agent.Result, error) {
-	o.Env = append(append([]string{}, runEnv...), o.Env...)
+	o.Env = append(append(append([]string{}, runEnv...), pinnedEnv(h)...), o.Env...)
 	if o.Timeout == 0 {
 		o.Timeout = commandTimeout
 	}
@@ -62,6 +62,30 @@ func run(ctx context.Context, h agent.Host, argv []string, o agent.RunOptions) (
 		return res, &execError{fmt.Errorf("exit status %d: %s", res.Code, strings.TrimSpace(firstLine(res.Stderr)))}
 	}
 	return res, nil
+}
+
+// pinnedEnv names the data and state folders the module found OpenCode's in (from the
+// machine's variables and home, as Detect resolved its roots), so the program reads and
+// writes the database hopsesh read, and asks for the service registered there, even when
+// hopsesh runs with other variables than the person's shell (started from Finder, or a
+// program over SSH). An account profile's own variables come after these.
+func pinnedEnv(h agent.Host) []string {
+	f := h.Facts()
+	if f.Home == "" {
+		return nil
+	}
+	var env []string
+	for _, v := range []struct {
+		name string
+		def  []string
+	}{{"XDG_DATA_HOME", []string{".local", "share"}}, {"XDG_STATE_HOME", []string{".local", "state"}}} {
+		val := f.Env[v.name]
+		if val == "" {
+			val = h.Path().Join(append([]string{f.Home}, v.def...)...)
+		}
+		env = append(env, v.name+"="+val)
+	}
+	return env
 }
 
 // execError is OpenCode's program not running at all.

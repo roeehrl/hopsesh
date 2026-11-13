@@ -115,21 +115,9 @@ func (m *Module) Rename(ctx context.Context, h agent.Host, in agent.Install, s a
 	if err != nil {
 		return err
 	}
-	svc := probeService(ctx, h)
-	if svc.standalone() {
-		// A private server opens the database: its OpenCode must read what is there.
-		newest := ""
-		if r, ok, err := openSQL(ctx, h, in); ok {
-			if err == nil {
-				newest, err = r.maxVersion(ctx)
-			}
-			if err != nil && !readUnsupported(err) {
-				return err
-			}
-		}
-		if err := checkStandalone(svc, in.Version, newest); err != nil {
-			return err
-		}
+	svc, err := writeService(ctx, h, in)
+	if err != nil {
+		return err
 	}
 	body, _ := json.Marshal(map[string]string{"title": t})
 	res, err := api(ctx, h, svc, "PATCH", "/api/session/"+string(s.Key.Session), body)
@@ -139,5 +127,6 @@ func (m *Module) Rename(ctx context.Context, h agent.Host, in agent.Install, s a
 	if res.Code != 0 {
 		return fmt.Errorf("OpenCode did not rename the session: %w", apiError("PATCH", "/api/session/"+string(s.Key.Session), res))
 	}
+	recordTitle(ctx, h, in, s.Key.Session, t)
 	return nil
 }

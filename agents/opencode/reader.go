@@ -16,8 +16,9 @@ import (
 const nativeFormat = "opencode.v2"
 
 // Read lifts a session into IR, from the database, else from OpenCode's export, or where
-// nothing runs (a peer's package, staged files) from the session's JSON lines at s.Path. Its cursor counts settled messages, the same in every mode, and its head is the
-// last node read.
+// nothing runs (a peer's package) from the session's JSON lines at s.Path; a copy the core
+// staged (s.Path not the session's anchor) from that file only. Its cursor counts settled
+// messages, the same in every mode, and its head is the last node read.
 func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, from ir.Cursor) (ir.Segment, error) {
 	sess, msgs, err := m.readSession(ctx, h, in, s)
 	if err != nil {
@@ -26,8 +27,12 @@ func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s age
 	return segment(sess, msgs, from)
 }
 
-// readSession reads a session's settled messages from wherever they are.
+// readSession reads a session's settled messages from wherever they are: a file other
+// than the session's anchor (a copy the core staged) is read as a file only.
 func (m *Module) readSession(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary) (session, []message, error) {
+	if s.Path != "" && h.Path().Clean(s.Path) != h.Path().Clean(anchorOf(h, in, s.Key.Session)) {
+		return readFile(ctx, h, s.Path)
+	}
 	if r, ok, err := openSQL(ctx, h, in); ok {
 		var (
 			sess session
@@ -44,15 +49,12 @@ func (m *Module) readSession(ctx context.Context, h agent.Host, in agent.Install
 	if err == nil || !notRun(err) || s.Path == "" {
 		return sess, msgs, err
 	}
-	// Nothing runs here (a peer's package, staged files): the file hopsesh placed.
-	b, ferr := agent.ReadNative(ctx, h.FS(), s.Path)
-	if ferr != nil {
-		if errors.Is(ferr, fs.ErrNotExist) {
-			return session{}, nil, err
-		}
-		return session{}, nil, ferr
+	// Nothing runs here (a peer's package): the file hopsesh placed.
+	sess, msgs, ferr := readFile(ctx, h, s.Path)
+	if errors.Is(ferr, fs.ErrNotExist) {
+		return session{}, nil, err
 	}
-	return decodeJSONL(s.Path, b)
+	return sess, msgs, ferr
 }
 
 // segment lifts messages to IR and returns what follows from: its Offset is a count of

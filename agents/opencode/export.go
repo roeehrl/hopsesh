@@ -109,27 +109,39 @@ func fromTransfer(raw []byte) (session, []message, error) {
 
 // exportSession asks OpenCode for a session: `opencode session export <id>`.
 func exportSession(ctx context.Context, h agent.Host, svc service, sid agent.SessionID) (session, []message, error) {
+	raw, err := exportRaw(ctx, h, svc, sid)
+	if err != nil {
+		return session{}, nil, err
+	}
+	return fromTransfer(raw)
+}
+
+// exportRaw is OpenCode's export of a session as it prints it: what its import reads.
+func exportRaw(ctx context.Context, h agent.Host, svc service, sid agent.SessionID) ([]byte, error) {
 	argv := []string{"session", "export", string(sid)}
 	if svc.standalone() {
 		argv = append(argv, "--standalone")
 	}
 	res, err := run(ctx, h, argv, agent.RunOptions{})
 	if err != nil {
-		return session{}, nil, err
+		return nil, err
 	}
 	if res.Code != 0 {
 		err := commandError("session export", res)
 		if strings.Contains(strings.ToLower(string(res.Stderr)), "session not found") {
-			return session{}, nil, fmt.Errorf("%w (%v)", agent.ErrNotFound, err)
+			return nil, fmt.Errorf("%w (%v)", agent.ErrNotFound, err)
 		}
-		return session{}, nil, err
+		return nil, err
 	}
-	return fromTransfer(res.Stdout)
+	return res.Stdout, nil
 }
 
 // Materialize is a bundle file's bytes: the session (or the child session the file is)
-// as JSON lines, from the database, or from OpenCode's export where hopsesh cannot read
-// the database (the remote API tier).
+// as JSON lines, for a move or a package. They are made from OpenCode's own export where
+// its program runs, since that is what its import reads: the session's permission rules
+// (a column the module cannot name) and the media OpenCode keeps apart (the database holds
+// only "media:" references, which an import refuses) are in it. Where the program does not
+// run, they are made from the database, and a session with media is refused.
 func (m *Module) Materialize(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, f agent.BundleFile) ([]byte, error) {
 	sid := s.Key.Session
 	if f.Role != agent.RoleMain {
@@ -146,11 +158,47 @@ func (m *Module) Materialize(ctx context.Context, h agent.Host, in agent.Install
 		}
 		sid = child
 	}
-	sess, msgs, err := m.transcript(ctx, h, in, sid)
+	sess, msgs, err := m.movable(ctx, h, in, sid)
 	if err != nil {
 		return nil, err
 	}
 	return encodeJSONL(sess, msgs)
+}
+
+// movable is a session as a move carries it: OpenCode's export, with the OpenCode version
+// that last wrote it from the database; else the database alone, without media.
+func (m *Module) movable(ctx context.Context, h agent.Host, in agent.Install, sid agent.SessionID) (session, []message, error) {
+	sess, msgs, err := exportSession(ctx, h, probeService(ctx, h), sid)
+	if err == nil {
+		if r, ok, e := openSQL(ctx, h, in); ok && e == nil {
+			if row, e := r.session(ctx, sid); e == nil {
+				sess.Version = row.Version
+			}
+		}
+		return sess, msgs, nil
+	}
+	if !notRun(err) {
+		return session{}, nil, err
+	}
+	if sess, msgs, err = m.transcript(ctx, h, in, sid); err != nil {
+		return session{}, nil, err
+	}
+	for _, msg := range msgs {
+		if bytes.Contains(msg.Raw, []byte(`"media:`)) {
+			return session{}, nil, fmt.Errorf("%w: the OpenCode session %s holds media that only OpenCode's own export carries, and its program does not run here", agent.ErrUnsupported, sid)
+		}
+	}
+	return sess, msgs, nil
+}
+
+// readFile reads a session's JSON lines from a file only: a copy hopsesh staged or
+// placed, never the database (a staged copy's id may be a session the database has).
+func readFile(ctx context.Context, h agent.Host, p string) (session, []message, error) {
+	b, err := agent.ReadNative(ctx, h.FS(), p)
+	if err != nil {
+		return session{}, nil, err
+	}
+	return decodeJSONL(p, b)
 }
 
 func containsID(ids []agent.SessionID, x agent.SessionID) bool {

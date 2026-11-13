@@ -28,6 +28,7 @@ type session struct {
 	Agent         string
 	Model         json.RawMessage
 	Metadata      json.RawMessage
+	Permissions   json.RawMessage // from OpenCode's export only (see infoOf)
 	Revert        json.RawMessage
 	Outcome       string
 	Cost          float64
@@ -114,11 +115,12 @@ type location struct {
 }
 
 // infoOf is a session's info as OpenCode's export makes it from the row (session/info.ts
-// fromRow). The session's permission rules are left out: their column shares its name
-// with a table the module never reads.
+// fromRow). The session's permission rules come only from OpenCode's export: their column
+// shares its name with a table the module never reads.
 func infoOf(s session) info {
 	in := info{ID: s.ID, ParentID: s.ParentID, ProjectID: s.ProjectID, Agent: s.Agent, Cost: s.Cost, Tokens: s.Tokens, Outcome: s.Outcome,
-		Location: location{Directory: s.Directory, WorkspaceID: s.WorkspaceID}, Subpath: s.Path, Metadata: s.Metadata, Revert: s.Revert, Version: s.Version,
+		Location: location{Directory: s.Directory, WorkspaceID: s.WorkspaceID}, Subpath: s.Path, Metadata: s.Metadata, Permissions: s.Permissions,
+		Revert: s.Revert, Version: s.Version,
 		Time: infoTime{Created: s.Created, Updated: s.Updated, Busy: s.Busy, Idle: s.Idle, Viewed: s.Viewed, Archived: s.Archived}}
 	if s.HasTitle {
 		t := s.Title
@@ -142,7 +144,7 @@ func infoOf(s session) info {
 // sessionOf is the session an export's (or a JSON lines file's) info describes.
 func sessionOf(in info) session {
 	s := session{ID: in.ID, ProjectID: in.ProjectID, ParentID: in.ParentID, Directory: in.Location.Directory, WorkspaceID: in.Location.WorkspaceID,
-		Path: in.Subpath, Version: in.Version, Agent: in.Agent, Model: in.Model, Metadata: in.Metadata, Revert: in.Revert, Outcome: in.Outcome,
+		Path: in.Subpath, Version: in.Version, Agent: in.Agent, Model: in.Model, Metadata: in.Metadata, Permissions: in.Permissions, Revert: in.Revert, Outcome: in.Outcome,
 		Cost: in.Cost, Tokens: in.Tokens, Created: in.Time.Created, Updated: in.Time.Updated, Busy: in.Time.Busy, Idle: in.Time.Idle,
 		Viewed: in.Time.Viewed, Archived: in.Time.Archived}
 	if in.Title != nil {
