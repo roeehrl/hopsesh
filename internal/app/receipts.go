@@ -24,7 +24,7 @@ func (a *App) RecoverReceipts(ctx context.Context, id string) error {
 			m.Close()
 		}
 	}()
-	err = j.RecoverReceipts(func(name string) (host.FS, error) {
+	fsFor := func(name string) (host.FS, error) {
 		if name == LocalName() {
 			return host.LocalFS(), nil
 		}
@@ -42,9 +42,6 @@ func (a *App) RecoverReceipts(ctx context.Context, id string) error {
 			machines[name] = m
 		}
 		return m.FS(ctx)
-	})
-	if err != nil {
-		return err
 	}
-	return nil
+	return j.RecoverReceiptsWith(ctx, journal.Reach{FS: fsFor, Sessions: a.undoSessions(false)})
 }

@@ -105,10 +105,10 @@ func (f familyObservation) recall(inv *Inventory, observed map[lineage.ReplicaID
 // receipts each copy's sidecar holds.
 func (a *App) movementFingerprint(ctx context.Context, inv *Inventory, family string) string {
 	type copyInput struct {
-		Identity, Endpoint, Status, Binding, Version, Path, Title, Live, State, Lineage string
-		Size, FileSize                                                                  int64
-		Activity, Modified                                                              time.Time
-		Installed                                                                       bool
+		Identity, Endpoint, Status, Binding, Version, Path, Title, Live, State, Lineage, Stamp string
+		Size, FileSize                                                                         int64
+		Activity, Modified                                                                     time.Time
+		Installed                                                                              bool
 	}
 	var copies []copyInput
 	for _, e := range inv.Entries {
@@ -128,6 +128,10 @@ func (a *App) movementFingerprint(ctx context.Context, inv *Inventory, family st
 				if h, err := m.host.For(ctx, mod.Spec(), in, nil); err == nil {
 					if info, err := h.FS().Stat(e.Session.Path); err == nil {
 						c.FileSize, c.Modified = info.Size(), info.ModTime()
+					}
+					// A session kept in a database changes while its anchor does not.
+					if st, ok := sessionStamp(ctx, mod, h, in, e.Session, e.Cached); ok {
+						c.Stamp = string(st)
 					}
 				}
 			}

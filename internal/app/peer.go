@@ -507,6 +507,23 @@ func (a *App) packageOf(ctx context.Context, here *Machine, e Entry) (peer.Packa
 	var size int64
 	for _, bf := range b.Files {
 		p := h.Path().Join(in.Root(bf.Root), bf.Rel)
+		if bf.Virtual {
+			// The agent keeps it in a database: the package carries the module's file at its
+			// anchor, which the receiver reads (its snapshot has no database).
+			mat, ok := mod.(agent.Materializer)
+			if !ok {
+				return peer.Package{}, fmt.Errorf("%w: %s cannot make the session's file", agent.ErrUnsupported, mod.Spec().Name)
+			}
+			data, err := mat.Materialize(ctx, h, in, e.Session, bf)
+			if err != nil {
+				return peer.Package{}, err
+			}
+			if size += int64(len(data)); size > maxPackage {
+				return peer.Package{}, fmt.Errorf("the session's files are larger than %s", move.Human(maxPackage))
+			}
+			pkg.Files = append(pkg.Files, host.SnapshotFile{Path: p, Data: data, Mode: 0o600, ModTime: time.Now()})
+			continue
+		}
 		fi, err := h.FS().Stat(p)
 		if err != nil {
 			return peer.Package{}, err

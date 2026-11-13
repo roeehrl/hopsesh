@@ -76,7 +76,7 @@ func (a *App) Undo(ctx context.Context, match string, force bool) (*journal.Jour
 		}
 		return m.FS(ctx)
 	}
-	reach := journal.Reach{FS: fsFor, Refs: a.refsReach(connect), Clouds: a.undoClouds(), Git: repos.LocalGit{}, Dirs: a.undoDirs()}
+	reach := journal.Reach{FS: fsFor, Refs: a.refsReach(connect), Clouds: a.undoClouds(), Git: repos.LocalGit{}, Dirs: a.undoDirs(), Sessions: a.undoSessions(false)}
 	if len(j.Parts) > 0 {
 		err := a.undoHop(ctx, j, reach, force)
 		a.Audit.Write(audit.Entry{Action: "undo", Detail: map[string]any{"journal": j.ID, "ok": err == nil, "force": force, "parts": j.Parts}})
@@ -137,7 +137,7 @@ func (a *App) Activities() ([]Activity, error) {
 	for _, j := range js {
 		byID[j.ID] = j
 	}
-	reach := journal.Reach{FS: local, Git: repos.LocalGit{}}
+	reach := journal.Reach{FS: local, Git: repos.LocalGit{}, Sessions: a.undoSessions(true)}
 	for _, j := range js {
 		act := Activity{Journal: j, CanUndo: !j.Undone, Part: j.PartOf != ""}
 		switch {
