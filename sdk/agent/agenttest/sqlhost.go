@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -72,8 +73,9 @@ func (h *FakeHost) dbFile(p string) (string, bool) {
 }
 
 // SQL makes FakeHost an agent.SQLHost. Like the core's local reader it opens the database
-// read only, runs a batch in one transaction and, once limited (SQLTableLimiter), refuses
-// reads of other tables in SQLite's authorizer.
+// read only, runs a batch in one transaction within one SQLBudget, caps a value's length
+// at the statements' MaxBytes and, once limited (SQLTableLimiter), refuses reads of other
+// tables in SQLite's authorizer (agent.SQLTableFuncs stay readable).
 func (h *FakeHost) SQL() agent.SQL { return fakeSQL{h: h} }
 
 type fakeSQL struct {
@@ -100,13 +102,37 @@ func (s fakeSQL) Batch(ctx context.Context, db string, stmts []agent.Statement) 
 		return nil, err
 	}
 	defer done()
+	// The database's own tables and views, read before the authorizer is in place: a
+	// read of any other name with no column is a WITH name (SELECT count(*) FROM cte).
+	rs, err := conn.QueryContext(ctx, "SELECT name FROM sqlite_schema WHERE type IN ('table', 'view')")
+	if err != nil {
+		return nil, err
+	}
+	names, err := agent.ScanRows(rs, agent.SQLLimits{})
+	if err != nil {
+		return nil, err
+	}
+	var stored []string
+	for _, r := range names.Rows {
+		stored = append(stored, r.String("name"))
+	}
 	if err := conn.Raw(func(dc any) error {
 		r, ok := dc.(sqlite.AuthorizerRegisterer)
 		if !ok {
 			return fmt.Errorf("agenttest: the SQLite driver has no authorizer")
 		}
-		return r.RegisterAuthorizer(s.authorize)
+		return r.RegisterAuthorizer(func(action sqlite.AuthorizerActionCode, arg1, arg2, arg3, arg4 string) sqlite.AuthorizerReturnCode {
+			return s.authorize(stored, action, arg1, arg2)
+		})
 	}); err != nil {
+		return nil, err
+	}
+	// No value longer than a statement may keep: SQLite refuses it before it is read whole.
+	var longest int64
+	for _, st := range stmts {
+		longest = max(longest, st.Limits.WithDefaults().MaxBytes)
+	}
+	if _, err := sqlite.Limit(conn, sqlite3.SQLITE_LIMIT_LENGTH, int(min(longest, 1<<30))); err != nil {
 		return nil, err
 	}
 	tx, err := conn.BeginTx(ctx, nil)
@@ -114,19 +140,28 @@ func (s fakeSQL) Batch(ctx context.Context, db string, stmts []agent.Statement) 
 		return nil, err
 	}
 	defer tx.Rollback()
+	budget := agent.NewSQLBudget()
 	var out []agent.Rows
 	for _, st := range stmts {
 		rs, err := tx.QueryContext(ctx, st.Query, st.Args...)
 		if err != nil {
-			return nil, err
+			return nil, tooBig(err)
 		}
-		r, err := agent.ScanRows(rs, st.Limits)
+		r, err := budget.ScanRows(rs, st.Limits)
 		if err != nil {
-			return nil, err
+			return nil, tooBig(err)
 		}
 		out = append(out, r)
 	}
 	return out, tx.Commit()
+}
+
+// tooBig reports SQLite's length limit as ErrTooLarge.
+func tooBig(err error) error {
+	if strings.Contains(err.Error(), "too big") {
+		return fmt.Errorf("%w: %v", agent.ErrTooLarge, err)
+	}
+	return err
 }
 
 func (s fakeSQL) Columns(ctx context.Context, db, table string) ([]string, error) {
@@ -171,8 +206,9 @@ func (s fakeSQL) open(ctx context.Context, db string) (*sql.Conn, func(), error)
 	return conn, func() { conn.Close(); d.Close() }, nil
 }
 
-// authorize allows reading, and only the allowed tables once limited.
-func (s fakeSQL) authorize(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ string) sqlite.AuthorizerReturnCode {
+// authorize allows reading, and once limited only the allowed tables, the table-valued
+// functions and WITH names.
+func (s fakeSQL) authorize(stored []string, action sqlite.AuthorizerActionCode, arg1, arg2 string) sqlite.AuthorizerReturnCode {
 	switch action {
 	case sqlite.AuthSelect, sqlite.AuthTransaction, sqlite.AuthRecursive:
 		return sqlite.AuthorizerOK
@@ -183,7 +219,10 @@ func (s fakeSQL) authorize(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ 
 		}
 		return sqlite.AuthorizerOK
 	case sqlite.AuthRead:
-		if s.limited && (!containsFold(s.allow, arg1) || containsFold(s.deny, arg1)) {
+		if withName(stored, arg1, arg2) {
+			return sqlite.AuthorizerOK // no table of the database
+		}
+		if s.limited && (containsFold(s.deny, arg1) || !containsFold(s.allow, arg1) && !containsFold(agent.SQLTableFuncs(), arg1)) {
 			return sqlite.AuthorizerDeny
 		}
 		s.h.sqlMu.Lock()
@@ -192,6 +231,14 @@ func (s fakeSQL) authorize(action sqlite.AuthorizerActionCode, arg1, arg2, _, _ 
 		return sqlite.AuthorizerOK
 	}
 	return sqlite.AuthorizerDeny
+}
+
+// withName reports whether a read is of a WITH name: no column, of a name that is no
+// table or view of the database and not one of SQLite's own (sqlite_master, pragma_*).
+// A read of a real table with no column (SELECT count(*) FROM t) names a stored table.
+func withName(stored []string, table, column string) bool {
+	lower := strings.ToLower(table)
+	return column == "" && !containsFold(stored, table) && !strings.HasPrefix(lower, "sqlite_") && !strings.HasPrefix(lower, "pragma_")
 }
 
 func containsFold(list []string, s string) bool {

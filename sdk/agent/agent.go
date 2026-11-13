@@ -126,8 +126,13 @@ type Spec struct {
 	TerminalEnv []string
 	// SQLTables are the database tables the module may read through the Host's SQL
 	// (SQLHost), for an agent that keeps sessions in SQLite. Every other table is refused.
-	// The database file itself stays a Secret: no file read, copy or package reaches it.
 	SQLTables []string
+	// SQLFiles are the database files SQL may open: paths or patterns (* ? [) with {root}
+	// and ~ as Secrets have ("{data}/opencode*.db", "{db}" for an Install root that a
+	// variable sets). A pattern whose root the install lacks matches nothing. Each file,
+	// with its -wal, -shm and -journal companions, is a Secret too: no file read, copy or
+	// package reaches it.
+	SQLFiles []string
 	// SQLDenied are tables that are never read, even through a view, and whose name
 	// refuses any query that mentions it (credentials, accounts).
 	SQLDenied []string

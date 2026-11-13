@@ -7,9 +7,11 @@ import (
 )
 
 // CheckSQLQuery checks a query's text before it reaches a database: one SELECT (or WITH,
-// VALUES) that writes nothing, reads only tables in allow (and the query's own WITH
-// names), and never mentions a table in deny. Names compare without regard to case. It is
-// a guard on the text; a Host also refuses reads below it where it can (SQLTableLimiter).
+// VALUES) that writes nothing, reads only tables in allow (and the names its leading WITH
+// clause defines), and never mentions a table in deny. Names compare without regard to
+// case. A quoted string where a table belongs, a WITH inside the query and a schema other
+// than main are refused. It is a guard on the text; a Host also refuses reads below it
+// where it can (SQLTableLimiter).
 func CheckSQLQuery(q string, allow, deny []string) error {
 	toks, err := sqlTokens(q)
 	if err != nil {
@@ -22,17 +24,20 @@ func CheckSQLQuery(q string, allow, deny []string) error {
 		return deniedSQL("only SELECT queries are run")
 	}
 	for i, t := range toks {
-		if t.text == ";" {
+		if t.punct(";") {
 			if i != len(toks)-1 {
 				return deniedSQL("one query at a time")
 			}
 			continue
 		}
 		if t.kind == tokIdent && !t.quoted && sqlWriteWords[strings.ToUpper(t.text)] {
-			if strings.EqualFold(t.text, "REPLACE") && i+1 < len(toks) && toks[i+1].text == "(" {
+			if strings.EqualFold(t.text, "REPLACE") && i+1 < len(toks) && toks[i+1].punct("(") {
 				continue // the replace() function
 			}
 			return deniedSQL(strings.ToUpper(t.text) + " is not run")
+		}
+		if t.is("WITH") && i > 0 {
+			return deniedSQL("WITH is read only at the start of a query")
 		}
 		if t.kind == tokIdent && sqlBannedFuncs[strings.ToLower(t.text)] {
 			return deniedSQL(t.text + "() is not run")
@@ -43,14 +48,19 @@ func CheckSQLQuery(q string, allow, deny []string) error {
 	}
 	ctes := sqlCTENames(toks)
 	for i, t := range toks {
-		if !t.is("FROM", "JOIN") {
-			continue
-		}
-		if t.is("FROM") && i >= 2 && toks[i-1].is("DISTINCT") && toks[i-2].is("IS", "NOT") {
-			continue // IS [NOT] DISTINCT FROM
-		}
-		if err := checkSQLFrom(toks, i+1, allow, ctes); err != nil {
-			return err
+		switch {
+		case t.is("FROM", "JOIN"):
+			if t.is("FROM") && i >= 2 && toks[i-1].is("DISTINCT") && toks[i-2].is("IS", "NOT") {
+				continue // IS [NOT] DISTINCT FROM
+			}
+			if err := checkSQLFrom(toks, i+1, allow, ctes); err != nil {
+				return err
+			}
+		case t.is("IN") && i+1 < len(toks) && !toks[i+1].punct("("):
+			// expr IN table reads a table with no FROM.
+			if _, err := checkSQLTable(toks, i+1, allow, ctes); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -67,8 +77,10 @@ var sqlWriteWords = map[string]bool{
 // sqlBannedFuncs reach files or load code.
 var sqlBannedFuncs = map[string]bool{"load_extension": true, "readfile": true, "writefile": true, "edit": true, "fts3_tokenizer": true}
 
-// sqlTableFuncs are the table-valued functions a query may read from.
-var sqlTableFuncs = map[string]bool{"json_each": true, "json_tree": true}
+// SQLTableFuncs are the table-valued functions a query may read from. A Host's
+// authorizer allows reads of them (SQLite reports a read of json_each.value) on top of
+// the module's tables.
+func SQLTableFuncs() []string { return []string{"json_each", "json_tree"} }
 
 // sqlClauseEnd ends a FROM list.
 var sqlClauseEnd = map[string]bool{"WHERE": true, "GROUP": true, "ORDER": true, "LIMIT": true, "HAVING": true,
@@ -90,9 +102,9 @@ func checkSQLFrom(toks []sqlToken, i int, allow, ctes []string) error {
 	for i < len(toks) {
 		t := toks[i]
 		switch {
-		case t.text == ")" || t.text == ";" || t.kind == tokIdent && !t.quoted && sqlClauseEnd[strings.ToUpper(t.text)]:
+		case t.punct(")") || t.punct(";") || t.kind == tokIdent && !t.quoted && sqlClauseEnd[strings.ToUpper(t.text)]:
 			return nil
-		case t.text == ",":
+		case t.punct(","):
 			item = true
 			i++
 		case t.kind == tokIdent && !t.quoted && sqlJoinWords[strings.ToUpper(t.text)]:
@@ -102,7 +114,7 @@ func checkSQLFrom(toks []sqlToken, i int, allow, ctes []string) error {
 			i = skipSQLExpr(toks, i+1)
 		case t.is("USING"):
 			i = skipSQLParens(toks, i+1)
-		case t.text == "(" && item:
+		case t.punct("(") && item:
 			if i+1 < len(toks) && toks[i+1].is("SELECT", "WITH", "VALUES") {
 				i = skipSQLParens(toks, i) // a subquery: its own FROM is checked on its own
 			} else {
@@ -112,25 +124,12 @@ func checkSQLFrom(toks []sqlToken, i int, allow, ctes []string) error {
 				i = skipSQLParens(toks, i)
 			}
 			item = false
-		case t.kind == tokIdent && item:
-			name := t.text
-			i++
-			if i+1 < len(toks) && toks[i].text == "." && toks[i+1].kind == tokIdent {
-				if !strings.EqualFold(name, "main") {
-					return deniedSQL("only the main database is read")
-				}
-				name = toks[i+1].text
-				i += 2
+		case item:
+			next, err := checkSQLTable(toks, i, allow, ctes)
+			if err != nil {
+				return err
 			}
-			if i < len(toks) && toks[i].text == "(" {
-				if !sqlTableFuncs[strings.ToLower(name)] {
-					return deniedSQL(name + "() is not read")
-				}
-				i = skipSQLParens(toks, i)
-			} else if !containsFold(allow, name) && !containsFold(ctes, name) {
-				return deniedSQL("the table " + name + " is not one this agent reads")
-			}
-			item = false
+			i, item = next, false
 		default:
 			i++ // an alias, AS, INDEXED BY
 		}
@@ -138,17 +137,54 @@ func checkSQLFrom(toks []sqlToken, i int, allow, ctes []string) error {
 	return nil
 }
 
+// checkSQLTable checks the table named at toks[i] ([schema.]name, or a table-valued
+// function and its arguments) and returns the index after it. A quoted string there is
+// refused: SQLite reads 'name' as a table.
+func checkSQLTable(toks []sqlToken, i int, allow, ctes []string) (int, error) {
+	if i >= len(toks) {
+		return i, nil
+	}
+	if toks[i].kind == tokString {
+		return i, deniedSQL("a quoted string is not read as a table")
+	}
+	if toks[i].kind != tokIdent {
+		return i + 1, nil // not a name: SQLite refuses the query itself
+	}
+	name := toks[i].text
+	i++
+	if i < len(toks) && toks[i].punct(".") {
+		if !strings.EqualFold(name, "main") {
+			return i, deniedSQL("only the main database is read")
+		}
+		if i+1 >= len(toks) || toks[i+1].kind != tokIdent {
+			return i, deniedSQL("a quoted string is not read as a table")
+		}
+		name = toks[i+1].text
+		i += 2
+	}
+	if i < len(toks) && toks[i].punct("(") {
+		if !containsFold(SQLTableFuncs(), name) {
+			return i, deniedSQL(name + "() is not read")
+		}
+		return skipSQLParens(toks, i), nil
+	}
+	if !containsFold(allow, name) && !containsFold(ctes, name) {
+		return i, deniedSQL("the table " + name + " is not one this agent reads")
+	}
+	return i, nil
+}
+
 // skipSQLParens returns the index after the parenthesis group that starts at toks[i].
 func skipSQLParens(toks []sqlToken, i int) int {
-	if i >= len(toks) || toks[i].text != "(" {
+	if i >= len(toks) || !toks[i].punct("(") {
 		return i
 	}
 	depth := 0
 	for ; i < len(toks); i++ {
-		switch toks[i].text {
-		case "(":
+		switch {
+		case toks[i].punct("("):
 			depth++
-		case ")":
+		case toks[i].punct(")"):
 			depth--
 			if depth == 0 {
 				return i + 1
@@ -163,11 +199,11 @@ func skipSQLParens(toks []sqlToken, i int) int {
 func skipSQLExpr(toks []sqlToken, i int) int {
 	for i < len(toks) {
 		t := toks[i]
-		if t.text == "(" {
+		if t.punct("(") {
 			i = skipSQLParens(toks, i)
 			continue
 		}
-		if t.text == ")" || t.text == "," || t.text == ";" || t.kind == tokIdent && !t.quoted && (sqlClauseEnd[strings.ToUpper(t.text)] || sqlJoinWords[strings.ToUpper(t.text)]) {
+		if t.punct(")") || t.punct(",") || t.punct(";") || t.kind == tokIdent && !t.quoted && (sqlClauseEnd[strings.ToUpper(t.text)] || sqlJoinWords[strings.ToUpper(t.text)]) {
 			return i
 		}
 		i++
@@ -175,26 +211,40 @@ func skipSQLExpr(toks []sqlToken, i int) int {
 	return i
 }
 
-// sqlCTENames are the names a WITH clause defines: name [(columns)] AS [NOT] [MATERIALIZED] (.
+// sqlCTENames are the names the query's leading WITH clause defines:
+// WITH [RECURSIVE] name [(columns)] AS [NOT] [MATERIALIZED] (query), … They are visible
+// across the whole query. A WITH anywhere else is refused before this is asked.
 func sqlCTENames(toks []sqlToken) []string {
+	if len(toks) == 0 || !toks[0].is("WITH") {
+		return nil
+	}
 	var out []string
-	for i, t := range toks {
-		if t.kind != tokIdent {
-			continue
+	i := 1
+	if i < len(toks) && toks[i].is("RECURSIVE") {
+		i++
+	}
+	for i < len(toks) && toks[i].kind == tokIdent {
+		name := toks[i].text
+		i++
+		if i < len(toks) && toks[i].punct("(") {
+			i = skipSQLParens(toks, i)
 		}
-		j := i + 1
-		if j < len(toks) && toks[j].text == "(" {
-			j = skipSQLParens(toks, j)
+		if i >= len(toks) || !toks[i].is("AS") {
+			break
 		}
-		if j < len(toks) && toks[j].is("AS") {
-			j++
-			for j < len(toks) && toks[j].is("NOT", "MATERIALIZED") {
-				j++
-			}
-			if j < len(toks) && toks[j].text == "(" && j+1 < len(toks) && toks[j+1].is("SELECT", "WITH", "VALUES") {
-				out = append(out, t.text)
-			}
+		i++
+		for i < len(toks) && toks[i].is("NOT", "MATERIALIZED") {
+			i++
 		}
+		if i >= len(toks) || !toks[i].punct("(") {
+			break
+		}
+		out = append(out, name)
+		i = skipSQLParens(toks, i)
+		if i >= len(toks) || !toks[i].punct(",") {
+			break
+		}
+		i++
 	}
 	return out
 }
@@ -202,15 +252,19 @@ func sqlCTENames(toks []sqlToken) []string {
 type tokKind int
 
 const (
-	tokIdent tokKind = iota
+	tokIdent  tokKind = iota
+	tokString         // a '…' literal; text is its value
 	tokOther
 )
 
 type sqlToken struct {
 	kind   tokKind
-	text   string // an identifier without its quotes
+	text   string // an identifier without its quotes, a string's value
 	quoted bool
 }
+
+// punct reports whether t is the punctuation p (not a string or name that reads so).
+func (t sqlToken) punct(p string) bool { return t.kind == tokOther && t.text == p }
 
 func (t sqlToken) is(words ...string) bool {
 	if t.kind != tokIdent || t.quoted {
@@ -219,8 +273,8 @@ func (t sqlToken) is(words ...string) bool {
 	return slices.ContainsFunc(words, func(w string) bool { return strings.EqualFold(w, t.text) })
 }
 
-// sqlTokens splits a query into identifiers and other tokens, dropping comments, string
-// literals and numbers' digits as values.
+// sqlTokens splits a query into identifiers, strings and other tokens, dropping comments
+// and numbers' digits.
 func sqlTokens(q string) ([]sqlToken, error) {
 	var out []sqlToken
 	for i := 0; i < len(q); {
@@ -243,7 +297,7 @@ func sqlTokens(q string) ([]sqlToken, error) {
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, sqlToken{kind: tokOther, text: "'"})
+			out = append(out, sqlToken{kind: tokString, text: strings.ReplaceAll(q[i+1:j-1], "''", "'")})
 			i = j
 		case c == '"' || c == '`':
 			j, err := sqlQuoted(q, i, c)

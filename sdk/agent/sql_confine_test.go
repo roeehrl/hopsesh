@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
@@ -20,17 +21,24 @@ INSERT INTO session_message VALUES ('ses_1', 1, '{"type":"user"}'), ('ses_1', 2,
 INSERT INTO credential VALUES ('openai', 'sk-never-read');
 `
 
+// customDB is a database a variable put outside the agent's roots (OPENCODE_DB).
+const customDB = "/srv/oc/custom.db"
+
 func sqlHost(t *testing.T, tables ...string) (*agenttest.FakeHost, agent.Host, string) {
 	t.Helper()
 	fh := agenttest.NewFakeHost("/home/u")
 	db := "/home/u/.local/share/oc/oc.db"
-	fh.LoadSQL(t, db)
-	if err := fh.ExecSQL(db, dbSchema); err != nil {
-		t.Fatal(err)
+	for _, p := range []string{db, customDB, "/home/u/.local/share/oc/drafts.sqlite"} {
+		fh.LoadSQL(t, p)
+		if err := fh.ExecSQL(p, dbSchema); err != nil {
+			t.Fatal(err)
+		}
 	}
+	fh.Put(db+"-wal", []byte("wal"), time.Now())
 	spec := agent.Spec{ID: "oc", Name: "OC", Roots: []agent.Root{{Name: "data", Default: map[string]string{"*": "~/.local/share/oc"}}},
-		Secrets: []string{"{data}/oc.db*"}, SQLTables: tables, SQLDenied: []string{"credential"}}
+		SQLFiles: []string{"{data}/oc*.db", "{db}", "{absent}/x.db"}, SQLTables: tables, SQLDenied: []string{"credential"}}
 	in := agent.DefaultInstall(spec, fh)
+	in.Roots["db"] = customDB
 	return fh, agent.Confine(fh, spec, in), db
 }
 
@@ -48,9 +56,15 @@ func TestConfinedSQL(t *testing.T) {
 	if !slices.Equal(r.Columns, []string{"id", "title", "time_updated"}) {
 		t.Fatalf("columns %v", r.Columns)
 	}
-	// The database file is a secret: the module cannot open, copy or package it.
-	if _, err := h.FS().ReadFile(db, 1<<20); !errors.Is(err, agent.ErrDenied) {
-		t.Fatalf("reading the database file must be denied, got %v", err)
+	// The database files are secrets: the module cannot open, copy or package them.
+	for _, p := range []string{db, db + "-wal", customDB} {
+		if _, err := h.FS().ReadFile(p, 1<<20); !errors.Is(err, agent.ErrDenied) {
+			t.Fatalf("reading %s must be denied, got %v", p, err)
+		}
+	}
+	// A database a variable put elsewhere is read through SQL.
+	if r, err := sq.Query(ctx, customDB, "SELECT id FROM session_v2"); err != nil || len(r.Rows) != 2 {
+		t.Fatalf("the custom database: %+v, %v", r, err)
 	}
 	for _, q := range []string{
 		"SELECT * FROM credential",           // denied by name
@@ -66,9 +80,12 @@ func TestConfinedSQL(t *testing.T) {
 	if r, err := sq.Query(ctx, db, "SELECT title FROM leak"); err == nil {
 		t.Fatalf("a view read a denied table: %v", r.Rows)
 	}
-	// A database outside the module's roots is refused, whatever the query.
-	if _, err := sq.Query(ctx, "/home/u/other.db", "SELECT * FROM session_v2"); !errors.Is(err, agent.ErrDenied) {
-		t.Fatalf("a database outside the roots must be denied, got %v", err)
+	// A database SQLFiles does not name is refused, whatever the query: one elsewhere,
+	// and another SQLite file in the agent's own folder (a desktop app's drafts).
+	for _, other := range []string{"/home/u/other.db", "/home/u/.local/share/oc/drafts.sqlite", "/home/u/.local/share/oc/sub/oc.db", "oc.db"} {
+		if _, err := sq.Query(ctx, other, "SELECT * FROM session_v2"); !errors.Is(err, agent.ErrDenied) {
+			t.Fatalf("%s must be denied, got %v", other, err)
+		}
 	}
 	// Batch: several queries in one transaction, each with its own guards.
 	rs, err := sq.Batch(ctx, db, []agent.Statement{
@@ -87,6 +104,23 @@ func TestConfinedSQL(t *testing.T) {
 	if _, err := sq.Batch(ctx, db, []agent.Statement{{Query: "SELECT data FROM session_message", Limits: agent.SQLLimits{MaxBytes: 20}}}); !errors.Is(err, agent.ErrTooLarge) {
 		t.Fatalf("bytes over the limit: %v", err)
 	}
+	// Two columns of one name would lose a value in a Row.
+	if _, err := sq.Query(ctx, db, "SELECT s.id, m.session_id AS id FROM session_v2 s JOIN session_message m ON m.session_id = s.id"); err == nil {
+		t.Fatal("two columns named id must be refused")
+	}
+	// A value longer than the statement keeps fails in SQLite, before it is read whole.
+	if _, err := sq.Batch(ctx, db, []agent.Statement{{Query: "SELECT randomblob(100000) AS b", Limits: agent.SQLLimits{MaxBytes: 1000}}}); !errors.Is(err, agent.ErrTooLarge) {
+		t.Fatalf("a long value: %v", err)
+	}
+	// A query that never ends stops with its context.
+	short, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = sq.Query(short, db, "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n) SELECT count(*) FROM n")
+	if err == nil || time.Since(start) > 10*time.Second {
+		t.Fatalf("an endless query: %v after %v", err, time.Since(start))
+	}
+	t.Logf("an endless query stopped after %v: %v", time.Since(start).Round(time.Millisecond), err)
 	cols, err := sq.Columns(ctx, db, "session_message")
 	if err != nil || !slices.Equal(cols, []string{"session_id", "seq", "data"}) {
 		t.Fatalf("Columns: %v, %v", cols, err)
@@ -109,7 +143,8 @@ func TestFakeHostAuthorizer(t *testing.T) {
 	if _, err := limited.Query(ctx, db, "SELECT * FROM session_v2"); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{"SELECT * FROM credential", "SELECT * FROM leak", "SELECT * FROM session_message"} {
+	for _, q := range []string{"SELECT * FROM credential", "SELECT * FROM leak", "SELECT * FROM session_message",
+		"SELECT * FROM 'credential'", "SELECT * FROM sqlite_master", "SELECT 'x' IN credential"} {
 		if r, err := limited.Query(ctx, db, q); err == nil {
 			t.Errorf("%s read %v", q, r.Rows)
 		}

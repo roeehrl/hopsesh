@@ -34,7 +34,7 @@ func (*dbAgent) Spec() agent.Spec {
 		ID: "dbagent", Name: "DB Agent", Vendor: "Example", Stability: agent.Experimental, Tested: []string{"1.0"},
 		Binaries:  []agent.Binary{{Name: "dbagent", VersionArgs: []string{"--version"}}},
 		Roots:     []agent.Root{{Name: "data", EnvSub: []agent.EnvSub{{Env: "XDG_DATA_HOME", Sub: "dbagent"}}, Default: map[string]string{"*": "~/.local/share/dbagent"}}},
-		Secrets:   []string{"{data}/db.sqlite*"},
+		SQLFiles:  []string{"{data}/db.sqlite"},
 		SQLTables: []string{"session", "message"},
 		SQLDenied: []string{"credential"},
 	}

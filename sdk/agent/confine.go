@@ -12,7 +12,7 @@ import (
 // Confine wraps a Host so a module can write only under its install's roots, never opens
 // its Spec's Secrets (paths, or patterns with * ? [), and runs only its Spec's Binaries.
 // When the Host reads databases (SQLHost), the module reads only its Spec's SQLTables, from
-// a database under its roots, even though the database file is a Secret. The core gives
+// the files its SQLFiles name, which are Secrets for every other use. The core gives
 // every module a confined Host; the conformance kit does the same.
 func Confine(h Host, s Spec, in Install) Host {
 	c := &confined{h: h, spec: s}
@@ -24,6 +24,14 @@ func Confine(h Host, s Spec, in Install) Host {
 	for _, sec := range s.Secrets {
 		c.secrets = append(c.secrets, Expand(sec, h.Facts().Home, in.Roots, h.Path()))
 	}
+	for _, f := range s.SQLFiles {
+		p := Expand(f, h.Facts().Home, in.Roots, h.Path())
+		if strings.Contains(p, "{") || !h.Path().IsAbs(p) {
+			continue // a root this install does not have
+		}
+		c.dbs = append(c.dbs, p)
+		c.secrets = append(c.secrets, p, p+"-*")
+	}
 	return c
 }
 
@@ -32,6 +40,7 @@ type confined struct {
 	spec    Spec
 	roots   []string
 	secrets []string
+	dbs     []string // SQLFiles, expanded
 }
 
 func (c *confined) Facts() Facts      { return c.h.Facts() }
@@ -66,19 +75,31 @@ func (c *confined) under(p string, dirs []string) bool {
 }
 
 func (c *confined) readable(p string) error {
-	clean := c.h.Path().Clean(p)
-	for _, sec := range c.secrets {
+	if c.matches(p, c.secrets, true) {
+		return fmt.Errorf("%w: %s holds credentials", ErrDenied, p)
+	}
+	return nil
+}
+
+// matches reports whether p is one of list's paths or patterns (* ? [), or, with
+// inside, under one of its paths.
+func (c *confined) matches(p string, list []string, inside bool) bool {
+	pa := c.h.Path()
+	clean := pa.Clean(p)
+	for _, sec := range list {
 		hit := false
 		if strings.ContainsAny(sec, "*?[") {
 			hit, _ = path.Match(strings.ReplaceAll(sec, `\`, "/"), strings.ReplaceAll(clean, `\`, "/"))
-		} else {
+		} else if inside {
 			hit = c.under(clean, []string{sec})
+		} else {
+			hit = clean == pa.Clean(sec)
 		}
 		if hit {
-			return fmt.Errorf("%w: %s holds credentials", ErrDenied, p)
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 func (c *confined) writable(p string) error {
@@ -170,8 +191,8 @@ func (s confinedSQL) database(db string) error {
 	if db == "" || !s.c.h.Path().IsAbs(db) {
 		return fmt.Errorf("%w: %q is not a database path", ErrDenied, db)
 	}
-	if !s.c.under(db, s.c.roots) {
-		return fmt.Errorf("%w: %s is outside %s's folders", ErrDenied, db, s.c.spec.Name)
+	if !s.c.matches(db, s.c.dbs, false) {
+		return fmt.Errorf("%w: %s is not a database %s reads", ErrDenied, db, s.c.spec.Name)
 	}
 	return nil
 }
@@ -187,6 +208,8 @@ func (s confinedSQL) Query(ctx context.Context, db, q string, args ...any) (Rows
 	if err := s.check(db, q); err != nil {
 		return Rows{}, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, DefaultSQLTimeout)
+	defer cancel()
 	return s.inner.Query(ctx, db, q, args...)
 }
 
@@ -196,6 +219,8 @@ func (s confinedSQL) Batch(ctx context.Context, db string, stmts []Statement) ([
 			return nil, err
 		}
 	}
+	ctx, cancel := context.WithTimeout(ctx, DefaultSQLTimeout)
+	defer cancel()
 	return s.inner.Batch(ctx, db, stmts)
 }
 
@@ -206,6 +231,8 @@ func (s confinedSQL) Columns(ctx context.Context, db, table string) ([]string, e
 	if !containsFold(s.c.spec.SQLTables, table) || containsFold(s.c.spec.SQLDenied, table) {
 		return nil, deniedSQL("the table " + table + " is not one this agent reads")
 	}
+	ctx, cancel := context.WithTimeout(ctx, DefaultSQLTimeout)
+	defer cancel()
 	return s.inner.Columns(ctx, db, table)
 }
 

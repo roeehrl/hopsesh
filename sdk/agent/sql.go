@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 )
 
@@ -19,12 +20,15 @@ type SQLHost interface {
 
 // SQL reads a SQLite database on the machine, read only: no query writes, checkpoints or
 // vacuums. db is the database file's absolute path. The confined Host a module gets lets it
-// read only its Spec's SQLTables, from a database under its roots.
+// read only its Spec's SQLTables, from the files its SQLFiles name, and gives each call
+// at most DefaultSQLTimeout (less when ctx ends sooner).
 type SQL interface {
 	// Query runs one SELECT and returns its rows, refusing more than the default limits.
 	Query(ctx context.Context, db, q string, args ...any) (Rows, error)
 	// Batch runs several SELECTs in one read transaction, so they see one snapshot of the
-	// database (messages and their parts), and returns their rows in order.
+	// database (messages and their parts), and returns their rows in order. Each
+	// statement keeps to its Limits, and the whole batch to DefaultSQLBatchMaxBytes
+	// (SQLBudget).
 	Batch(ctx context.Context, db string, stmts []Statement) ([]Rows, error)
 	// Columns lists a table's columns, for a module's check of the schema it reads; a
 	// missing table has none.
@@ -56,7 +60,9 @@ type Statement struct {
 	Limits SQLLimits
 }
 
-// SQLLimits guard how much of a database one query may bring into memory.
+// SQLLimits guard how much of a database one query may bring into memory. MaxBytes
+// counts the values kept; a Host's reader also caps one value's length (SQLite's
+// SQLITE_LIMIT_LENGTH) so a single huge value fails before it is read whole.
 type SQLLimits struct {
 	MaxRows  int
 	MaxBytes int64 // the sum of every value's size: strings and blobs by length, others 8
@@ -64,8 +70,10 @@ type SQLLimits struct {
 
 // Default SQL limits: a long session's messages fit, a runaway query does not.
 const (
-	DefaultSQLMaxRows  = 100_000
-	DefaultSQLMaxBytes = 64 << 20
+	DefaultSQLMaxRows       = 100_000
+	DefaultSQLMaxBytes      = 64 << 20
+	DefaultSQLBatchMaxBytes = 128 << 20        // every statement of one Batch together
+	DefaultSQLTimeout       = 30 * time.Second // one Query, Batch or Columns call
 )
 
 // WithDefaults fills zero limits with the defaults.
@@ -104,7 +112,7 @@ func (r Row) String(col string) string {
 }
 
 // Int is an INTEGER value (0 when NULL; a whole REAL or a decimal TEXT is read too, as
-// a remote reader's JSON gives them).
+// a remote reader's JSON gives them, and any other text is 0).
 func (r Row) Int(col string) int64 {
 	switch v := r[col].(type) {
 	case int64:
@@ -116,15 +124,15 @@ func (r Row) Int(col string) int64 {
 			return int64(v)
 		}
 	case string:
-		var n int64
-		if _, err := fmt.Sscan(v, &n); err == nil {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
 		}
 	}
 	return 0
 }
 
-// Float is a REAL value (0 when NULL).
+// Float is a REAL value (0 when NULL; an INTEGER or a decimal TEXT is read too, as Int
+// does).
 func (r Row) Float(col string) float64 {
 	switch v := r[col].(type) {
 	case float64:
@@ -133,6 +141,10 @@ func (r Row) Float(col string) float64 {
 		return float64(v)
 	case int:
 		return float64(v)
+	case string:
+		if f, err := strconv.ParseFloat(v, 64); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
+			return f
+		}
 	}
 	return 0
 }
@@ -141,12 +153,34 @@ func (r Row) Float(col string) float64 {
 func (r Row) Null(col string) bool { return r[col] == nil }
 
 // ScanRows reads database/sql rows into Rows within limits, for a Host's SQL. It closes
-// rs. Going over a limit is ErrTooLarge.
+// rs. Going over a limit is ErrTooLarge; two columns of one name (SELECT a.*, b.*) are an
+// error, since a Row keeps one value per name.
 func ScanRows(rs *sql.Rows, lim SQLLimits) (Rows, error) {
+	return (&SQLBudget{left: math.MaxInt64}).ScanRows(rs, lim)
+}
+
+// CheckRows applies limits to rows read another way (a remote reader's JSON), whose
+// Columns the reader fills in the query's order, repeats included.
+func CheckRows(r Rows, lim SQLLimits) error {
+	return (&SQLBudget{left: math.MaxInt64}).CheckRows(r, lim)
+}
+
+// SQLBudget caps the bytes one Batch brings into memory across its statements, on top of
+// each statement's own limits. A Host's SQL makes one per Batch.
+type SQLBudget struct{ left int64 }
+
+// NewSQLBudget is a budget of DefaultSQLBatchMaxBytes.
+func NewSQLBudget() *SQLBudget { return &SQLBudget{left: DefaultSQLBatchMaxBytes} }
+
+// ScanRows is ScanRows, also spending the budget.
+func (b *SQLBudget) ScanRows(rs *sql.Rows, lim SQLLimits) (Rows, error) {
 	defer rs.Close()
 	lim = lim.WithDefaults()
 	cols, err := rs.Columns()
 	if err != nil {
+		return Rows{}, err
+	}
+	if err := uniqueSQLColumns(cols); err != nil {
 		return Rows{}, err
 	}
 	out := Rows{Columns: cols, Rows: []Row{}}
@@ -166,31 +200,56 @@ func ScanRows(rs *sql.Rows, lim SQLLimits) (Rows, error) {
 		row := make(Row, len(cols))
 		for i, c := range cols {
 			v := normalSQLValue(vals[i])
-			size += sqlValueSize(v)
+			n := sqlValueSize(v)
+			if err := b.spend(&size, n, lim); err != nil {
+				return Rows{}, err
+			}
 			row[c] = v
-		}
-		if size > lim.MaxBytes {
-			return Rows{}, fmt.Errorf("%w: over %d bytes", ErrTooLarge, lim.MaxBytes)
 		}
 		out.Rows = append(out.Rows, row)
 	}
 	return out, rs.Err()
 }
 
-// CheckRows applies limits to rows read another way (a remote reader's JSON).
-func CheckRows(r Rows, lim SQLLimits) error {
+// CheckRows is CheckRows, also spending the budget.
+func (b *SQLBudget) CheckRows(r Rows, lim SQLLimits) error {
 	lim = lim.WithDefaults()
+	if err := uniqueSQLColumns(r.Columns); err != nil {
+		return err
+	}
 	if len(r.Rows) > lim.MaxRows {
 		return fmt.Errorf("%w: over %d rows", ErrTooLarge, lim.MaxRows)
 	}
 	var size int64
 	for _, row := range r.Rows {
 		for _, v := range row {
-			size += sqlValueSize(v)
+			if err := b.spend(&size, sqlValueSize(v), lim); err != nil {
+				return err
+			}
 		}
 	}
-	if size > lim.MaxBytes {
+	return nil
+}
+
+func (b *SQLBudget) spend(size *int64, n int64, lim SQLLimits) error {
+	*size += n
+	b.left -= n
+	if *size > lim.MaxBytes {
 		return fmt.Errorf("%w: over %d bytes", ErrTooLarge, lim.MaxBytes)
+	}
+	if b.left < 0 {
+		return fmt.Errorf("%w: a batch over %d bytes", ErrTooLarge, DefaultSQLBatchMaxBytes)
+	}
+	return nil
+}
+
+func uniqueSQLColumns(cols []string) error {
+	seen := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		if seen[c] {
+			return fmt.Errorf("the query returns two columns named %q; name each one (AS)", c)
+		}
+		seen[c] = true
 	}
 	return nil
 }
