@@ -143,11 +143,11 @@ func TestHookTurnedOffIsNotOK(t *testing.T) {
 		{Agent: "claude", Supported: true, Installed: true},
 		{Agent: "claude", Supported: true, Installed: true, Reason: "disableAllHooks is set"},
 	} {
-		if c := hookCheck(h); c.State != CheckWarn || c.Reason == "" {
+		if c := hookCheck(h, "Claude Code"); c.State != CheckWarn || c.Reason == "" {
 			t.Errorf("%+v: %+v", h, c)
 		}
 	}
-	if c := hookCheck(MovementHookStatus{Agent: "claude", Supported: true, Installed: true, Enabled: true}); c.State != CheckOK {
+	if c := hookCheck(MovementHookStatus{Agent: "claude", Supported: true, Installed: true, Enabled: true}, "Claude Code"); c.State != CheckOK {
 		t.Fatalf("enabled: %+v", c)
 	}
 }
@@ -198,22 +198,25 @@ func TestHooksAndSkillReadOverSSH(t *testing.T) {
 	}
 	fsys := host.LocalFS()
 	// JSON escapes nothing in a single-quoted shell command; some writers escape quotes.
+	file := func(path string, id agent.ID) *agent.HookFile {
+		return &agent.HookFile{Path: path, Runs: func(b []byte) (string, bool) { return agent.NoticeHookProgram(b, id) }}
+	}
 	settings := write("claude/settings.json", `{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"'`+prog+`' notice-hook --agent 'claude' --profile '' '--config-dir' '/x'"}]}]}}`)
-	if c := remoteHook(fsys, settings, "claude"); c.State != CheckOK {
+	if c := remoteHook(fsys, file(settings, "claude"), false); c.State != CheckOK {
 		t.Fatalf("installed: %+v", c)
 	}
-	if c := remoteHook(fsys, settings, "codex"); c.State != CheckOff || c.Fix != FixHooks {
+	if c := remoteHook(fsys, file(settings, "codex"), true); c.State != CheckOff || c.Fix != FixHooks {
 		t.Fatalf("another agent's hook is not this one's: %+v", c)
 	}
 	gone := write("claude2/settings.json", `{"command":"'`+filepath.Join(dir, "moved", "hopsesh")+`' notice-hook --agent 'claude' --profile ''"}`)
-	if c := remoteHook(fsys, gone, "claude"); c.State != CheckError || !strings.Contains(c.Reason, "isn't there") {
+	if c := remoteHook(fsys, file(gone, "claude"), false); c.State != CheckError || !strings.Contains(c.Reason, "isn't there") {
 		t.Fatalf("a hook whose program is gone is broken: %+v", c)
 	}
 	codex := write("codex/hooks.json", `{"hooks":[{"command":"'`+prog+`' notice-hook --agent 'codex' --profile 'p1'"}]}`)
-	if c := remoteHook(fsys, codex, "codex"); c.State != CheckOK || !strings.Contains(c.Text, "trust") {
+	if c := remoteHook(fsys, file(codex, "codex"), true); c.State != CheckOK || !strings.Contains(c.Text, "trust") {
 		t.Fatalf("codex: %+v", c)
 	}
-	if c := remoteHook(fsys, filepath.Join(dir, "none.json"), "claude"); c.State != CheckOff {
+	if c := remoteHook(fsys, file(filepath.Join(dir, "none.json"), "claude"), false); c.State != CheckOff {
 		t.Fatalf("no file: %+v", c)
 	}
 

@@ -35,6 +35,9 @@ func noticeHookCmd() *cobra.Command {
 			useDirFlags(cmd)
 			// A hook fails open and emits no diagnostics or non-JSON output. Do not use
 			// newRun: no audit log, skill offers, password readers, or session scan.
+			if !takesNoticeHooks(agent.ID(id)) {
+				return nil
+			}
 			return runPreparedNoticeHook(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout(), agent.ID(id), profile, func(ctx context.Context, id agent.ID, profile, session, path, event, source string) (preparedMovementNotice, error) {
 				cfg, err := config.Load()
 				if err != nil {
@@ -72,8 +75,21 @@ func noticeHookCmd() *cobra.Command {
 	return cmd
 }
 
+// takesNoticeHooks reports whether agent id's module installs notice hooks.
+func takesNoticeHooks(id agent.ID) bool {
+	if modules == nil {
+		return false
+	}
+	m, ok := modules.Get(id)
+	if !ok {
+		return false
+	}
+	_, ok = m.(agent.MovementHookIntegrator)
+	return ok
+}
+
 func runPreparedNoticeHook(ctx context.Context, in io.Reader, out io.Writer, id agent.ID, profile string, prepare movementNoticePrepare) error {
-	if id != "claude" && id != "codex" || len(profile) > 128 || strings.ContainsFunc(profile, unicode.IsControl) {
+	if id == "" || len(profile) > 128 || strings.ContainsFunc(profile, unicode.IsControl) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, noticeHookTimeout)

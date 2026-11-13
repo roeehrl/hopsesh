@@ -81,7 +81,7 @@ func (a *App) addLocalAccount(ctx context.Context, id agent.ID, name string, tag
 	}
 	mod, ok := a.Module(id)
 	if !ok || mod.Spec().Accounts == nil {
-		return agent.RuntimeProfile{}, errors.New("account folders are for Claude Code and Codex")
+		return agent.RuntimeProfile{}, errors.New("account folders are for " + a.accountAgents())
 	}
 	m, err := a.accountMachine(ctx, "")
 	if err != nil {

@@ -41,11 +41,11 @@ func TestClassify(t *testing.T) {
 		{"Linux VS Code", []string{"code", "code", "bash", "claude"}, Host{KindIDE, "VS Code", 100}},
 		{"Zed", []string{"zed", "zsh", "claude"}, Host{KindIDE, "Zed", 100}},
 		{"JetBrains", []string{"goland", "zsh", "claude"}, Host{KindIDE, "GoLand", 100}},
-		{"Claude app", []string{"Claude", "disclaimer", "claude"}, Host{KindClaudeApp, "Claude", 100}},
-		{"Claude app helper", []string{"Claude", "Claude Helper", "zsh", "claude"}, Host{KindClaudeApp, "Claude", 100}},
+		{"Claude app", []string{"Claude", "disclaimer", "claude"}, Host{KindApp("claude"), "Claude", 100}},
+		{"Claude app helper", []string{"Claude", "Claude Helper", "zsh", "claude"}, Host{KindApp("claude"), "Claude", 100}},
 		{"a claude command-line tool is not the app", []string{"iTerm2", "zsh", "claude", "bash", "claude"}, Host{KindITerm2, "iTerm2", 100}},
-		{"ChatGPT runs Codex", []string{"ChatGPT", "codex"}, Host{KindCodexApp, "ChatGPT", 100}},
-		{"Codex app", []string{"Codex", "codex"}, Host{KindCodexApp, "Codex", 100}},
+		{"ChatGPT runs Codex", []string{"ChatGPT", "codex"}, Host{KindApp("codex"), "ChatGPT", 100}},
+		{"Codex app", []string{"Codex", "codex"}, Host{KindApp("codex"), "Codex", 100}},
 		{"hopsesh's app by name", []string{"hopsesh-app", "2.1.289"}, Host{KindHopsesh, "hopsesh", 100}},
 		{"Windows Terminal", []string{"explorer.exe", "WindowsTerminal.exe", "pwsh.exe", "claude.exe"}, Host{KindWT, "Windows Terminal", 101}},
 		{"Windows names ignore case", []string{"WINDOWSTERMINAL.EXE", "cmd.exe", "node.exe", "codex.exe"}, Host{KindWT, "Windows Terminal", 100}},
@@ -184,6 +184,20 @@ func BenchmarkSnapshot(b *testing.B) {
 	for b.Loop() {
 		if _, err := Snapshot(context.Background()); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+func TestKindApp(t *testing.T) {
+	if KindApp("codex") != "codex-app" || KindApp("claude") != "claude-app" {
+		t.Fatal("app kinds changed their persisted values")
+	}
+	if a, ok := KindApp("opencode").AppAgent(); !ok || a != "opencode" {
+		t.Fatalf("AppAgent = %q %v", a, ok)
+	}
+	for _, k := range []Kind{KindIDE, KindTmux, KindUnknown, "-app"} {
+		if _, ok := k.AppAgent(); ok {
+			t.Errorf("%s is no app", k)
 		}
 	}
 }

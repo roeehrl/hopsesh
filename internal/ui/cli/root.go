@@ -4,6 +4,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -18,7 +19,7 @@ func NewRoot(out io.Writer, reg *registry.Registry) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "hopsesh",
 		Short: "Move coding-agent sessions between your machines, and between agents",
-		Long: `hopsesh finds your coding-agent sessions (Claude Code, Codex) on this machine and your
+		Long: `hopsesh finds your coding-agent sessions (` + strings.Join(localNames(), ", ") + `) on this machine and your
 other machines (over your own SSH or Tailscale), shows them grouped by repository, and
 moves the one you pick here, or continues it in another agent: it checks or clones the
 repo, copies the session, rewrites its paths and prints the command to continue it.
@@ -27,7 +28,7 @@ It also hands sessions off to the agents' clouds (Claude Code cloud, Codex cloud
 experimentally Copilot, Jules, Devin and Amp) and brings cloud sessions home, through the
 vendors' own commands, signed in as you: see hopsesh clouds and hopsesh handoff.
 
-Unofficial; not affiliated with or endorsed by Anthropic or OpenAI.`,
+Unofficial; not affiliated with or endorsed by ` + joinWith(localVendors(), " or ") + `.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,

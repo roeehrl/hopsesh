@@ -176,7 +176,7 @@ func (a *App) SetAgent(id string, enabled, remoteControl, imp bool) error {
 	}
 	ac := a.core.Cfg.Agents[id]
 	ac.Disabled, ac.RemoteControl, ac.Import = !enabled, remoteControl, imp
-	if ac == (config.Agent{}) {
+	if ac.IsZero() {
 		delete(a.core.Cfg.Agents, id)
 	} else {
 		a.core.Cfg.Agents[id] = ac
@@ -203,7 +203,7 @@ func (a *App) SetAgentKind(id, kind string, show bool) error {
 	if !ac.SetShows(kind, show) {
 		return fmt.Errorf("hopsesh has no setting for %q sessions", kind)
 	}
-	if ac == (config.Agent{}) {
+	if ac.IsZero() {
 		delete(a.core.Cfg.Agents, id)
 	} else {
 		a.core.Cfg.Agents[id] = ac

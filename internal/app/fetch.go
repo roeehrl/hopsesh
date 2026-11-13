@@ -182,7 +182,7 @@ func (a *App) planFetch(ctx context.Context, inv *Inventory, e Entry, target age
 		return nil, move.Input{}, err
 	}
 	fin := move.FetchInput{Machine: here.host, Module: mod, Install: in, Host: h, Cloud: cl, Session: s, Checkout: checkout,
-		Lineage: e.Lineage, Worktrees: a.Reg.Worktrees()}
+		Lineage: e.Lineage, Worktrees: a.Reg.Worktrees(), Takers: a.writerNames()}
 	if ap, ok := mod.(agent.AccountProber); ok {
 		if acct, err := ap.Account(ctx, h, in); err == nil {
 			fin.Account = &acct
@@ -230,7 +230,7 @@ func (a *App) planFetch(ctx context.Context, inv *Inventory, e Entry, target age
 
 // BringTarget is the local agent that gets a cloud-only module's session (Copilot's log,
 // Amp's thread) when the user names none: the agent it was handed off from, by its lineage,
-// else Claude Code, else the first agent here that takes sessions; "" when none here can.
+// else the first agent here, in display order, that takes sessions; "" when none here can.
 func (a *App) BringTarget(inv *Inventory, e Entry) agent.ID {
 	here := inv.Local()
 	if here == nil {
@@ -256,12 +256,9 @@ func (a *App) BringTarget(inv *Inventory, e Entry) agent.ID {
 			}
 		}
 	}
-	if takes("claude") {
-		return "claude"
-	}
-	for _, st := range here.Agents {
-		if takes(st.Agent) {
-			return st.Agent
+	for _, m := range a.Modules() {
+		if id := m.Spec().ID; takes(id) {
+			return id
 		}
 	}
 	return ""
@@ -580,4 +577,15 @@ func nonEmpty(s, d string) string {
 		return d
 	}
 	return s
+}
+
+// writerNames names the enabled agents that write sessions ("Claude Code or Codex").
+func (a *App) writerNames() string {
+	var names []string
+	for _, m := range a.Modules() {
+		if agent.Has(m, agent.CapWrite) {
+			names = append(names, m.Spec().Name)
+		}
+	}
+	return joinOr(names)
 }

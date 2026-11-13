@@ -1,14 +1,12 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -154,8 +152,8 @@ func (s MachineStatus) OriginalProtection(id agent.ID, profile string) (verdict,
 	hook := folder.Hook
 	switch hook.State {
 	case CheckOK:
-		if id == "codex" && strings.Contains(hook.Text, "trust checked at login") {
-			return ProtectedUnknown, "Codex's approval of the hook can't be checked over SSH", FixServe
+		if hook.Text == trustAtLogin {
+			return ProtectedUnknown, nonEmptyStr(folder.Name, string(id)) + "'s approval of the hook can't be checked over SSH", FixServe
 		}
 		return ProtectedYes, "", ""
 	case CheckOff, CheckError:
@@ -257,7 +255,7 @@ func (a *App) hookOn(ctx context.Context, m *Machine, key agent.SessionKey) Chec
 	if f == nil {
 		return Check{State: CheckOff, Text: "not supported"}
 	}
-	return remoteHook(fsys, f.Path, key.Agent)
+	return remoteHook(fsys, f, isTrustReporter(mod))
 }
 
 // atLeast compares hopsesh versions; a development build counts as the newest.
@@ -722,7 +720,7 @@ func (a *App) protectionSetups(p Protection, m *Machine) []AgentSetup {
 			continue
 		}
 		index[key] = len(out)
-		out = append(out, AgentSetup{Agent: h.Agent, Name: a.agentName(h.Agent), Profile: h.Profile, ProfileLabel: h.ProfileLabel, Hook: hookCheck(h), Skill: Check{State: CheckUnknown, Text: "not checked"}})
+		out = append(out, AgentSetup{Agent: h.Agent, Name: a.agentName(h.Agent), Profile: h.Profile, ProfileLabel: h.ProfileLabel, Hook: hookCheck(h, a.agentName(h.Agent)), Skill: Check{State: CheckUnknown, Text: "not checked"}})
 	}
 	// The skill report names the agents each copy serves ("Claude Code", "Claude Code (work)").
 	for _, c := range p.Skill.Copies {
@@ -772,14 +770,14 @@ func skillServes(name string, as AgentSetup) bool {
 }
 
 // hookCheck is a hook's state as hopsesh there reported it.
-func hookCheck(h MovementHookStatus) Check {
+func hookCheck(h MovementHookStatus, name string) Check {
 	switch {
 	case !h.Supported:
 		return Check{State: CheckOff, Text: "not supported", Reason: h.Reason}
 	case !h.Installed:
 		return Check{State: CheckOff, Text: "not installed", Reason: "originals moved from here aren't blocked or warned", Fix: FixHooks}
 	case h.Trust != nil && (h.Trust.State == agent.HookNeedsReview || h.Trust.State == agent.HookDisabled):
-		return Check{State: CheckWarn, Text: "approve in " + nonEmptyStr(agentDisplay(h.Agent), string(h.Agent)), Reason: nonEmptyStr(h.Trust.Fix, "the agent runs it only once you approve it"), Fix: FixApprove}
+		return Check{State: CheckWarn, Text: "approve in " + name, Reason: nonEmptyStr(h.Trust.Fix, "the agent runs it only once you approve it"), Fix: FixApprove}
 	case !h.Enabled:
 		// Turned off by the agent, or protection of originals is off in hopsesh there (no
 		// reason): either way it blocks nothing.
@@ -790,8 +788,13 @@ func hookCheck(h MovementHookStatus) Check {
 	return Check{State: CheckOK, Text: "installed"}
 }
 
-func agentDisplay(id agent.ID) string {
-	return map[agent.ID]string{"claude": "Claude Code", "codex": "Codex"}[id]
+// trustAtLogin is the text of an installed hook whose agent decides by its own approval
+// whether it runs (agent.HookTrustReporter), read over SSH where that approval is unknown.
+const trustAtLogin = "installed · trust checked at login"
+
+func isTrustReporter(mod agent.Module) bool {
+	_, ok := mod.(agent.HookTrustReporter)
+	return ok
 }
 
 // skillCheck is a skill copy's state.
@@ -810,10 +813,6 @@ func skillCheck(state, installed string) Check {
 	}
 	return Check{State: CheckError, Text: state, Reason: "the skill's files are incomplete", Fix: FixSkill}
 }
-
-// noticeHookIn finds a hopsesh notice hook for agent id in a hook file, and the program
-// it runs ("" when it has none).
-var noticeHookIn = regexp.MustCompile(`'((?:[^'\\]|\\.)+)' notice-hook --agent '([a-z0-9-]+)'`)
 
 // fileSetups reads each agent folder's hook file and skill over SSH, for a machine whose
 // hopsesh does not run in the login session (so it cannot answer for itself). A hook is
@@ -845,7 +844,7 @@ func (a *App) fileSetups(ctx context.Context, hm *host.Machine, m *Machine) []Ag
 		}
 		if hi, ok := mod.(agent.MovementHookIntegrator); ok {
 			if f := hi.MovementHooks(h, in, bin).File; f != nil {
-				as.Hook = remoteHook(fsys, f.Path, st.Agent)
+				as.Hook = remoteHook(fsys, f, isTrustReporter(mod))
 			}
 		}
 		if ig, ok := mod.(agent.Integrator); ok {
@@ -859,28 +858,31 @@ func (a *App) fileSetups(ctx context.Context, hm *host.Machine, m *Machine) []Ag
 }
 
 // remoteHook reads one hook file over SSH.
-func remoteHook(fsys host.FS, path string, id agent.ID) Check {
-	b, err := fsys.ReadFile(path, 1<<20)
+func remoteHook(fsys host.FS, f *agent.HookFile, trust bool) Check {
+	b, err := fsys.ReadFile(f.Path, 1<<20)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return Check{State: CheckOff, Text: "not installed", Reason: "originals moved from here aren't blocked or warned", Fix: FixHooks}
 	case err != nil:
 		return Check{State: CheckUnknown, Text: "not checked", Reason: err.Error()}
 	}
-	for _, m := range noticeHookIn.FindAllSubmatch(bytes.ReplaceAll(b, []byte(`\"`), []byte(`"`)), -1) {
-		if string(m[2]) != string(id) {
-			continue
+	installed := f.Has != nil && f.Has(b)
+	if f.Runs != nil {
+		prog, ok := f.Runs(b)
+		if ok {
+			if _, err := fsys.Stat(prog); err != nil {
+				return Check{State: CheckError, Text: "broken", Reason: "it runs " + tildePath(prog) + ", which isn't there", Fix: FixHooks}
+			}
 		}
-		prog := string(m[1])
-		if _, err := fsys.Stat(prog); err != nil {
-			return Check{State: CheckError, Text: "broken", Reason: "it runs " + tildePath(prog) + ", which isn't there", Fix: FixHooks}
-		}
-		if id == "codex" {
-			return Check{State: CheckOK, Text: "installed · trust checked at login"}
-		}
-		return Check{State: CheckOK, Text: "installed"}
+		installed = ok
 	}
-	return Check{State: CheckOff, Text: "not installed", Reason: "originals moved from here aren't blocked or warned", Fix: FixHooks}
+	switch {
+	case !installed:
+		return Check{State: CheckOff, Text: "not installed", Reason: "originals moved from here aren't blocked or warned", Fix: FixHooks}
+	case trust:
+		return Check{State: CheckOK, Text: trustAtLogin}
+	}
+	return Check{State: CheckOK, Text: "installed"}
 }
 
 // remoteSkill reads one skill copy's install record over SSH and compares the version

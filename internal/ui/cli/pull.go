@@ -23,7 +23,7 @@ import (
 
 func addPullFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
-	f.String("in", "", "continue in this agent ("+strings.Join(writerIDs(), ", ")+"; default: the session's own; from copilot-cloud or amp, whose text is written into an agent here: the one it was handed off from, else claude)")
+	f.String("in", "", "continue in this agent ("+strings.Join(writerIDs(), ", ")+"; default: the session's own; from copilot-cloud or amp, whose text is written into an agent here: the one it was handed off from, else "+firstWriterID()+")")
 	f.String("fidelity", "history", "for another agent: history (the conversation as text) or note (a briefing only)")
 	f.Bool("bounded", false, "create a bounded continuation on the same branch; preserve the original session and portable archive")
 	f.Bool("new-session", false, "create a new native session without selecting or modifying an existing destination copy")

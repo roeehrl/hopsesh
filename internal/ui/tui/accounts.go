@@ -234,11 +234,13 @@ func (m *model) accountKeys(k string) (tea.Model, tea.Cmd) {
 		a.cursor = max(0, a.cursor-1)
 	case "down", "j":
 		a.cursor = min(max(0, len(a.items)-1), a.cursor+1)
-	case "1", "2":
-		a.agent = "claude"
-		if k == "2" {
-			a.agent = "codex"
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		mods := m.accountModules()
+		n := int(k[0] - '1')
+		if n >= len(mods) {
+			break
 		}
+		a.agent = mods[n].Spec().ID
 		a.editing = "new-name"
 		a.input = ""
 	case "r":
@@ -339,7 +341,12 @@ func (m *model) viewAccounts(b *strings.Builder) {
 	if a.editing != "" {
 		fmt.Fprintf(b, "\n  %s: %s▌\n  enter: save/next · esc: cancel\n", a.editing, a.input)
 	} else {
-		b.WriteString("\n  ↑↓ select · / search · u untagged · g group · ←/→/space collapse group\n  n rename · t tags · d forget · l sign in · r scan\n  1 add Claude · 2 add Codex · enter choose destination\n")
+		var adds []string
+		for i, mod := range m.accountModules() {
+			adds = append(adds, fmt.Sprintf("%d add %s", i+1, mod.Spec().Short()))
+		}
+		adds = append(adds, "enter choose destination")
+		b.WriteString("\n  ↑↓ select · / search · u untagged · g group · ←/→/space collapse group\n  n rename · t tags · d forget · l sign in · r scan\n  " + strings.Join(adds, " · ") + "\n")
 	}
 }
 
@@ -348,4 +355,16 @@ func nonEmptyAccount(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// accountModules are the enabled agents with account folders, in display order (the
+// first is added with 1).
+func (m *model) accountModules() []agent.Module {
+	var out []agent.Module
+	for _, mod := range m.deps.App.Modules() {
+		if mod.Spec().Accounts != nil && len(out) < 9 {
+			out = append(out, mod)
+		}
+	}
+	return out
 }

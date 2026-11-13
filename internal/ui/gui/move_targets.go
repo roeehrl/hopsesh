@@ -112,13 +112,16 @@ func (a *App) MoveTargets(machine, key string) ([]TargetDTO, error) {
 			if m.Local && p.Default && in.Desktop != "" && agent.Has(mod, agent.CapApp) {
 				d := t
 				d.Tool = "app"
-				d.OpensIn = map[agent.ID]string{"claude": "Claude desktop", "codex": "ChatGPT desktop"}[e.Agent]
+				desk := spec.Desktop
+				if desk != nil {
+					d.OpensIn = desk.Product
+				}
 				var da *agent.Account
 				if in.DesktopAccount != nil {
 					da = &agent.Account{Key: in.DesktopAccount.Key, Person: in.DesktopAccount.Person, LoggedIn: true}
 					d.RunsAs = ownerEmail(inv, e.Agent, *in.DesktopAccount)
-				} else if e.Agent == "codex" {
-					da = acct // the Codex app shares the folder's sign-in
+				} else if desk != nil && !desk.OwnSignIn {
+					da = acct // the app shares the folder's sign-in (the Codex app)
 				} else {
 					da, d.RunsAs = nil, ""
 				}

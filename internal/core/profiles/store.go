@@ -314,7 +314,7 @@ func (s Store) SetDefault(endpoint string, id agent.ID, selected, autoName strin
 				p.Generation++
 			}
 			if !want && autoName != "" && p.Name == autoName {
-				p.Name = unusedName(FolderName(p.Root), taken)
+				p.Name = unusedName(FolderName(p.Root, id), taken)
 				taken[p.Name] = true
 				p.Generation++
 			}
@@ -323,12 +323,12 @@ func (s Store) SetDefault(endpoint string, id agent.ID, selected, autoName strin
 	})
 }
 
-// FolderName is a name for an account folder from its path: its last element, or the one
-// before for a folder named after its agent (…/profiles/<id>/claude).
-func FolderName(root string) string {
+// FolderName is a name for agent id's account folder from its path: its last element, or
+// the one before for a folder named after its agent (…/profiles/<id>/claude).
+func FolderName(root string, id agent.ID) string {
 	parts := strings.FieldsFunc(root, func(r rune) bool { return r == '/' || r == '\\' })
 	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i] == "claude" || parts[i] == "codex" {
+		if parts[i] == string(id) {
 			continue
 		}
 		if name := strings.TrimPrefix(parts[i], "."); name != "" {

@@ -190,9 +190,12 @@ func TestFolderNoLongerDefaultLosesTheDefaultName(t *testing.T) {
 }
 
 func TestFolderName(t *testing.T) {
-	for in, want := range map[string]string{"/u/.hopsesh/accounts/claude/de": "de", `C:\Users\u\.codex`: "codex", "/u/.claude": "claude", "/claude": "other", "/p/9ed8/claude": "9ed8", "/u/work/": "work"} {
-		if got := FolderName(in); got != want {
+	for in, want := range map[string]string{"/u/.hopsesh/accounts/claude/de": "de", `C:\Users\u\.codex`: "codex", "/u/.claude": "claude", "/claude": "other", "/p/9ed8/claude": "9ed8", "/u/work/": "work", "/p/1a2b/codex": "codex"} {
+		if got := FolderName(in, "claude"); got != want {
 			t.Errorf("FolderName(%q) = %q, want %q", in, got, want)
 		}
+	}
+	if got := FolderName("/p/1a2b/codex", "codex"); got != "1a2b" {
+		t.Errorf("a folder named after its agent: %q", got)
 	}
 }

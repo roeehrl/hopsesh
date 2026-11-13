@@ -84,7 +84,7 @@ func (a *App) RegisterAccount(ctx context.Context, machine string, id agent.ID, 
 	defer m.Close()
 	mod, ok := a.Module(id)
 	if !ok || mod.Spec().Accounts == nil {
-		return agent.RuntimeProfile{}, errors.New("account profiles support Claude Code and Codex")
+		return agent.RuntimeProfile{}, errors.New("account profiles support " + a.accountAgents())
 	}
 	endpoint, err := m.PrepareIdentity(ctx)
 	if err != nil {
@@ -643,4 +643,33 @@ func accountProbeVisibility(m *host.Machine, account agent.Account, err error) e
 		return fmt.Errorf("no sign-in is visible over SSH on %s. The macOS Keychain may be unavailable; check sign-in in Hopsesh on that machine. Last known account is retained", m.Name)
 	}
 	return err
+}
+
+// accountAgents names the enabled agents that have account folders ("Claude Code and Codex").
+func (a *App) accountAgents() string {
+	var names []string
+	for _, m := range a.Modules() {
+		if m.Spec().Accounts != nil {
+			names = append(names, m.Spec().Name)
+		}
+	}
+	return joinAnd(names)
+}
+
+// joinAnd joins names as a sentence does: "a", "a and b", "a, b and c".
+func joinAnd(names []string) string {
+	if len(names) == 0 {
+		return "no agent"
+	}
+	return joinWith(names, " and ")
+}
+
+// joinOr joins names as a sentence does: "a", "a or b", "a, b or c" ("" for none).
+func joinOr(names []string) string { return joinWith(names, " or ") }
+
+func joinWith(names []string, last string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + last + names[len(names)-1]
 }

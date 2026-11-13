@@ -11,7 +11,7 @@ import (
 )
 
 func accountsCmd() *cobra.Command {
-	root := &cobra.Command{Use: "accounts", Short: "Discover and manage named Claude Code and Codex account profiles"}
+	root := &cobra.Command{Use: "accounts", Short: "Discover and manage named " + joinWith(accountNames(), " and ") + " account profiles"}
 	list := &cobra.Command{Use: "list", Short: "List registered roots, tags and observed logins", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		r, err := newRun(cmd)
 		if err != nil {
@@ -68,7 +68,7 @@ func accountsCmd() *cobra.Command {
 	}}
 	scan.Flags().String("machine", "", "only this machine (default: allowed machines)")
 	scan.Flags().Bool("json", false, "output JSON")
-	add := &cobra.Command{Use: "add <claude|codex> <name>", Short: "Create an empty local profile or adopt an existing root", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+	add := &cobra.Command{Use: "add <" + strings.Join(accountIDs(), "|") + "> <name>", Short: "Create an empty local profile or adopt an existing root", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
 		r, err := newRun(cmd)
 		if err != nil {
 			return err
