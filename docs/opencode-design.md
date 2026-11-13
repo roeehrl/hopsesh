@@ -822,8 +822,8 @@ rows that tests prove are never read).
 - The reader's file mode is used only where nothing runs (Exec fails: a peer's package); a
   machine without SQL reads OpenCode's export first, since an anchor hopsesh wrote may be
   stale. PR 4's reads of staged files need a file-only entry (`decodeJSONL`).
-- `Summary.Size` counts messages, but `hopsesh ls` prints it as bytes ("4 B"): the user
-  interfaces should say messages for `VirtualSessions` modules (PR 8).
+- `Summary.Size` counts messages. `Entry.SizeUnit` says so, `ls` and `show` print "24 messages",
+  and byte totals leave them out. The GUI shows no per-session size yet (PR 8, if wanted).
 - Live: TUI processes (`-s <id>`) are not detected: the Host lists no processes, and asking for
   the holders of `opencode.db` would flock the database.
 - TitleSource is never "custom": a hopsesh rename is not recorded yet (sidecar, PR 4).
