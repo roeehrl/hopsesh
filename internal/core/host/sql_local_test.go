@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func sqlDB(t *testing.T, wal bool) string {
 		t.Fatal(err)
 	}
 	p := filepath.Join(dir, "agent.db")
-	d, err := sql.Open("sqlite", "file:"+uriPath(p))
+	d, err := sql.Open("sqlite", "file:"+uriPath(p, runtime.GOOS == "windows"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +150,7 @@ func TestLocalSQLRefusesTooLargeValues(t *testing.T) {
 func TestLocalSQLReadsALiveWALWithoutCheckpointing(t *testing.T) {
 	ctx := context.Background()
 	db := sqlDB(t, true)
-	agentConn, err := sql.Open("sqlite", "file:"+uriPath(db)+"?_pragma=wal_autocheckpoint(0)")
+	agentConn, err := sql.Open("sqlite", "file:"+uriPath(db, runtime.GOOS == "windows")+"?_pragma=wal_autocheckpoint(0)")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,5 +279,70 @@ func TestLocalSQLReadsAClosedWALDatabase(t *testing.T) {
 	})
 	if !errors.Is(err, errCantOpen) {
 		t.Fatal(err)
+	}
+}
+
+func TestURIPath(t *testing.T) {
+	for _, c := range []struct {
+		p       string
+		windows bool
+		want    string
+	}{
+		{`/home/u/we\ird/a?b#c%.db`, false, `/home/u/we\ird/a%3fb%23c%25.db`},
+		{`C:\Users\u\a?b.db`, true, `/C:/Users/u/a%3fb.db`},
+		{`\\server\share\a.db`, true, `//server/share/a.db`},
+	} {
+		if got := uriPath(c.p, c.windows); got != c.want {
+			t.Errorf("%s: %s, want %s", c.p, got, c.want)
+		}
+	}
+}
+
+// A backslash in a folder's name on macOS or Linux is part of the name: the reader opens
+// the database the module named, never the one the path would name with a slash.
+func TestLocalSQLBackslashInPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a backslash separates folders on Windows")
+	}
+	root := t.TempDir()
+	make := func(dir, title string) string {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(dir, "agent.db")
+		d, err := sql.Open("sqlite", "file:"+uriPath(p, false))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer d.Close()
+		if _, err := d.Exec("CREATE TABLE session (title TEXT); INSERT INTO session VALUES (?)", title); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	odd := make(filepath.Join(root, `we\ird`), "the named one")
+	make(filepath.Join(root, "we", "ird"), "another")
+	got, err := localSQL{}.Query(context.Background(), odd, "SELECT title FROM session")
+	if err != nil || got.Rows[0].String("title") != "the named one" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+// An immutable read that fails while a program opens the database is a busy read, done
+// again, not the failure it saw.
+func TestWhenClosedFailedImmutableRead(t *testing.T) {
+	db := sqlDB(t, true)
+	if _, err := os.Stat(db + "-shm"); err == nil {
+		t.Skip("the -shm file outlived its connection")
+	}
+	err := whenClosed(db, localStat, localWAL, func(immutable bool) error {
+		if !immutable {
+			t.Fatal("a closed WAL database read through its WAL")
+		}
+		os.WriteFile(db+"-wal", []byte("x"), 0o600)
+		return errors.New("database disk image is malformed")
+	})
+	if !errors.Is(err, errBusy) {
+		t.Fatalf("%v", err)
 	}
 }

@@ -60,9 +60,11 @@ type Machine struct {
 	rfs  *transport.RemoteFS
 	snap *memFS // a snapshot another machine's hopsesh sent (NewSnapshot)
 
-	sqlMu   sync.Mutex
-	sqlTier string     // the remote SQL tier, once probed (sql_remote.go)
-	sqlExec agent.Exec // stands in for SSH in tests of the remote SQL tiers
+	sqlMu     sync.Mutex
+	sqlTier   string     // the remote SQL tier, once probed (sql_remote.go)
+	sqlBlobs  bool       // its sqlite3 shell marks BLOBs
+	sqlFailed time.Time  // when the last probe failed
+	sqlExec   agent.Exec // stands in for SSH in tests of the remote SQL tiers
 }
 
 // FS returns the machine's filesystem (opening SFTP on first use for a remote machine).

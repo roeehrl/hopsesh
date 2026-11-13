@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -147,7 +148,7 @@ func openReadOnly(ctx context.Context, db string, immutable bool) (*sql.Conn, fu
 	if !fi.Mode().IsRegular() {
 		return nil, nil, fmt.Errorf("%w: %s is not a database file", agent.ErrDenied, db)
 	}
-	dsn := readOnlyDSN(db)
+	dsn := readOnlyDSN(db, runtime.GOOS == "windows")
 	if immutable {
 		dsn += "&immutable=1"
 	}
@@ -166,15 +167,19 @@ func openReadOnly(ctx context.Context, db string, immutable bool) (*sql.Conn, fu
 
 // readOnlyDSN is the database's URI, read only, with SQLite's own wait for a lock. The
 // characters a URI gives a meaning to are escaped in the path.
-func readOnlyDSN(p string) string {
-	return "file:" + uriPath(p) + "?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(2000)"
+func readOnlyDSN(p string, windows bool) string {
+	return "file:" + uriPath(p, windows) + "?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(2000)"
 }
 
-// uriPath is a file path as the path of a SQLite file: URI.
-func uriPath(p string) string {
-	u := strings.ReplaceAll(p, `\`, "/")
-	if len(u) >= 2 && u[1] == ':' {
-		u = "/" + u // file:/C:/x.db
+// uriPath is a file path as the path of a SQLite file: URI. Only a Windows path has its
+// backslashes turned into slashes: elsewhere a backslash is part of a file's name.
+func uriPath(p string, windows bool) string {
+	u := p
+	if windows {
+		u = strings.ReplaceAll(u, `\`, "/")
+		if len(u) >= 2 && u[1] == ':' {
+			u = "/" + u // file:/C:/x.db
+		}
 	}
 	return strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(u)
 }
@@ -188,7 +193,7 @@ func storedNames(ctx context.Context, conn *sql.Conn) ([]string, error) {
 	}
 	r, err := agent.ScanRows(rs, agent.SQLLimits{})
 	if err != nil {
-		return nil, err
+		return nil, sqlError(err)
 	}
 	names := make([]string, 0, len(r.Rows))
 	for _, row := range r.Rows {
@@ -220,11 +225,11 @@ func sqlAuthorized(action int, arg1, arg2 string, stored []string, limited bool,
 		}
 		return true
 	case sqlRead:
+		if containsFold(deny, arg1) {
+			return false // also when the name is no table yet (one made since storedNames)
+		}
 		if withName(stored, arg1, arg2) {
 			return true // no table of the database
-		}
-		if containsFold(deny, arg1) {
-			return false
 		}
 		return !limited || containsFold(allow, arg1) || containsFold(agent.SQLTableFuncs(), arg1)
 	}
@@ -286,7 +291,8 @@ func localStat(p string) (fileState, error) {
 // -shm file, and SQLite cannot then open it read only. With no -wal and no -shm, the
 // database file holds everything, so it is read as immutable, never through a WAL; if any
 // of the three changed by the end of the read (a program opened it meanwhile), the read
-// counts as busy and is done again.
+// counts as busy and is done again, also when it failed (an immutable read of a file
+// being checkpointed can look corrupt).
 // isWAL, when given, tells a WAL database from its header without opening it, so a closed
 // one is read as immutable from the start: some SQLite builds open it read only by making
 // empty -wal and -shm files, which hopsesh leaves to the agent.
@@ -301,13 +307,11 @@ func whenClosed(db string, stat func(string) (fileState, error), isWAL func(stri
 			return err
 		}
 	}
-	if err := read(true); err != nil {
-		return err
-	}
+	err := read(true)
 	if after, ok := closedState(db, stat); !ok || after != before {
 		return fmt.Errorf("%w: it was opened while hopsesh read it", errBusy)
 	}
-	return nil
+	return err
 }
 
 // localWAL reads a database file's header: format versions 2 are WAL mode.
@@ -321,6 +325,11 @@ func localWAL(db string) bool {
 	if _, err := f.ReadAt(h[:], 0); err != nil {
 		return false
 	}
+	return walHeader(h)
+}
+
+// walHeader reports whether a database file's first 20 bytes are those of one in WAL mode.
+func walHeader(h [20]byte) bool {
 	return string(h[:16]) == "SQLite format 3\x00" && h[18] == 2 && h[19] == 2
 }
 

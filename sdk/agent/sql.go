@@ -91,7 +91,10 @@ func (l SQLLimits) WithDefaults() SQLLimits {
 var ErrTooLarge = errors.New("more data than hopsesh reads at once")
 
 // Rows are a query's rows, read into memory. Values are int64 (INTEGER), float64 (REAL),
-// string (TEXT), []byte (BLOB) or nil (NULL), keyed by column name.
+// string (TEXT), []byte (BLOB) or nil (NULL), keyed by column name. One reader cannot tell
+// a BLOB from text: another machine's sqlite3 shell older than the one that marks BLOBs,
+// used where python3 is missing, gives a BLOB as a string that may differ from its bytes,
+// so a module that reads a BLOB column selects hex(col) and decodes it.
 type Rows struct {
 	Columns []string `json:"columns"`
 	Rows    []Row    `json:"rows"`

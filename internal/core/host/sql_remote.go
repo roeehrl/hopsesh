@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,11 +26,19 @@ const (
 	tierNone    = "none"    // neither: the module falls back to its agent's own program
 )
 
-// sqlProbeScript says which of the tools a remote read can use are there, and their
-// versions.
-const sqlProbeScript = `if command -v sqlite3 >/dev/null 2>&1; then printf 'sqlite3 %s\n' "$(sqlite3 -version 2>/dev/null)"; fi
+// sqlProbeScript says which of the tools a remote read can use are there: the sqlite3
+// shell's version and whether its JSON marks BLOBs (--blob-quote, which an older shell
+// prints as text), then, unless that shell does all a read needs, python3's.
+const sqlProbeScript = `if command -v sqlite3 >/dev/null 2>&1; then
+printf 'sqlite3 %s\n' "$(sqlite3 -version 2>/dev/null)"
+case "$(sqlite3 -init /dev/null -cmd '.mode json --blob-quote sql' :memory: "SELECT x'01' AS b" 2>/dev/null)" in *"x'01'"*) echo 'sqlite3-blobs yes'; exit 0;; esac
+fi
 if command -v python3 >/dev/null 2>&1; then python3 -I -c 'import sqlite3; print("python3 " + sqlite3.sqlite_version)' 2>/dev/null; fi
 exit 0`
+
+// sqlProbeRetry is how long a machine whose probe failed has no reader before it is
+// probed again.
+const sqlProbeRetry = 30 * time.Second
 
 // capScript runs the rest of its arguments with at most $1 bytes of their output passed
 // on, and exits with their exit code (141 when cut short).
@@ -50,18 +60,23 @@ func (m *Machine) SQL() agent.SQL {
 	case m.Facts.OS == "windows":
 		return nil
 	}
-	if m.sqlTierOf() == tierNone {
+	if tier, _ := m.sqlTierOf(); tier == tierNone {
 		return nil
 	}
 	return remoteSQL{m: m}
 }
 
-// sqlTierOf probes the machine for a remote tier the first time it is asked.
-func (m *Machine) sqlTierOf() string {
+// sqlTierOf probes the machine for a remote tier the first time it is asked, and says
+// whether its sqlite3 shell marks BLOBs. A failed probe is kept for sqlProbeRetry, so a
+// machine out of reach is not probed again by every reader meanwhile.
+func (m *Machine) sqlTierOf() (string, bool) {
 	m.sqlMu.Lock()
 	defer m.sqlMu.Unlock()
 	if m.sqlTier != "" {
-		return m.sqlTier
+		return m.sqlTier, m.sqlBlobs
+	}
+	if !m.sqlFailed.IsZero() && time.Since(m.sqlFailed) < sqlProbeRetry {
+		return tierNone, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -70,10 +85,12 @@ func (m *Machine) sqlTierOf() string {
 		if m.Log != nil {
 			m.Log.Warn("probing SQL tools", "machine", m.Name, "err", err)
 		}
-		return tierNone // not kept: the next reader asks again
+		m.sqlFailed = time.Now()
+		return tierNone, false
 	}
-	m.sqlTier = pickSQLTier(string(res.Stdout))
-	return m.sqlTier
+	m.sqlFailed = time.Time{}
+	m.sqlTier, m.sqlBlobs = pickSQLTier(string(res.Stdout))
+	return m.sqlTier, m.sqlBlobs
 }
 
 // sqlRunner runs the remote readers' programs: the machine's own Exec, or a stand-in.
@@ -85,9 +102,11 @@ func (m *Machine) sqlRunner() agent.Exec {
 }
 
 // pickSQLTier reads sqlProbeScript's output: the sqlite3 shell when it has -safe and
-// -json, else python3, else none.
-func pickSQLTier(out string) string {
-	python := false
+// -json and marks BLOBs; else python3, which sets SQLite's authorizer and returns BLOBs as
+// bytes; else an older sqlite3 shell (3.37+), which returns a BLOB as text; else none.
+// blobs says whether the shell picked marks BLOBs.
+func pickSQLTier(out string) (tier string, blobs bool) {
+	shell, marks, python := false, false, false
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 {
@@ -95,17 +114,22 @@ func pickSQLTier(out string) string {
 		}
 		switch f[0] {
 		case "sqlite3":
-			if versionAtLeast(f[1], 3, 37) {
-				return tierSQLite3
-			}
+			shell = versionAtLeast(f[1], 3, 37)
+		case "sqlite3-blobs":
+			marks = true
 		case "python3":
 			python = true
 		}
 	}
-	if python {
-		return tierPython3
+	switch {
+	case shell && marks:
+		return tierSQLite3, true
+	case python:
+		return tierPython3, false
+	case shell:
+		return tierSQLite3, false
 	}
-	return tierNone
+	return tierNone, false
 }
 
 func versionAtLeast(v string, major, minor int) bool {
@@ -162,7 +186,7 @@ func (s remoteSQL) Batch(ctx context.Context, db string, stmts []agent.Statement
 	var out []agent.Rows
 	err := s.read(ctx, db, func(uri string) error {
 		var err error
-		switch s.m.sqlTierOf() {
+		switch tier, _ := s.m.sqlTierOf(); tier {
 		case tierSQLite3:
 			out, err = s.sqlite3(ctx, db, uri, stmts, texts)
 		case tierPython3:
@@ -210,9 +234,9 @@ func (s remoteSQL) Columns(ctx context.Context, db, table string) ([]string, err
 	var out []agent.Rows
 	err = s.read(ctx, db, func(uri string) error {
 		var err error
-		switch s.m.sqlTierOf() {
+		switch tier, _ := s.m.sqlTierOf(); tier {
 		case tierSQLite3:
-			out, err = s.sqlite3(ctx, db, uri, stmts, texts)
+			out, err = s.columnsSQLite3(ctx, db, uri, texts[0])
 		case tierPython3:
 			// pragma_table_info is SQLite's own: read past the module's table list.
 			out, err = remoteSQL{m: s.m}.python3(ctx, db, uri, stmts, texts)
@@ -233,7 +257,8 @@ func (s remoteSQL) Columns(ctx context.Context, db, table string) ([]string, err
 
 // read runs a read with the database's URI, again while it is busy, and as immutable
 // while no program has it open (whenClosed), as the local reader does. The machine's
-// files are checked over SFTP.
+// files are checked over SFTP, and a WAL database told from its header there, so a closed
+// one is never opened through a WAL (which some SQLite builds do by making its files).
 func (s remoteSQL) read(ctx context.Context, db string, run func(uri string) error) error {
 	stat := func(p string) (fileState, error) {
 		fsys, err := s.m.FS(ctx)
@@ -249,12 +274,30 @@ func (s remoteSQL) read(ctx context.Context, db string, run func(uri string) err
 		}
 		return fileState{size: fi.Size(), mod: fi.ModTime()}, nil
 	}
+	isWAL := func(p string) bool {
+		fsys, err := s.m.FS(ctx)
+		if err != nil {
+			return false
+		}
+		f, err := fsys.Open(p)
+		if err != nil {
+			return false
+		}
+		defer f.Close()
+		var h [20]byte
+		if _, err := io.ReadFull(f, h[:]); err != nil {
+			return false
+		}
+		return walHeader(h)
+	}
 	if s.m.Conn == nil && s.m.fs == nil {
 		stat = func(string) (fileState, error) { return fileState{}, errors.New("no filesystem") }
+		isWAL = nil
 	}
-	uri := "file:" + uriPath(db) + "?mode=ro"
+	// A remote database path is always a POSIX one (Windows has no reader).
+	uri := "file:" + uriPath(db, false) + "?mode=ro"
 	err := retryBusy(ctx, func() error {
-		return whenClosed(db, stat, nil, func(immutable bool) error {
+		return whenClosed(db, stat, isWAL, func(immutable bool) error {
 			if immutable {
 				return run(uri + "&immutable=1")
 			}
@@ -283,23 +326,77 @@ func outputCap(stmts []agent.Statement) int64 {
 // nothing for a statement without rows.
 const sqlSeparator = `SELECT 'hopsesh' AS "~hopsesh-end~"`
 
-func (s remoteSQL) sqlite3(ctx context.Context, db, uri string, stmts []agent.Statement, texts []string) ([]agent.Rows, error) {
-	var script strings.Builder
-	script.WriteString("BEGIN;\n")
-	if s.limited {
-		// The shell has no authorizer to see through a view: the views come first, and a
-		// read is refused when the module's tables include one.
-		script.WriteString(sqlViews + ";\n" + sqlSeparator + ";\n")
+// sqlColumnsOf is one row naming q's columns (all NULL), even when q has no rows: q runs
+// with LIMIT 0, so SQLite stops before it reads anything.
+func sqlColumnsOf(q string) string {
+	return `SELECT * FROM (SELECT 1 AS "~hopsesh-cols~") LEFT JOIN (SELECT * FROM (` + q + "\n) LIMIT 0) ON 1"
+}
+
+// sqlViewGuard fails (an integer overflow) when the module's tables include a view: the
+// shell has no authorizer to see through one. It runs as its own argument, so the shell
+// stops there, before any statement of the next one runs.
+func sqlViewGuard(allow []string) (string, error) {
+	lits := make([]string, 0, len(allow))
+	for _, t := range allow {
+		lit, err := sqlLiteral(strings.ToLower(t))
+		if err != nil {
+			return "", err
+		}
+		lits = append(lits, lit)
 	}
+	return `SELECT CASE WHEN EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'view' AND lower(name) IN (` + strings.Join(lits, ", ") +
+		`)) THEN abs(-9223372036854775808) END AS "~hopsesh-views~"`, nil
+}
+
+// sqlite3 runs a batch in the sqlite3 shell, in one transaction: the view guard (its own
+// argument), then for each statement a row naming its columns and its rows, each ended by
+// the separator. A statement goes on its own line, so a comment at its end cannot hide
+// what follows.
+func (s remoteSQL) sqlite3(ctx context.Context, db, uri string, stmts []agent.Statement, texts []string) ([]agent.Rows, error) {
+	guard, err := sqlViewGuard(s.allow)
+	if err != nil {
+		return nil, err
+	}
+	var script strings.Builder
+	script.WriteString(sqlSeparator + ";\n") // ends the guard's result
 	for _, q := range texts {
-		script.WriteString(q + ";\n" + sqlSeparator + ";\n")
+		script.WriteString(sqlColumnsOf(q) + ";\n" + sqlSeparator + ";\n")
+		script.WriteString(q + "\n;\n" + sqlSeparator + ";\n")
 	}
 	script.WriteString("COMMIT;\n")
+	out, err := s.runShell(ctx, db, uri, stmts, 1+2*len(texts), "BEGIN;\n"+guard+";\n", script.String())
+	if err != nil {
+		return nil, err
+	}
+	results := make([]agent.Rows, 0, len(texts))
+	for i := range texts {
+		cols, rows := out[1+2*i], out[2+2*i]
+		if len(rows.Rows) == 0 && len(cols.Rows) == 1 && len(cols.Columns) > 0 {
+			rows.Columns = unwrappedColumns(cols.Columns[1:])
+		}
+		results = append(results, rows)
+	}
+	return results, nil
+}
+
+// columnsSQLite3 lists a table's columns in the sqlite3 shell (pragma_table_info is
+// SQLite's own).
+func (s remoteSQL) columnsSQLite3(ctx context.Context, db, uri, q string) ([]agent.Rows, error) {
+	return s.runShell(ctx, db, uri, []agent.Statement{{}}, 1, "BEGIN;\n"+q+";\n"+sqlSeparator+";\nCOMMIT;\n")
+}
+
+// runShell runs scripts in the sqlite3 shell, read only and safe, one argument each (the
+// shell stops at the first that fails), with its output cut at the batch's cap, and
+// splits the output into n results.
+func (s remoteSQL) runShell(ctx context.Context, db, uri string, stmts []agent.Statement, n int, scripts ...string) ([]agent.Rows, error) {
 	limit := outputCap(stmts)
 	argv := []string{"sh", "-c", capScript, "sh", strconv.FormatInt(limit+1, 10),
-		"sqlite3", "-readonly", "-safe", "-bail", "-init", "/dev/null", "-json",
-		"-cmd", ".timeout 2000", "-cmd", ".limit length " + strconv.FormatInt(min(longestValue(stmts), 1<<30), 10),
-		uri, script.String()}
+		"sqlite3", "-readonly", "-safe", "-bail", "-init", "/dev/null", "-json"}
+	if _, blobs := s.m.sqlTierOf(); blobs {
+		argv = append(argv, "-cmd", ".mode json --blob-quote sql")
+	}
+	argv = append(argv, "-cmd", ".timeout 2000", "-cmd", ".limit length "+strconv.FormatInt(min(longestValue(stmts), 1<<30), 10), uri)
+	argv = append(argv, scripts...)
 	res, err := s.m.sqlRunner().Run(ctx, argv, agent.RunOptions{})
 	if err != nil {
 		return nil, err
@@ -308,26 +405,66 @@ func (s remoteSQL) sqlite3(ctx context.Context, db, uri string, stmts []agent.St
 		return nil, fmt.Errorf("%w: the output is over %d bytes", agent.ErrTooLarge, limit)
 	}
 	if res.Code != 0 {
+		if strings.Contains(string(res.Stderr), "integer overflow") && !bytes.Contains(res.Stdout, []byte("~hopsesh-end~")) {
+			return nil, fmt.Errorf("%w: the module's tables include a view, read only where SQLite's authorizer checks it", agent.ErrDenied)
+		}
 		return nil, remoteSQLError(db, string(res.Stderr), res.Code)
 	}
-	n := len(texts)
-	if s.limited {
-		n++
-	}
-	out, err := parseShellJSON(res.Stdout, n)
-	if err != nil || !s.limited {
-		return out, err
-	}
-	for _, v := range out[0].Rows {
-		if containsFold(s.allow, v.String("name")) {
-			return nil, fmt.Errorf("%w: %s is a view, read only where SQLite's authorizer checks it", agent.ErrDenied, v.String("name"))
-		}
-	}
-	return out[1:], nil
+	return parseShellJSON(markedBlobs(res.Stdout), n)
 }
 
-// sqlViews lists the database's views.
-const sqlViews = `SELECT name FROM sqlite_schema WHERE type = 'view'`
+// unwrappedColumns undoes SQLite's renaming of a repeated column in a subquery ("id:1"),
+// so a query's columns read the same with and without rows.
+func unwrappedColumns(cols []string) []string {
+	out := make([]string, len(cols))
+	for i, c := range cols {
+		out[i] = c
+		if j := strings.LastIndexByte(c, ':'); j > 0 {
+			if _, err := strconv.Atoi(c[j+1:]); err == nil && slices.Contains(out[:i], c[:j]) {
+				out[i] = c[:j]
+			}
+		}
+	}
+	return out
+}
+
+// markedBlobs turns the BLOBs the shell marks (x'00ff', outside any string) into JSON:
+// {"hex":"00ff"}.
+func markedBlobs(out []byte) []byte {
+	if !bytes.Contains(out, []byte("x'")) {
+		return out
+	}
+	var b bytes.Buffer
+	inString, escaped := false, false
+	for i := 0; i < len(out); i++ {
+		c := out[i]
+		switch {
+		case inString:
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+		case c == '"':
+			inString = true
+		case c == 'x' && i+1 < len(out) && out[i+1] == '\'':
+			end := bytes.IndexByte(out[i+2:], '\'')
+			if end < 0 {
+				return out // not the shell's: the decoder reports it
+			}
+			b.WriteString(`{"hex":"`)
+			b.Write(out[i+2 : i+2+end])
+			b.WriteString(`"}`)
+			i += 2 + end
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.Bytes()
+}
 
 // parseShellJSON splits the sqlite3 shell's -json output into each statement's rows: a
 // JSON array per statement that has rows, each statement ended by sqlSeparator's.
@@ -415,7 +552,8 @@ func readJSONObject(dec *json.Decoder) ([]string, agent.Row, error) {
 }
 
 // jsonValue is a JSON value as a Row value: whole numbers int64, other numbers float64,
-// strings, null nil, and {"b64": …} bytes (the python3 script's BLOBs).
+// strings, null nil, and bytes for {"b64": …} (the python3 script's BLOBs) and {"hex": …}
+// (the sqlite3 shell's, markedBlobs).
 func jsonValue(raw json.RawMessage) (any, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -436,6 +574,9 @@ func jsonValue(raw json.RawMessage) (any, error) {
 	case map[string]any:
 		if s, ok := x["b64"].(string); ok && len(x) == 1 {
 			return base64.StdEncoding.DecodeString(s)
+		}
+		if s, ok := x["hex"].(string); ok && len(x) == 1 {
+			return hex.DecodeString(s)
 		}
 	}
 	return nil, fmt.Errorf("unexpected value %s", raw)
@@ -464,7 +605,8 @@ func remoteSQLError(db, stderr string, code int) error {
 // pythonSQLScript reads a database read only with Python's sqlite3 module, with SQLite's
 // authorizer set to the same rules as the local reader (sqlAuthorized). Its request comes
 // on stdin; it prints {"results": [{"columns": [...], "rows": [[...]]}]} or exits 2 after
-// printing the error on stderr.
+// printing the error on stderr. Python before 3.11 has no setlimit: a long value is then
+// caught by the output cap alone.
 const pythonSQLScript = `import base64, json, sqlite3, sys
 req = json.load(sys.stdin)
 fold = lambda xs: set(x.lower() for x in xs)
@@ -486,10 +628,10 @@ def auth(action, a1, a2, db, src):
         return OK if (a1 or "").lower() == "table_info" else DENY
     if action == 20:
         t = (a1 or "").lower()
-        if not a2 and t not in stored and not t.startswith("sqlite_") and not t.startswith("pragma_"):
-            return OK
         if t in deny:
             return DENY
+        if not a2 and t not in stored and not t.startswith("sqlite_") and not t.startswith("pragma_"):
+            return OK
         return OK if not limited or t in allow or t in funcs else DENY
     return DENY
 def enc(v):
@@ -507,7 +649,7 @@ try:
         cols = [d[0] for d in (cur.description or [])]
         out.append({"columns": cols, "rows": [[enc(v) for v in r] for r in cur]})
     conn.execute("COMMIT")
-    sys.stdout.write(json.dumps({"results": out}, allow_nan=False))
+    sys.stdout.buffer.write(json.dumps({"results": out}, allow_nan=False, ensure_ascii=False).encode("utf-8"))
 except (sqlite3.Error, ValueError, OverflowError) as e:
     sys.stderr.write(str(e)); sys.exit(2)
 `

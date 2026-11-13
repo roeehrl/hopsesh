@@ -11,21 +11,28 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 func TestPickSQLTier(t *testing.T) {
 	for out, want := range map[string]string{
-		"sqlite3 3.43.2 2023-10-10 13:08:14 abc\npython3 3.43.2\n": tierSQLite3,
+		"sqlite3 3.54.0 2026-04-09 x\nsqlite3-blobs yes\n":         tierSQLite3 + "+blobs",
+		"sqlite3 3.43.2 2023-10-10 13:08:14 abc\npython3 3.43.2\n": tierPython3, // BLOBs read as text
+		"sqlite3 3.43.2 2023-10-10 13:08:14 abc\n":                 tierSQLite3,
 		"sqlite3 3.31.1 2020-01-27 19:55:54 abc\npython3 3.31.1\n": tierPython3, // no -safe
 		"python3 3.40.1\n": tierPython3,
 		"sqlite3 \n":       tierNone,
 		"":                 tierNone,
 		"sqlite3 4.0.0\n":  tierSQLite3,
 	} {
-		if got := pickSQLTier(out); got != want {
-			t.Errorf("%q: %s, want %s", out, got, want)
+		tier, blobs := pickSQLTier(out)
+		if blobs {
+			tier += "+blobs"
+		}
+		if tier != want {
+			t.Errorf("%q: %s, want %s", out, tier, want)
 		}
 	}
 }
@@ -111,14 +118,19 @@ func TestRemoteSQLTierSelection(t *testing.T) {
 	ctx := context.Background()
 	db := "/home/u/.local/share/agent/agent.db"
 	t.Run("sqlite3", func(t *testing.T) {
-		f := &fakeTools{probe: "sqlite3 3.45.1 2024-01-30 x\npython3 3.45.1\n", reply: func([]string) agent.Result {
-			return agent.Result{Stdout: []byte(`[{"~hopsesh-end~":"hopsesh"}]` + "\n" + `[{"id":"ses_a","n":2}]` + "\n" + `[{"~hopsesh-end~":"hopsesh"}]` + "\n")}
+		end := `[{"~hopsesh-end~":"hopsesh"}]` + "\n"
+		f := &fakeTools{probe: "sqlite3 3.54.0 2026-04-09 x\nsqlite3-blobs yes\n", reply: func([]string) agent.Result {
+			return agent.Result{Stdout: []byte(`[{"~hopsesh-views~":null}]` + "\n" + end + `[{"~hopsesh-cols~":1,"id":null,"n":null}]` + "\n" + end +
+				`[{"id":"ses_a","n":2,"b":x'00ff41'}]` + "\n" + end)}
 		}}
 		m := remoteMachine("linux", f)
 		r := m.SQL().(agent.SQLTableLimiter).Only([]string{"session"}, []string{"credential"})
 		got, err := r.Query(ctx, db, "SELECT id, count(*) AS n FROM session WHERE id = ?", "ses_a")
-		if err != nil || got.Rows[0].String("id") != "ses_a" || got.Rows[0].Int("n") != 2 || strings.Join(got.Columns, ",") != "id,n" {
+		if err != nil || got.Rows[0].String("id") != "ses_a" || got.Rows[0].Int("n") != 2 || strings.Join(got.Columns, ",") != "id,n,b" {
 			t.Fatalf("%+v %v", got, err)
+		}
+		if b, ok := got.Rows[0]["b"].([]byte); !ok || string(b) != "\x00\xffA" {
+			t.Fatalf("a BLOB the shell marked: %#v", got.Rows[0]["b"])
 		}
 		if _, err := m.SQL().(agent.SQLTableLimiter).Only([]string{"session"}, nil).Query(ctx, db, "SELECT 1 AS x FROM session"); err != nil {
 			t.Fatal(err)
@@ -127,10 +139,10 @@ func TestRemoteSQLTierSelection(t *testing.T) {
 			t.Fatalf("calls: %v", f.calls)
 		}
 		last := f.calls[1]
-		if !strings.Contains(last[len(last)-1], "WHERE id = 'ses_a'") || last[len(last)-2] != "file:"+db+"?mode=ro" {
+		if !strings.Contains(last[len(last)-1], "WHERE id = 'ses_a'") || !strings.Contains(last[len(last)-2], "~hopsesh-views~") || last[len(last)-3] != "file:"+db+"?mode=ro" {
 			t.Fatalf("the shell's arguments: %q", last)
 		}
-		for _, flag := range []string{"-readonly", "-safe", "-bail", "-json"} {
+		for _, flag := range []string{"-readonly", "-safe", "-bail", "-json", "--blob-quote sql"} {
 			if !strings.Contains(strings.Join(last, " "), flag) {
 				t.Errorf("no %s in %q", flag, last)
 			}
@@ -263,6 +275,77 @@ func TestRemoteSQLTiersOnRealTools(t *testing.T) {
 			if err != nil || strings.Join(cols, ",") != "id,session_id,seq,text" {
 				t.Fatalf("columns %v %v", cols, err)
 			}
+			// A comment at the end of a query, which the text check allows, hides nothing.
+			if got, err := r.Query(ctx, db, "SELECT id FROM session -- trailing note"); err != nil || len(got.Rows) != 1 {
+				t.Fatalf("a query ending in a comment: %+v %v", got, err)
+			}
+			// No rows still names the columns, in the query's order.
+			if got, err := r.Query(ctx, db, "SELECT title, id FROM session WHERE 0"); err != nil || len(got.Rows) != 0 || strings.Join(got.Columns, ",") != "title,id" {
+				t.Fatalf("an empty result: %+v %v", got, err)
+			}
+			// Text in other scripts comes back as it is.
+			if got, err := r.Query(ctx, db, "SELECT 'héllo, 日本' AS t FROM session"); err != nil || got.Rows[0].String("t") != "héllo, 日本" {
+				t.Fatalf("text: %+v %v", got, err)
+			}
+			// A BLOB comes back as its bytes where the tier can tell it from text.
+			if _, blobs := m.sqlTierOf(); tier == tierPython3 || blobs {
+				got, err := r.Query(ctx, db, "SELECT data FROM session")
+				if b, ok := got.Rows[0]["data"].([]byte); err != nil || !ok || string(b) != "\x00\xffA" {
+					t.Fatalf("a BLOB: %#v %v", got.Rows[0]["data"], err)
+				}
+			}
+			// The database is closed (WAL, no -shm): it is read as immutable from the start,
+			// and nothing is made beside it.
+			for _, f := range []string{db + "-wal", db + "-shm"} {
+				if _, err := os.Stat(f); err == nil {
+					t.Fatalf("a read made %s", f)
+				}
+			}
 		})
+	}
+}
+
+// A reader refuses output over its cap before decoding it, on both tiers.
+func TestRemoteSQLOutputCap(t *testing.T) {
+	big := []byte(strings.Repeat("x", 4<<20))
+	for _, probe := range []string{"sqlite3 3.54.0 x\nsqlite3-blobs yes\n", "python3 3.12.1\n"} {
+		f := &fakeTools{probe: probe, reply: func([]string) agent.Result { return agent.Result{Stdout: big} }}
+		r := remoteMachine("linux", f).SQL().(agent.SQLTableLimiter).Only([]string{"session"}, nil)
+		_, err := r.Batch(context.Background(), "/db", []agent.Statement{{Query: "SELECT id FROM session", Limits: agent.SQLLimits{MaxBytes: 16}}})
+		if !errors.Is(err, agent.ErrTooLarge) {
+			t.Errorf("%q: %v", probe, err)
+		}
+	}
+}
+
+// A machine whose probe failed has no reader for a while, and is not probed again by
+// every reader meanwhile.
+func TestRemoteSQLProbeFailureIsKept(t *testing.T) {
+	f := &failingProbe{}
+	m := remoteMachine("linux", f)
+	if m.SQL() != nil || m.SQL() != nil || f.calls != 1 {
+		t.Fatalf("%d probes", f.calls)
+	}
+	m.sqlFailed = time.Now().Add(-sqlProbeRetry - time.Second)
+	if m.SQL() != nil || f.calls != 2 {
+		t.Fatalf("not probed again after %s: %d probes", sqlProbeRetry, f.calls)
+	}
+}
+
+type failingProbe struct{ calls int }
+
+func (f *failingProbe) Run(context.Context, []string, agent.RunOptions) (agent.Result, error) {
+	f.calls++
+	return agent.Result{}, errors.New("connection refused")
+}
+
+func TestMarkedBlobs(t *testing.T) {
+	in := `[{"a":"x'00'","b":x'00ff41',"c":"q\"x'1'","d":x''}]`
+	want := `[{"a":"x'00'","b":{"hex":"00ff41"},"c":"q\"x'1'","d":{"hex":""}}]`
+	if got := string(markedBlobs([]byte(in))); got != want {
+		t.Fatalf("%s", got)
+	}
+	if got := unwrappedColumns([]string{"id", "id:1", "a:2", "n"}); strings.Join(got, ",") != "id,id,a:2,n" {
+		t.Fatalf("%v", got)
 	}
 }

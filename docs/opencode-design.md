@@ -218,15 +218,25 @@ as `[]map[string]any` with max-rows and max-bytes guards. A `Batch` form runs se
 read transaction (consistent WAL snapshot across message and part queries).
 
 **Local** (`internal/core/host/sql_local.go`, modernc.org/sqlite v1.61.0, already in `go.mod`):
-- DSN `file:<db>?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(2000)`. Never `immutable=1`.
+- DSN `file:<db>?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(2000)`. `immutable=1` only for a
+  closed WAL database: with neither a `-wal` nor a `-shm` file (no program has it open) SQLite
+  cannot open it read only, and the file holds everything. The read counts only if none of the
+  three files changed by its end (also when it failed); otherwise it is busy and done again. A
+  closed WAL database is told from its header, so it is never opened through a WAL (some builds
+  would make empty `-wal`/`-shm` files in the agent's folder). Remotely the check is over SFTP,
+  whose times have a resolution of one second.
 - One `BEGIN` read transaction per batch; close after each operation so no reader blocks checkpoints.
 - `SQLITE_BUSY` → three retries with backoff. Never checkpoint, vacuum or write.
 - **Main guard: modernc's authorizer** (`RegisterAuthorizer` via `conn.Raw`): `SQLITE_READ` on a table
   outside `Spec.SQLTables`, or on a denied table, is refused.
 
 **Remote tiers** (`internal/core/host/sql_remote.go`), chosen per machine and cached:
-1. `sqlite3 -readonly -json 'file:…?mode=ro' "<query>"` over SSH Exec (always on macOS, common on Linux).
-2. `python3 -I` with a fixed embedded script using the `sqlite3` module (read-only URI, JSON out).
+1. `sqlite3 -readonly -json 'file:…?mode=ro' "<query>"` over SSH Exec (always on macOS, common on Linux),
+   when the shell marks BLOBs in its JSON (`.mode json --blob-quote sql`, current shells).
+2. `python3 -I` with a fixed embedded script using the `sqlite3` module (read-only URI, JSON out, the
+   same authorizer as locally). Chosen over an older sqlite3 shell, which prints a BLOB as text.
+   An older shell (3.37+) is the tier only where python3 is missing; a module reads a BLOB column
+   there with `hex()`.
 3. **No SQL:** the module falls back to `opencode service status`, then `opencode api GET /api/session`,
    `GET /api/session/{id}/message` and `session export`, with `--standalone` when the service is stopped.
    This returns projected JSON (parts merged, legacy shapes decoded) and no credential bytes. Slower;
