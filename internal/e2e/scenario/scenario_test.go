@@ -1,35 +1,104 @@
 // Package scenario runs hopsesh's command line through scripted scenarios (testdata/*.txtar)
-// with stand-in claude and codex programs on the PATH, on every OS, with no network.
+// with stand-in claude, codex and opencode programs on the PATH, on every OS, with no
+// network.
 package scenario
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rogpeppe/go-internal/testscript"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakeagent"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 	"github.com/roeehrl/hopsesh/internal/ui/cli"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
-		"hopsesh": func() { os.Exit(hopsesh()) },
-		"claude":  func() { os.Exit(fakeagent.Claude()) },
-		"codex":   func() { os.Exit(fakeagent.Codex()) },
+		"hopsesh":  func() { os.Exit(hopsesh()) },
+		"claude":   func() { os.Exit(fakeagent.Claude()) },
+		"codex":    func() { os.Exit(fakeagent.Codex()) },
+		"opencode": func() { os.Exit(fakeagent.OpenCode()) },
+		// What the GUI does with a session that the command line has no command for.
+		"hopsesh-preview": func() { os.Exit(sessionAction("preview")) },
+		"hopsesh-rename":  func() { os.Exit(sessionAction("rename")) },
 		"gh": func() {
 			code, _ := fakeagent.Vendor("gh")
 			os.Exit(code)
 		},
 	})
+}
+
+// sessionAction plays a session action of the GUI (internal/app) on this machine:
+// hopsesh-preview REF [N] prints the end of a session as "role: text" lines, and
+// hopsesh-rename REF TITLE renames it.
+func sessionAction(what string) int {
+	fail := func(err error) int { fmt.Fprintln(os.Stderr, "error:", err); return 1 }
+	if len(os.Args) < 2 {
+		return fail(fmt.Errorf("usage: hopsesh-%s REF ...", what))
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fail(err)
+	}
+	a := app.New(cfg, all.Registry(), config.StateDir(), nil)
+	defer a.Catalog.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	inv := a.Scan(ctx, app.ScanOptions{NoCache: true, SkipGit: true, Hosts: []string{app.LocalName()}})
+	defer inv.Close()
+	e, err := inv.Find(app.ParseRef(os.Args[1]))
+	if err != nil {
+		return fail(err)
+	}
+	switch what {
+	case "rename":
+		if len(os.Args) != 3 {
+			return fail(fmt.Errorf("usage: hopsesh-rename REF TITLE"))
+		}
+		if _, err := a.Rename(ctx, inv, e, os.Args[2]); err != nil {
+			return fail(err)
+		}
+		return 0
+	}
+	n := 10
+	if len(os.Args) > 2 {
+		fmt.Sscan(os.Args[2], &n)
+	}
+	p, err := a.Preview(ctx, inv, e, n)
+	if err != nil {
+		return fail(err)
+	}
+	for _, it := range p.Items {
+		text := strings.Join(strings.Fields(it.Text), " ")
+		if it.Role == agent.PreviewTools {
+			var kinds []string
+			for k, c := range it.Tools {
+				kinds = append(kinds, fmt.Sprintf("%s×%d", k, c))
+			}
+			sort.Strings(kinds)
+			text = strings.Join(kinds, " ")
+		}
+		fmt.Printf("%s: %s\n", it.Role, text)
+	}
+	if p.More {
+		fmt.Println("(earlier messages)")
+	}
+	return 0
 }
 
 func hopsesh() int {
