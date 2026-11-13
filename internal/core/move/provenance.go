@@ -224,11 +224,32 @@ func nativeProjection(source, target ir.Segment) ([]ir.Projection, error) {
 		}
 		s, ok := by[n.Native.Anchor]
 		if !ok {
+			if ps, ok := renamedProjection(source, target); ok {
+				return ps, nil
+			}
 			return nil, fmt.Errorf("native record %s has no source provenance", n.Native.Anchor)
 		}
 		ps = append(ps, ir.Projection{Anchor: n.Native.Anchor, Hash: ir.ContentHash(n), Coverage: s.Coverage, Fragments: s.Fragments, Generated: s.Generated, Fidelity: "native"})
 	}
 	return ps, nil
+}
+
+// renamedProjection maps a copy whose agent gave its records new ids (OpenCode's message
+// ids are keys of its whole database, so a copy kept beside the original has its own): it
+// is the source node for node, each the same content, in the same order.
+func renamedProjection(source, target ir.Segment) ([]ir.Projection, bool) {
+	if len(source.Nodes) != len(target.Nodes) || len(target.Nodes) == 0 {
+		return nil, false
+	}
+	ps := make([]ir.Projection, 0, len(target.Nodes))
+	for i, n := range target.Nodes {
+		s := source.Nodes[i]
+		if n.Native == nil || s.Kind != n.Kind || s.Actor != n.Actor || ir.ContentHash(s) != ir.ContentHash(n) {
+			return nil, false
+		}
+		ps = append(ps, ir.Projection{Anchor: n.Native.Anchor, Hash: ir.ContentHash(n), Coverage: s.Coverage, Fragments: s.Fragments, Generated: s.Generated, Fidelity: "native"})
+	}
+	return ps, true
 }
 
 func conversionLoss(r convert.Report) []string {

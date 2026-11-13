@@ -267,3 +267,19 @@ func setAsideSession(ctx context.Context, side Side, h agent.Host, j *journal.Jo
 	}
 	return nil
 }
+
+// resumeNow is the command that resumes a session now on side's machine: the module's
+// HostResumer's, which checks the machine as it is now, else planned (made before the
+// session was there). A resumer that refuses leaves planned, with its reason as a warning.
+func resumeNow(ctx context.Context, side Side, h agent.Host, pl agent.Placement, o agent.ResumeOptions, planned agent.Command, res *Result) agent.Command {
+	hr, ok := side.Module.(agent.HostResumer)
+	if !ok || o.App {
+		return planned
+	}
+	c, err := hr.ResumeOn(ctx, h, side.Install, pl.Key, pl, o)
+	if err != nil {
+		res.Warnings = append(res.Warnings, "before you resume it: "+err.Error())
+		return planned
+	}
+	return c
+}

@@ -246,6 +246,9 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 	if p.StartPrompt != "" && os.MkdirAll(filepath.Dir(promptFile), 0o700) == nil && os.WriteFile(promptFile, []byte(p.StartPrompt), 0o600) == nil {
 		res.PromptFile = promptFile
 	}
+	// The session is there now: a module whose command depends on the machine as it is
+	// (OpenCode's program must be of its running service's version) says it now.
+	p.Resume = resumeNow(ctx, tgt, tgtHost, p.Placement, p.resumeOpts, p.Resume, res)
 	res.Command, res.Run = launch.Shell(p.Resume, res.PromptFile, launch.DefaultShell()), p.Resume
 	if err := j.SealWith(ctx, reachOf(ctx, p, in)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
