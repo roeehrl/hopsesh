@@ -10,6 +10,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/testkit/thirdagent"
 )
 
 func accountsApp(t *testing.T) (*App, string) {
@@ -125,5 +126,40 @@ func TestOldAccountFoldersMoveOutOfTheStateFolder(t *testing.T) {
 	}
 	if left, _ := a.FoldersToMove(); len(left) != 0 {
 		t.Fatalf("left: %+v", left)
+	}
+}
+
+// An agent with several roots gets each pinned in its account command, and a new folder
+// copies only the listed settings, never a credential.
+func TestAccountFolderOfMultiRootAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no account commands on Windows")
+	}
+	home := t.TempDir()
+	root := filepath.Join(home, "accounts", "third", "work")
+	if _, err := addShellCommand(home, "third-work", thirdagent.New(), root); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(home, ".local", "bin", "third-work"))
+	for _, want := range []string{"export THIRD_DATA_DIR='" + root + "'", "export THIRD_CONFIG_DIR='" + filepath.Join(root, "config") + "'"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("the command lacks %s:\n%s", want, b)
+		}
+	}
+	from := filepath.Join(home, "default")
+	os.MkdirAll(from, 0o700)
+	os.WriteFile(filepath.Join(from, "settings.json"), []byte(`{"theme":"dark","tui":{"scroll":3,"token":"x"},"apiKey":"sk-x"}`), 0o600)
+	os.WriteFile(filepath.Join(from, "config.toml"), []byte("theme = \"light\"\nkey = \"x\"\n"), 0o600)
+	os.MkdirAll(root, 0o700)
+	if err := inherit(from, root, thirdagent.New().Spec().Accounts.Inherit); err != nil {
+		t.Fatal(err)
+	}
+	js, _ := os.ReadFile(filepath.Join(root, "settings.json"))
+	if !strings.Contains(string(js), `"theme": "dark"`) || !strings.Contains(string(js), `"scroll": 3`) || strings.Contains(string(js), "sk-x") || strings.Contains(string(js), "token") {
+		t.Fatalf("settings.json: %s", js)
+	}
+	toml, _ := os.ReadFile(filepath.Join(root, "config.toml"))
+	if !strings.Contains(string(toml), "light") || strings.Contains(string(toml), "key") {
+		t.Fatalf("config.toml: %s", toml)
 	}
 }

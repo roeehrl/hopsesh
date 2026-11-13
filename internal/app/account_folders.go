@@ -129,9 +129,28 @@ func (a *App) addLocalAccount(ctx context.Context, id agent.ID, name string, tag
 	return a.accountStore().Register(p)
 }
 
-// inherit copies top-level TOML settings (by file) from the default folder to a new one.
+// inherit copies settings (by file) from the default folder to a new one: top-level keys
+// of a TOML file, or dot paths into a JSON file (never a credential, agent.InheritJSON).
 func inherit(from, to string, keys map[string][]string) error {
 	for file, names := range keys {
+		if strings.EqualFold(filepath.Ext(file), ".json") {
+			src, err := os.ReadFile(filepath.Join(from, file))
+			if err != nil {
+				continue // no such file there: the agent's own default
+			}
+			b, err := agent.InheritJSON(src, names)
+			clear(src)
+			if err != nil || b == nil {
+				continue // not one hopsesh reads, or nothing to copy
+			}
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(to, file)), 0o700); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(to, file), b, 0o600); err != nil {
+				return err
+			}
+			continue
+		}
 		var have map[string]any
 		if _, err := toml.DecodeFile(filepath.Join(from, file), &have); err != nil {
 			continue // no such file there, or not one hopsesh reads: the agent's own default
@@ -164,7 +183,7 @@ const commandMark = "# Added by hopsesh for an account folder"
 // unless a command of that name hopsesh did not add is there.
 func addShellCommand(home, name string, mod agent.Module, root string) (string, error) {
 	if runtime.GOOS == "windows" {
-		return "", errors.New("hopsesh adds account commands on macOS and Linux; on Windows set " + strings.Join(mod.Spec().Accounts.RootEnv, " and ") + " yourself")
+		return "", errors.New("hopsesh adds account commands on macOS and Linux; on Windows set " + strings.Join(mod.Spec().Accounts.Vars(), " and ") + " yourself")
 	}
 	path := filepath.Join(home, ".local", "bin", name)
 	if b, err := os.ReadFile(path); err == nil && !bytes.Contains(b, []byte(commandMark)) {
@@ -178,8 +197,9 @@ func addShellCommand(home, name string, mod agent.Module, root string) (string, 
 	for _, v := range spec.Accounts.Unset {
 		fmt.Fprintf(&b, "unset %s\n", v)
 	}
-	for _, v := range spec.Accounts.RootEnv {
-		fmt.Fprintf(&b, "export %s=%s\n", v, shQuote(root))
+	for _, e := range spec.Accounts.EnvFor(root, agent.PathFor(runtime.GOOS)) {
+		k, v, _ := strings.Cut(e, "=")
+		fmt.Fprintf(&b, "export %s=%s\n", k, shQuote(v))
 	}
 	fmt.Fprintf(&b, "exec %s \"$@\"\n", spec.Binaries[0].Name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
