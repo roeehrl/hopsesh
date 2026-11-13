@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/testkit/thirdagent"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -41,6 +42,25 @@ func TestAgentFactsFromModules(t *testing.T) {
 	// A cloud-only module has no columns and no local folder.
 	if f := facts["copilot"]; f.Local || len(f.Tools) != 0 {
 		t.Fatalf("copilot %+v", f)
+	}
+}
+
+// A third local agent with several roots gets its facts from its module alone: its main
+// root is its default folder, its columns follow its desktop app, and settings it carries
+// into a new folder do not make it keep its sign-in there.
+func TestAgentFactsThirdAgent(t *testing.T) {
+	f := agentFacts(thirdagent.New(), "windows")
+	if f.Short != "Third" || !f.Local || !f.Accounts || f.InheritsSignIn || f.HookReview || f.RemoteControlTyped != "" {
+		t.Fatalf("third %+v", f)
+	}
+	if f.DefaultRoot != "~/.local/share/third" {
+		t.Fatalf("default folder %q, want the main root's", f.DefaultRoot)
+	}
+	if got := []ToolDTO{{"third-terminal", "Third Agent · terminal"}, {"third-desktop", "Third desktop"}}; !reflect.DeepEqual(f.Tools, got) {
+		t.Fatalf("third tools %+v", f.Tools)
+	}
+	if f.Desktop == nil || f.Desktop.Product != "Third" || f.Desktop.OwnSignIn || f.Desktop.Shared {
+		t.Fatalf("third desktop %+v", f.Desktop)
 	}
 }
 
