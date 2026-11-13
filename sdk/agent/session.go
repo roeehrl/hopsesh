@@ -1,6 +1,10 @@
 package agent
 
-import "time"
+import (
+	"context"
+	"fmt"
+	"time"
+)
 
 // Summary describes one session, the same way for every agent.
 type Summary struct {
@@ -83,6 +87,10 @@ type BundleFile struct {
 	Role     FileRole    `json:"role"`
 	Rewrite  RewriteKind `json:"rewrite"`
 	Growable bool        `json:"growable,omitempty"` // may still be appended to while copied
+	// Virtual: the module makes the file's bytes (Materializer) from a session the agent
+	// keeps elsewhere, in a database; nothing at Root/Rel is read for it. Size is then an
+	// estimate.
+	Virtual bool `json:"virtual,omitempty"`
 }
 
 // Bundle is every file of one session.
@@ -324,4 +332,108 @@ type Account struct {
 	// RemoteControl is whether this login can use the agent's own remote control.
 	RemoteControl bool   `json:"remoteControl"`
 	Why           string `json:"why,omitempty"` // why not
+}
+
+// Materializer makes the bytes of a session's Virtual bundle files: the session as the
+// module's own file format (JSON lines), read from where the agent keeps it. The core
+// stages, rewrites, packages and installs those bytes like any other file. A module with
+// Virtual files implements it.
+type Materializer interface {
+	Materialize(ctx context.Context, h Host, in Install, s Summary, f BundleFile) ([]byte, error)
+}
+
+// VirtualSessions marks a module whose sessions are not one growing file: Summary.Size and
+// ir.Cursor.Offset count the session's records (settled messages), not bytes, and
+// Summary.Path is an anchor file hopsesh keeps, which may be missing. The core then
+// compares stamps (SessionStamp) instead of file sizes and times.
+type VirtualSessions interface {
+	VirtualSessions()
+}
+
+// IsVirtual reports whether a module keeps virtual sessions.
+func IsVirtual(m Module) bool {
+	_, ok := m.(VirtualSessions)
+	return ok
+}
+
+// SessionStamp is a module's opaque mark of a session's state: two equal stamps mean
+// nothing was added or changed in between. "" is no stamp.
+type SessionStamp string
+
+// SessionStamper gives a session's stamp without listing every session, for caches and
+// for guards that refuse to undo over later work. A missing session is ErrNotFound.
+type SessionStamper interface {
+	SessionStamp(ctx context.Context, h Host, in Install, id SessionID) (SessionStamp, error)
+}
+
+// SummaryStamp is the stamp of a listed virtual session: its record count and last
+// activity.
+func SummaryStamp(s Summary) SessionStamp {
+	return SessionStamp(fmt.Sprintf("%d@%d", s.Size, s.LastActivity.UTC().UnixNano()))
+}
+
+// StampOf is a session's stamp from its module: SessionStamper's, else SummaryStamp for a
+// virtual module. ok is false when the module has neither, and the core compares the main
+// file's size and time instead.
+func StampOf(ctx context.Context, m Module, h Host, in Install, s Summary) (stamp SessionStamp, ok bool, err error) {
+	if st, is := m.(SessionStamper); is {
+		stamp, err = st.SessionStamp(ctx, h, in, s.Key.Session)
+		return stamp, true, err
+	}
+	if IsVirtual(m) {
+		return SummaryStamp(s), true, nil
+	}
+	return "", false, nil
+}
+
+// SessionStore changes sessions the agent keeps in a database, through the agent's own
+// program, never by writing the database. The core journals each change as a
+// vendor-session operation and undoes it with these methods.
+type SessionStore interface {
+	SessionStamper
+	// Backup saves the session as the agent exports it to a file under the install's
+	// roots (through h.FS, journaled) and returns that file and the stamp it was taken
+	// at.
+	Backup(ctx context.Context, h Host, in Install, id SessionID) (backup string, stamp SessionStamp, err error)
+	// Delete removes the session (and its child sessions) only while its stamp is still
+	// expect; otherwise ErrDiverged, and nothing is deleted. A session already gone is
+	// ErrNotFound.
+	Delete(ctx context.Context, h Host, in Install, id SessionID, expect SessionStamp) error
+	// Restore imports a Backup again, keeping the session's id, and returns the new stamp.
+	// It is idempotent: a session already there with the backup's content is left as it
+	// is.
+	Restore(ctx context.Context, h Host, in Install, id SessionID, backup string) (SessionStamp, error)
+}
+
+// SessionIDMinter makes new session ids in the agent's own form (OpenCode: "ses_…"), for a
+// copy kept beside the original or a session written from another agent. Without it the
+// core makes a UUID.
+type SessionIDMinter interface {
+	NewSessionID(in Install, now time.Time) SessionID
+}
+
+// NewSessionID is a new id from the module's minter, else from fallback.
+func NewSessionID(m Module, in Install, now time.Time, fallback func() string) SessionID {
+	if mm, ok := m.(SessionIDMinter); ok {
+		if id := mm.NewSessionID(in, now); id != "" {
+			return id
+		}
+	}
+	return SessionID(fallback())
+}
+
+// VendorInstaller is a PostInstaller whose AfterInstall is the install itself: the staged
+// files are input for the agent's own importer (OpenCode's session import), not the
+// session. When InstallsViaVendor is true the core runs AfterInstall before it records
+// lineage, treats its failure as the operation's failure, and runs it again when it
+// recovers an interrupted operation, so AfterInstall must be idempotent.
+type VendorInstaller interface {
+	PostInstaller
+	InstallsViaVendor() bool
+}
+
+// InstallsViaVendor reports whether a module's sessions are installed by the agent itself.
+func InstallsViaVendor(m Module) bool {
+	v, ok := m.(VendorInstaller)
+	return ok && v.InstallsViaVendor()
 }
