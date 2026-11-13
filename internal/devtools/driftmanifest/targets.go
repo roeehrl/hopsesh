@@ -212,6 +212,38 @@ var agentWatch = map[agent.ID]target{
 			{Version: "0.156.0", Gates: "`--no-daemon` on resume and fork in hopsesh's own terminal tabs (native writer-lock evidence)", Source: "agents/codex/ownedtab.go", Relies: []string{"--no-daemon"}},
 		},
 	},
+	"opencode": {
+		Group:    "local",
+		Surface:  "OpenCode 2.x's SQLite database read through an allowlist of tables (session_v2, session_message, session_part, kv's models.dev catalog, migration; never credential, account, control_account, account_state, permission or workspace) behind a column gate, the settled-message filter and part-row merge of `opencode session export`, the shared background service (`opencode service status`, `--standalone` when it is stopped, never started, stopped or restarted by hopsesh), `opencode api` (GET /api/session, /api/session/active, /api/info; PATCH /api/session/<id>; POST /api/session/<id>/interrupt), `opencode auth list --format json`, `opencode -s <id>` with a program of the service's version (the desktop app's bundled or staged CLI), OpenCode's ses_/msg_ ids, XDG data, config and state folders, OPENCODE_DB and AGENTS.md",
+		Priority: "high",
+		Latest:   latest{From: "npm", Ref: "@opencode/cli"},
+		Package:  "@opencode/cli",
+		Watch: watch{
+			Docs:  prefixed("https://raw.githubusercontent.com/anomalyco/opencode/dev/services/site/src/docs/content/", ".mdx", []string{"index", "config", "instructions", "skills", "tools", "permissions", "plugins", "compaction", "migrate-v1", "troubleshooting"}),
+			Feeds: []feed{{Kind: "releases", Repo: "anomalyco/opencode", Tag: "v"}},
+			Grep:  `session|session_v2|session_message|session_part|migration|export|import|transfer|settled|part_rows|service|standalone|serve|mismatch|api/session|interrupt|active|auth|credential|account|XDG_DATA_HOME|XDG_CONFIG_HOME|XDG_STATE_HOME|OPENCODE_CONFIG_DIR|OPENCODE_DB|desktop|opencode-cli|archiv|fork|subagent|parent|title|AGENTS\.md|deprecat|remov|rename|breaking`,
+			Help: [][]string{{"opencode", "--help"}, {"opencode", "service", "status", "--help"}, {"opencode", "api", "--help"}, {"opencode", "auth", "list", "--help"},
+				{"opencode", "session", "export", "--help"}, {"opencode", "session", "import", "--help"}, {"opencode", "session", "list", "--help"}, {"opencode", "session", "delete", "--help"}},
+			Relies: []string{"--session", "--prompt", "--standalone", "service status", "api", "auth list", "--format", "session export", "--version"},
+			Code: &code{
+				Repo: "anomalyco/opencode",
+				Paths: []string{"packages/core/src/session/sql.ts", "packages/core/src/session/transfer.ts", "packages/core/src/session/history.ts", "packages/core/src/session/info.ts",
+					"packages/schema/src/session.ts", "packages/schema/src/session-message.ts", "packages/schema/src/identifier.ts", "packages/cli/src/database-path.ts",
+					"packages/client/src/effect/service.ts", "packages/cli/src/commands/handlers/service/status.ts", "packages/cli/src/commands/handlers/auth/list.ts",
+					"packages/util/src/session-title-fallback.ts", "packages/util/src/global-roots.ts"},
+				Canaries: []string{"session_v2", "session_part", "isSettled", "withParts", "time_suspended", "fork_boundary", "SessionAlreadyProjected", "mismatch", "OPENCODE_DB", "isExactRootFallback"},
+			},
+			Tests: "TestOpenCode",
+			Formats: []format{
+				{ID: "opencode-session", What: "session_v2 rows: a session's folder, title, version, parent (subagents), fork, archive and turn times", Fields: []string{"session_v2", "directory", "parent_id", "fork_session_id", "fork_boundary", "time_archived", "time_busy", "time_idle", "time_suspended", "time_compacting", "version"}, Readers: []string{"agents/opencode/sql.go", "agents/opencode/schema.go"}},
+				{ID: "opencode-message", What: "session_message rows and their session_part rows (parts first, then inline content), filtered as session export filters them", Fields: []string{"session_message", "session_part", "ordinal", "seq", "completed", "running", "content"}, Readers: []string{"agents/opencode/sql.go", "agents/opencode/model.go"}},
+				{ID: "opencode-catalog", What: "kv's cached models.dev catalog: a model's context and input limits", Fields: []string{"models-dev", "catalog", "limit", "context", "input"}, Readers: []string{"agents/opencode/sql.go", "agents/opencode/capacity.go"}},
+			},
+		},
+		Floors: []floor{
+			{Version: "2.1.0", Gates: "every OpenCode command and API call hopsesh makes, and the session_v2 tables it reads", Source: "agents/opencode/service.go", Relies: []string{"--standalone", "service status", "api", "session export"}},
+		},
+	},
 }
 
 // review is how the drift check reviews a cloud a module declares (Spec.Clouds, which

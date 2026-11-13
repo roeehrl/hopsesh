@@ -479,9 +479,7 @@ its clouds with their fidelity, needs and the upstream changes the drift check w
 					case rw.Install.Present:
 						here = "data only"
 					}
-					for _, p := range rw.Install.Roots {
-						folder = p
-					}
+					folder = rw.Install.Main() // an agent with several folders shows its main one
 				}
 				if !rw.Enabled {
 					here += " (disabled)"

@@ -23,6 +23,8 @@ func Env(h string) map[string]string {
 	env := map[string]string{
 		"HOME": h, "USERPROFILE": h, "HOPSESH_CONFIG_DIR": filepath.Join(h, "config"),
 		"HOPSESH_STATE_DIR": filepath.Join(h, "state"), "HOPSESH_MACHINE": "studio", "CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "",
+		// OpenCode's folders follow the XDG variables: never this machine's real ones.
+		"XDG_DATA_HOME": "", "XDG_CONFIG_HOME": "", "XDG_STATE_HOME": "", "OPENCODE_CONFIG_DIR": "", "OPENCODE_DB": "",
 		"HOPSESH_TAILSCALE":    "off", // never show this machine's real tailnet
 		"HOPSESH_APP_RUNTIMES": "off", // never run an agent bundled in this machine's real desktop app
 	}

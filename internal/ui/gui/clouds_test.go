@@ -105,8 +105,10 @@ func TestCloudInTheWindow(t *testing.T) {
 		t.Fatalf("machines: %+v", m.Clouds)
 	} else {
 		for _, n := range m.Here.Agents {
-			if !strings.HasPrefix(n, "Claude Code") && !strings.HasPrefix(n, "Codex") {
-				t.Errorf("a cloud-only module is listed as an agent here: %q", n)
+			for _, cloudOnly := range []string{"GitHub Copilot", "Jules", "Devin", "Amp"} {
+				if strings.HasPrefix(n, cloudOnly) {
+					t.Errorf("a cloud-only module is listed as an agent here: %q", n)
+				}
 			}
 		}
 	}
