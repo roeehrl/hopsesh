@@ -12,6 +12,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -182,14 +183,32 @@ type Binary struct {
 type Root struct {
 	Name string   // "home"
 	Env  []string // overriding variables, first set wins: ["CLAUDE_CONFIG_DIR"]
+	// EnvSub are variables that set the root as a folder inside their value, tried after
+	// Env, first set wins: {XDG_DATA_HOME, "opencode"} is $XDG_DATA_HOME/opencode.
+	EnvSub []EnvSub
 	// Default is the folder when no variable is set, by GOOS ("*" for all); "~" is the home
 	// folder, "{name}" another root.
 	Default map[string]string
 }
 
-// Vars are the environment variables that can set the root. Code that keys on or
-// resolves a root's environment goes through Vars and Locate, never Env itself.
-func (r Root) Vars() []string { return r.Env }
+// EnvSub is a variable that names a folder the root is inside (XDG base directories).
+type EnvSub struct {
+	Env string `json:"env"` // "XDG_DATA_HOME"
+	Sub string `json:"sub"` // "opencode", slash-separated
+}
+
+// Vars are the environment variables that can set the root, in the order Locate tries
+// them. Code that keys on or resolves a root's environment goes through Vars and Locate,
+// never Env or EnvSub themselves.
+func (r Root) Vars() []string {
+	out := append([]string(nil), r.Env...)
+	for _, e := range r.EnvSub {
+		if !slices.Contains(out, e.Env) {
+			out = append(out, e.Env)
+		}
+	}
+	return out
+}
 
 // DefaultFor is the root's folder on goos when no variable sets it ("~/.claude").
 func (r Root) DefaultFor(goos string) string {
@@ -199,12 +218,18 @@ func (r Root) DefaultFor(goos string) string {
 	return r.Default["*"]
 }
 
-// Locate is the root's folder on a machine, before Expand: its first set variable, else
-// its default for goos. getenv reads that machine's environment.
+// Locate is the root's folder on a machine, before Expand: its first set Env variable,
+// else the first set EnvSub variable with its subfolder, else its default for goos.
+// getenv reads that machine's environment.
 func (r Root) Locate(goos string, getenv func(string) string) string {
 	for _, e := range r.Env {
 		if v := getenv(e); v != "" {
 			return v
+		}
+	}
+	for _, e := range r.EnvSub {
+		if v := getenv(e.Env); v != "" {
+			return PathFor(goos).Join(v, e.Sub)
 		}
 	}
 	return r.DefaultFor(goos)

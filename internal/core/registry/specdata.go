@@ -56,6 +56,7 @@ type BinaryData struct {
 type RootData struct {
 	Name    string            `json:"name"`
 	Env     []string          `json:"env"`
+	EnvSub  []agent.EnvSub    `json:"envSub"`
 	Default map[string]string `json:"default"`
 }
 
@@ -143,7 +144,7 @@ func Data(s agent.Spec) SpecData {
 		for k, v := range r.Default {
 			def[k] = v
 		}
-		d.Roots = append(d.Roots, RootData{Name: r.Name, Env: list(r.Env), Default: def})
+		d.Roots = append(d.Roots, RootData{Name: r.Name, Env: list(r.Env), EnvSub: list(r.EnvSub), Default: def})
 	}
 	for _, c := range s.Clouds {
 		problems := map[string]string{}
