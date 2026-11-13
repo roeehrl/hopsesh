@@ -1,5 +1,6 @@
 // Command fakeagent is the stand-in agent as a program: built as codex (or codex.exe) it
-// answers like Codex, built as claude like Claude Code, built as gh, jules, devin or amp
+// answers like Codex, built as claude like Claude Code, built as opencode like OpenCode
+// 2.3.0 (with a database of its own), built as gh, jules, devin or amp
 // like those vendors' CLIs (their cloud verbs), and built as fakecloud it plays the
 // stand-in clouds' agent (fakecloud work <id>). The Windows screenshots in CI put it on PATH
 // so the window shows Codex as installed without the real one.
@@ -17,6 +18,9 @@ func main() {
 	name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
 	if strings.HasPrefix(name, "claude") {
 		os.Exit(fakeagent.Claude())
+	}
+	if strings.HasPrefix(name, "opencode") {
+		os.Exit(fakeagent.OpenCode())
 	}
 	if code, ok := fakeagent.Vendor(name); ok {
 		os.Exit(code)

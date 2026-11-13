@@ -1,0 +1,334 @@
+// Package fakeopencode is the stand-in OpenCode 2.3.0 the tests (and the test bundle) run
+// in place of the real one. It keeps sessions in a SQLite database with OpenCode's own
+// schema, where OpenCode keeps it, and answers what hopsesh asks OpenCode: --version,
+// debug paths, service status, session list|export|import|delete, auth list and the HTTP
+// API calls hopsesh makes through `opencode api`, the way OpenCode 2.3.0 does
+// (agents/opencode/testdata/2.3.0 holds what the real one printed).
+//
+// It has no model and no server. Its background service is make-believe: stopped unless
+// $FAKE_OPENCODE_SERVICE is "running" (or a URL), or a command started it, which
+// OpenCode does for any command but `run`, `service`, `debug paths` and --version when no
+// --standalone is given; the stand-in then records the start in its state folder and in
+// $FAKE_AGENT_LOG ("opencode: started the background service"), so a test can check that
+// hopsesh never starts it.
+//
+// Every call is appended to $FAKE_AGENT_LOG as "opencode <args>". Other variables:
+// $FAKE_OPENCODE_VERSION (the program's version, default 2.3.0),
+// $FAKE_OPENCODE_SERVICE_VERSION (the running service's, default the program's),
+// $FAKE_OPENCODE_ACTIVE (session ids with a turn running, comma-separated, besides those
+// in its state folder), and $FAKE_OPENCODE_AUTH (what `auth list --format json` prints,
+// default []).
+package fakeopencode
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"time"
+)
+
+// Version is the OpenCode version the stand-in plays.
+const Version = "2.3.0"
+
+// VersionLine is what `opencode --version` prints for a version.
+func VersionLine(v string) string { return "opencode v" + v }
+
+// servicePort is the background service's port (OpenCode's default outside Windows).
+const servicePort = 49374
+
+// Proc is one run of the stand-in.
+type Proc struct {
+	Args   []string
+	Dir    string                      // the working folder
+	Getenv func(string) (string, bool) // its environment (nil: the process's)
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+	Now    func() time.Time // nil: the clock
+}
+
+func (p Proc) env(k string) (string, bool) {
+	if p.Getenv != nil {
+		return p.Getenv(k)
+	}
+	return os.LookupEnv(k)
+}
+
+func (p Proc) getenv(k string) string {
+	v, _ := p.env(k)
+	return v
+}
+
+func (p Proc) now() time.Time {
+	if p.Now != nil {
+		return p.Now()
+	}
+	return time.Now()
+}
+
+func (p Proc) log(line string) {
+	if f := p.getenv("FAKE_AGENT_LOG"); f != "" {
+		if w, err := os.OpenFile(f, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+			fmt.Fprintln(w, line)
+			w.Close()
+		}
+	}
+}
+
+// Main runs the stand-in and returns its exit code.
+func Main(p Proc) int {
+	p.log("opencode " + strings.Join(p.Args, " "))
+	r := &run{Proc: p}
+	args := r.flags(p.Args)
+	if r.version {
+		fmt.Fprintln(p.Stdout, VersionLine(r.binVersion()))
+		return 0
+	}
+	if len(args) == 0 {
+		return r.tui(args)
+	}
+	switch args[0] {
+	case "debug":
+		if len(args) >= 2 && args[1] == "paths" {
+			return r.debugPaths(args[2:])
+		}
+	case "service":
+		if len(args) == 2 && args[1] == "status" {
+			fmt.Fprintln(p.Stdout, r.serviceStatus())
+			return 0
+		}
+		if len(args) >= 2 && slices.Contains([]string{"start", "stop", "restart", "set", "unset", "get"}, args[1]) {
+			return r.fail("the OpenCode stand-in does not play `opencode service %s`", args[1])
+		}
+	case "session":
+		if len(args) >= 2 {
+			return r.session(args[1], args[2:])
+		}
+	case "api":
+		return r.api(args[1:])
+	case "auth":
+		if len(args) >= 2 && args[1] == "list" {
+			return r.authList()
+		}
+	case "run", "mini":
+		return r.tui(args)
+	default:
+		if !strings.HasPrefix(args[0], "-") && len(args) == 1 {
+			return r.tui(args) // opencode <dir>
+		}
+	}
+	return r.fail("the OpenCode stand-in does not play `opencode %s`", strings.Join(args, " "))
+}
+
+// run is one command, with OpenCode's global flags read.
+type run struct {
+	Proc
+	version    bool
+	standalone bool
+	format     string
+	data       string // api -d
+	dir        string // session import --directory
+	maxCount   int
+	resume     string // -s
+}
+
+// flags takes OpenCode's flags out of args and returns the words left.
+func (r *run) flags(args []string) []string {
+	var words []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		next := func() string {
+			if i+1 < len(args) {
+				i++
+				return args[i]
+			}
+			return ""
+		}
+		name, val, hasVal := strings.Cut(a, "=")
+		take := func() string {
+			if hasVal {
+				return val
+			}
+			return next()
+		}
+		switch name {
+		case "--version", "-v":
+			r.version = true
+		case "--standalone":
+			r.standalone = true
+		case "--format":
+			r.format = take()
+		case "--data", "-d":
+			r.data = take()
+		case "--directory":
+			r.dir = take()
+		case "--max-count", "-n":
+			fmt.Sscan(take(), &r.maxCount)
+		case "--session", "-s":
+			r.resume = take()
+		case "--print-logs", "--continue", "-c":
+		case "--log-level", "--prompt", "--model", "-m", "--agent", "--header", "-H", "--param":
+			take()
+		default:
+			words = append(words, a)
+		}
+	}
+	return words
+}
+
+func (r *run) fail(f string, a ...any) int {
+	fmt.Fprintf(r.Stderr, f+"\n", a...)
+	return 1
+}
+
+func (r *run) binVersion() string {
+	if v := r.getenv("FAKE_OPENCODE_VERSION"); v != "" {
+		return v
+	}
+	return Version
+}
+
+// tui plays opening a session in the terminal: OpenCode's TUI needs a model, so the
+// stand-in only says what it would open.
+func (r *run) tui(args []string) int {
+	if r.resume != "" {
+		fmt.Fprintf(r.Stdout, "opencode (stand-in): would open %s\n", r.resume)
+	}
+	return 0
+}
+
+// paths are OpenCode's folders (packages/util/src/global-roots.ts): each XDG variable,
+// when set and not empty, else under the home folder, on every OS.
+type paths struct {
+	home, data, config, cache, state, db string
+}
+
+func (r *run) paths() paths {
+	home := r.getenv("HOME")
+	if runtime.GOOS == "windows" && r.getenv("USERPROFILE") != "" {
+		home = r.getenv("USERPROFILE")
+	}
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	root := func(env string, def ...string) string {
+		if v := r.getenv(env); v != "" {
+			return filepath.Join(v, "opencode")
+		}
+		return filepath.Join(append(append([]string{home}, def...), "opencode")...)
+	}
+	p := paths{home: home, data: root("XDG_DATA_HOME", ".local", "share"), cache: root("XDG_CACHE_HOME", ".cache"),
+		config: root("XDG_CONFIG_HOME", ".config"), state: root("XDG_STATE_HOME", ".local", "state")}
+	// OPENCODE_CONFIG_DIR replaces the config folder when it is set, even empty (`??`).
+	if v, ok := r.env("OPENCODE_CONFIG_DIR"); ok {
+		p.config = v
+	}
+	// OPENCODE_DB names the database, relative to the data folder, when it is set, even
+	// empty (`??`: the data folder itself then, which no database can open).
+	p.db = filepath.Join(p.data, "opencode.db")
+	if v, ok := r.env("OPENCODE_DB"); ok {
+		if v == ":memory:" || filepath.IsAbs(v) {
+			p.db = v
+		} else {
+			p.db = filepath.Join(p.data, v)
+		}
+	}
+	return p
+}
+
+func (r *run) debugPaths(args []string) int {
+	p := r.paths()
+	tmp := filepath.Join(os.TempDir(), "opencode")
+	rows := [][2]string{{"home", p.home}, {"data", p.data}, {"cache", p.cache}, {"config", p.config}, {"state", p.state},
+		{"tmp", tmp}, {"bin", filepath.Join(p.cache, "bin")}, {"log", filepath.Join(p.data, "log")},
+		{"repos", filepath.Join(p.data, "repos")}, {"db", p.db}}
+	if len(args) == 1 {
+		for _, row := range rows {
+			if row[0] == args[0] {
+				fmt.Fprintln(r.Stdout, row[1])
+				return 0
+			}
+		}
+		return r.fail("ERROR\n  Invalid value for argument <name>: %q. Expected: \"db\" | \"home\" | \"data\" | \"config\" | \"cache\" | \"state\" | \"tmp\" | \"bin\" | \"log\" | \"repos\"", args[0])
+	}
+	for _, row := range rows {
+		fmt.Fprintf(r.Stdout, "%-10s %s\n", row[0], row[1])
+	}
+	return 0
+}
+
+// serviceFile is where the stand-in keeps its make-believe service's address.
+func (r *run) serviceFile() string { return filepath.Join(r.paths().state, "fake-service") }
+
+// serviceURL is the running service's address ("" when it is stopped).
+func (r *run) serviceURL() string {
+	switch v := r.getenv("FAKE_OPENCODE_SERVICE"); {
+	case v == "running":
+		return fmt.Sprintf("http://127.0.0.1:%d", servicePort)
+	case strings.HasPrefix(v, "http"):
+		return v
+	}
+	if b, err := os.ReadFile(r.serviceFile()); err == nil {
+		return strings.TrimSpace(string(b))
+	}
+	return ""
+}
+
+func (r *run) serviceStatus() string {
+	if u := r.serviceURL(); u != "" {
+		return u
+	}
+	return "stopped"
+}
+
+// server is the server a command talks to: a private one with --standalone, else the
+// background service, which OpenCode starts when it is stopped.
+func (r *run) server() {
+	if r.standalone || r.serviceURL() != "" {
+		return
+	}
+	f := r.serviceFile()
+	_ = os.MkdirAll(filepath.Dir(f), 0o700)
+	_ = os.WriteFile(f, []byte(fmt.Sprintf("http://127.0.0.1:%d\n", servicePort)), 0o600)
+	r.log("opencode: started the background service")
+}
+
+// serverVersion is the version of the server a command talks to.
+func (r *run) serverVersion() string {
+	if !r.standalone {
+		if v := r.getenv("FAKE_OPENCODE_SERVICE_VERSION"); v != "" {
+			return v
+		}
+	}
+	return r.binVersion()
+}
+
+func (r *run) authList() int {
+	r.server()
+	if _, err := r.open(); err != nil {
+		return r.fail("Error: %v", err)
+	}
+	out := r.getenv("FAKE_OPENCODE_AUTH")
+	if out == "" {
+		out = "[]"
+	}
+	if r.format != "json" {
+		fmt.Fprintln(r.Stdout, "The OpenCode stand-in lists credentials only with --format json.")
+		return 0
+	}
+	fmt.Fprintln(r.Stdout, out)
+	return 0
+}
+
+// workdir is the folder the command runs in.
+func (r *run) workdir() string {
+	if r.Dir != "" {
+		return r.Dir
+	}
+	d, _ := os.Getwd()
+	return d
+}
