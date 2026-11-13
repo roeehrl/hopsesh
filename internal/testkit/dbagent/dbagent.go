@@ -8,7 +8,9 @@ package dbagent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,8 +35,11 @@ type Module struct {
 	minted  atomic.Int64
 	// FailImport makes its program refuse every import while set.
 	FailImport atomic.Bool
-	// OwnIDs makes Write give a new session an id of its own, not the one asked for.
+	// OwnIDs makes Write give a new session an id of its own (from the operation's id, so
+	// RecoverWrite finds it again), not the one asked for.
 	OwnIDs atomic.Bool
+	// BeforeDelete runs as Delete starts (set before the module is used).
+	BeforeDelete func(id agent.SessionID)
 }
 
 // New returns the stand-in agent.
@@ -87,12 +92,17 @@ type record struct {
 	Title     string `json:"title,omitempty"`
 }
 
+// dbPath is where the program keeps a data root's database (a test of the module against a
+// fake machine points it at that machine's database).
+var dbPath = DBFile
+
 // program is the agent's own program: the only writer of its database.
 func program(data string, write func(*sql.Tx) error) error {
-	if err := os.MkdirAll(data, 0o700); err != nil {
+	db := dbPath(data)
+	if err := os.MkdirAll(filepath.Dir(db), 0o700); err != nil {
 		return err
 	}
-	d, err := sql.Open("sqlite", "file:"+DBFile(data)+"?_pragma=busy_timeout(2000)")
+	d, err := sql.Open("sqlite", "file:"+db+"?_pragma=busy_timeout(2000)")
 	if err != nil {
 		return err
 	}
@@ -425,13 +435,14 @@ func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s age
 func (*Module) Profile(agent.Install) ir.Profile { return ir.Profile{Window: 200_000} }
 
 // Write writes a new session from another agent's: its JSON lines at its anchor, which
-// its program then imports, under the id the core chose.
+// its program then imports, under the id the core chose. The write is the install: the
+// core runs no AfterInstall after it.
 func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req ir.WriteRequest) (ir.WriteResult, error) {
 	if req.Mode != ir.WriteNew {
 		return ir.WriteResult{}, fmt.Errorf("%w: dbagent only writes new sessions", agent.ErrUnsupported)
 	}
-	id := agent.SessionID(req.SessionID)
-	if id == "" || m.OwnIDs.Load() {
+	id := m.writtenID(req)
+	if id == "" {
 		id = m.NewSessionID(in, time.Now())
 	}
 	info := record{Kind: "info", ID: string(id), Directory: req.Header.CWD, Title: req.Header.Title}
@@ -471,10 +482,20 @@ func (m *Module) result(ctx context.Context, h agent.Host, in agent.Install, id 
 	return res, nil
 }
 
+// writtenID is the id Write gives the session req asks for: the one asked for, or with
+// OwnIDs one of its own made from the operation's id.
+func (m *Module) writtenID(req ir.WriteRequest) agent.SessionID {
+	if m.OwnIDs.Load() && req.OperationID != "" {
+		sum := sha256.Sum256([]byte(req.OperationID))
+		return agent.SessionID("ses_own_" + hex.EncodeToString(sum[:6]))
+	}
+	return agent.SessionID(req.SessionID)
+}
+
 // RecoverWrite finishes an interrupted Write: the anchor is there, so the import runs
 // again (it does nothing when it ran).
 func (m *Module) RecoverWrite(ctx context.Context, h agent.Host, in agent.Install, req ir.WriteRequest) (ir.WriteResult, error) {
-	id := agent.SessionID(req.SessionID)
+	id := m.writtenID(req)
 	if err := m.AfterInstall(ctx, h, in, agent.SessionKey{Agent: ID, Session: id}, agent.Placement{}); err != nil {
 		return ir.WriteResult{}, err
 	}
@@ -496,7 +517,7 @@ func (m *Module) SessionStamp(ctx context.Context, h agent.Host, in agent.Instal
 	if err != nil {
 		return "", err
 	}
-	r, err := sq.Query(ctx, dbOf(h, in), "SELECT s.updated, s.directory, (SELECT count(*) FROM message m WHERE m.session_id = s.id) AS n FROM session s WHERE s.id = ?", string(id))
+	r, err := sq.Query(ctx, dbOf(h, in), "SELECT s.updated, (SELECT count(*) FROM message m WHERE m.session_id = s.id) AS n FROM session s WHERE s.id = ?", string(id))
 	if err != nil {
 		return "", err
 	}
@@ -524,6 +545,9 @@ func (m *Module) Backup(ctx context.Context, h agent.Host, in agent.Install, id 
 func (m *Module) Delete(ctx context.Context, h agent.Host, in agent.Install, id agent.SessionID, expect agent.SessionStamp) error {
 	if expect == "" {
 		return fmt.Errorf("%w: a delete names the stamp it deletes", agent.ErrDenied)
+	}
+	if m.BeforeDelete != nil {
+		m.BeforeDelete(id)
 	}
 	st, err := m.SessionStamp(ctx, h, in, id)
 	if err != nil {

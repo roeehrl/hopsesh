@@ -226,6 +226,11 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 		}
 		return res, err
 	}
+	if env.Failpoint != nil {
+		if err := env.Failpoint("vendor-imported"); err != nil {
+			return res, err
+		}
+	}
 	// 5. Lineage beside both copies.
 	if err := recordLineage(ctx, p, in, j, mainDst, srcHead, tgtHead, res); err != nil {
 		return res, err

@@ -447,7 +447,7 @@ func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal
 	if err != nil {
 		return err
 	}
-	if err := recordVendorWritten(j, side.Module, side.Machine.Name, o.Key, req, w); err != nil {
+	if err := recordVendorWritten(ctx, j, side, h, o.Key, req, w); err != nil {
 		return err
 	}
 	var rollover *lineage.Rollover
@@ -457,7 +457,8 @@ func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal
 		o.Path = w.Path
 		to = m.Upsert(lineage.Replica{Endpoint: side.Machine.Facts.Endpoint, Binding: side.Install.BindingID(), Key: o.Key, Line: m.Branch, Location: side.Machine.Name, AgentVersion: side.Install.Version, Time: j.Time.UTC()})
 		ad.Warnings = append(ad.Warnings, "Original context was full; prepared a bounded continuation on the same branch. Original retained.")
-		if pi, ok := side.Module.(agent.PostInstaller); ok {
+		// An agent that installs its own sessions imported it in Write.
+		if pi, ok := side.Module.(agent.PostInstaller); ok && !agent.InstallsViaVendor(side.Module) {
 			pl := agent.Placement{Key: o.Key, SourceID: f.Original.Key.Session, CWD: o.CWD, Location: side.Machine.Name, Name: o.Title}
 			if err := pi.AfterInstall(ctx, h, side.Install, o.Key, pl); err != nil {
 				ad.Warnings = append(ad.Warnings, "after writing: "+err.Error())

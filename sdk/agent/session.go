@@ -447,9 +447,14 @@ func NewSessionID(m Module, in Install, now time.Time, fallback func() string) S
 
 // VendorInstaller is a PostInstaller whose AfterInstall is the install itself: the staged
 // files are input for the agent's own importer (OpenCode's session import), not the
-// session. When InstallsViaVendor is true the core runs AfterInstall before it records
-// lineage, treats its failure as the operation's failure, and runs it again when it
-// recovers an interrupted operation, so AfterInstall must be idempotent.
+// session. When InstallsViaVendor is true the core runs AfterInstall, after placing a
+// moved session's files, before it records lineage, treats its failure as the operation's
+// failure, and runs it again when it recovers an interrupted operation, so AfterInstall
+// must be idempotent. A session already at the id with other content than the placed copy
+// is ErrDiverged, never success (it may be work done since a first, interrupted run).
+//
+// Such a module's Writer imports in Write itself, and its WriteRecoverer again when an
+// interrupted Write had not: the core runs no AfterInstall after a write.
 type VendorInstaller interface {
 	PostInstaller
 	InstallsViaVendor() bool

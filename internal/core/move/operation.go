@@ -235,14 +235,13 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 			if e != nil {
 				return res, e
 			}
-			if e = recordVendorWritten(j, in.Target.Module, in.Target.Machine.Name, p.Placement.Key, *r.Request, w); e != nil {
+			// A writer whose agent installs its own sessions imported again above if the
+			// interrupted write had not; the session it made is journaled and stamped.
+			if e = recordVendorWritten(ctx, j, in.Target, h, p.Placement.Key, *r.Request, w); e != nil {
 				return res, e
 			}
 			adoptWritten(p, in, j, w)
 			res.Files, res.Bytes = 1, w.To-w.From
-			if e = vendorInstall(ctx, in.Target, h, j, p.Placement); e != nil {
-				return res, e
-			}
 			if e = recordContinuation(ctx, p, in, j, w, r.NativeBackup, r.NativeBackupHead, res); e != nil {
 				return res, e
 			}

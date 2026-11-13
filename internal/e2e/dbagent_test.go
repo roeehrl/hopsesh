@@ -410,3 +410,337 @@ func TestContinueIntoVirtualSession(t *testing.T) {
 		})
 	}
 }
+
+// Interrupted after its write, a continuation into a session kept in a database recovers
+// by the session the write made, also when the writer gave it an id of its own: it imports
+// nothing again, resumes that session, journals it at the stamp the write left, and records
+// lineage beside it.
+func TestContinueIntoVirtualSessionRecovery(t *testing.T) {
+	for _, ownIDs := range []bool{false, true} {
+		t.Run(map[bool]string{false: "asked id", true: "writer's id"}[ownIDs], func(t *testing.T) {
+			root := t.TempDir()
+			box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+			seed(t, box)
+			os.MkdirAll(dbInstall(here).Main(), 0o700)
+			m := dbagent.New()
+			m.OwnIDs.Store(ownIDs)
+			ctx := context.Background()
+			in := move.Input{Source: move.Side{Machine: box.m, Module: claude.New(), Install: box.in}, Session: list(t, box)[sid],
+				Target: move.Side{Machine: here.m, Module: m, Install: dbInstall(here)}}
+			opt := move.Options{TargetDir: here.repo, OperationID: "continue-recovery"}
+			p, err := move.Build(ctx, in, opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := move.Env{StateDir: t.TempDir(), Failpoint: func(stage string) error {
+				if stage == "native-written" {
+					return errors.New("simulated process exit")
+				}
+				return nil
+			}}
+			if _, err := move.Apply(ctx, p, in, env); err == nil {
+				t.Fatal("the fault did not interrupt the continuation")
+			}
+			sessions := dbSessions(t, here, m)
+			if len(sessions) != 1 || m.Imports() != 1 {
+				t.Fatalf("written before the fault: %+v (%d imports)", sessions, m.Imports())
+			}
+			var made agent.SessionID
+			for id := range sessions {
+				made = id
+			}
+			if p, err = move.Build(ctx, in, opt); err != nil {
+				t.Fatal(err)
+			}
+			env.Failpoint = nil
+			res, err := move.Apply(ctx, p, in, env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Imports() != 1 || len(dbSessions(t, here, m)) != 1 || !strings.Contains(res.Command, "dbagent -s "+string(made)) {
+				t.Fatalf("recovered: %d imports, resumes with %s (made %s)", m.Imports(), res.Command, made)
+			}
+			j, err := journal.Load(env.StateDir, res.Journal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stamped := false
+			for _, e := range vendorEntries(j) {
+				stamped = stamped || e.Created && e.Key.Session == made && e.Stamp != ""
+			}
+			if !stamped {
+				t.Fatalf("the session made is not journaled at its stamp: %+v", vendorEntries(j))
+			}
+			graph, err := lineage.Read(host.LocalFS(), dbagent.Anchor(dbInstall(here).Main(), made))
+			if err != nil || graph == nil || len(graph.ActiveHops()) != 1 {
+				t.Fatalf("recovered lineage: %v %v", graph, err)
+			}
+			if err := j.Undo(ctx, reachDB(m, here), false); err != nil {
+				t.Fatal(err)
+			}
+			if dbagent.Exists(dbInstall(here).Main(), made) {
+				t.Fatal("undo left the session")
+			}
+		})
+	}
+}
+
+// A failed import after the copy here was set aside leaves only its backup: the error says
+// so, running the same operation again imports the incoming copy, and undo then puts the
+// copy that was here back from its backup.
+func TestVirtualSessionImportRetryAfterSetAside(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seedDB(t, box)
+	os.MkdirAll(dbInstall(here).Main(), 0o700)
+	m := dbagent.New()
+	ctx := context.Background()
+	env := move.Env{StateDir: t.TempDir()}
+	in := dbInput(t, m, box, here)
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbagent.Continue(dbInstall(box).Main(), dbSession, dbagent.Message{ID: "msg_3", Role: "user", Text: "Fixed?"}); err != nil {
+		t.Fatal(err)
+	}
+	in = dbInput(t, m, box, here)
+	opt := move.Options{TargetDir: here.repo, OperationID: "replace-retry"}
+	if p, err = move.Build(ctx, in, opt); err != nil || len(p.SetAside) != 1 {
+		t.Fatalf("plan: %v %v", p.SetAside, err)
+	}
+	m.FailImport.Store(true)
+	_, err = move.Apply(ctx, p, in, env)
+	m.FailImport.Store(false)
+	if err == nil || !strings.Contains(err.Error(), "set aside and is backed up") || !strings.Contains(err.Error(), "running this again retries the import") {
+		t.Fatalf("a failed import after a set-aside: %v", err)
+	}
+	if dbagent.Exists(dbInstall(here).Main(), dbSession) {
+		t.Fatal("the copy here was not set aside")
+	}
+	imports := m.Imports()
+	if p, err = move.Build(ctx, dbInput(t, m, box, here), opt); err != nil {
+		t.Fatal(err)
+	}
+	res, err := move.Apply(ctx, p, in, env)
+	if err != nil {
+		t.Fatalf("the retry: %v", err)
+	}
+	if s := dbSessions(t, here, m)[dbSession]; s.Size != 3 || m.Imports() != imports+1 {
+		t.Fatalf("retried: %+v (%d imports)", s, m.Imports()-imports)
+	}
+	j, _ := journal.Load(env.StateDir, res.Journal)
+	if err := j.Undo(ctx, reachDB(m, box, here), false); err != nil {
+		t.Fatal(err)
+	}
+	if s, ok := dbSessions(t, here, m)[dbSession]; !ok || s.Size != 2 {
+		t.Fatalf("restored from its backup: %+v", s)
+	}
+}
+
+// The copy here was used between its backup and its delete: the agent refuses the delete,
+// the move fails with that copy kept, and undo leaves it as it is (nothing to put back).
+func TestVirtualSessionSetAsideRefused(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seedDB(t, box)
+	os.MkdirAll(dbInstall(here).Main(), 0o700)
+	m := dbagent.New()
+	ctx := context.Background()
+	env := move.Env{StateDir: t.TempDir()}
+	in := dbInput(t, m, box, here)
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbagent.Continue(dbInstall(box).Main(), dbSession, dbagent.Message{ID: "msg_3", Role: "user", Text: "Fixed?"}); err != nil {
+		t.Fatal(err)
+	}
+	in = dbInput(t, m, box, here)
+	if p, err = move.Build(ctx, in, move.Options{TargetDir: here.repo}); err != nil || len(p.SetAside) != 1 {
+		t.Fatalf("plan: %v %v", p.SetAside, err)
+	}
+	m.BeforeDelete = func(id agent.SessionID) {
+		m.BeforeDelete = nil
+		if err := dbagent.Continue(dbInstall(here).Main(), id, dbagent.Message{ID: "msg_h", Role: "user", Text: "Still here."}); err != nil {
+			t.Error(err)
+		}
+	}
+	res, err := move.Apply(ctx, p, in, env)
+	if !errors.Is(err, agent.ErrDiverged) {
+		t.Fatalf("a refused set-aside: %v", err)
+	}
+	j, err := journal.Load(env.StateDir, res.Journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := vendorEntries(j); len(v) != 0 {
+		t.Fatalf("a delete the agent refused is journaled: %+v", v)
+	}
+	if err := j.Undo(ctx, reachDB(m, box, here), false); err != nil {
+		t.Fatal(err)
+	}
+	if s := dbSessions(t, here, m)[dbSession]; s.Size != 3 {
+		t.Fatalf("the copy here with its work: %+v", s)
+	}
+}
+
+// A session at the target with no anchor counts as there when planning; --via import is
+// refused for an agent that keeps its sessions in a database (it reads the session's file).
+func TestVirtualSessionPlanChecks(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seedDB(t, box)
+	seedDB(t, here) // there, with no anchor
+	m := dbagent.New()
+	ctx := context.Background()
+	in := dbInput(t, m, box, here)
+	in.Copies = nil // as a plan that did not list it sees it
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.ExpectedAbsent) != 0 {
+		t.Fatalf("a session with no anchor is expected absent: %v", p.ExpectedAbsent)
+	}
+	cin := move.Input{Source: move.Side{Machine: box.m, Module: m, Install: dbInstall(box)}, Session: dbSessions(t, box, m)[dbSession],
+		Target: move.Side{Machine: here.m, Module: claude.New(), Install: here.in}}
+	if _, err := move.Build(ctx, cin, move.Options{TargetDir: here.repo, Via: move.ViaImport}); !errors.Is(err, agent.ErrUnsupported) || !strings.Contains(err.Error(), "database") {
+		t.Fatalf("--via import from a database agent: %v", err)
+	}
+}
+
+// Continuing a session kept in a database in another agent keeps the database agent's own
+// copy here too: its program imports it, the journal holds it at its stamp, and undo
+// deletes both.
+func TestContinueFromVirtualSession(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seedDB(t, box)
+	os.MkdirAll(dbInstall(here).Main(), 0o700)
+	m := dbagent.New()
+	ctx := context.Background()
+	state := t.TempDir()
+	cl := claude.New()
+	in := move.Input{Source: move.Side{Machine: box.m, Module: m, Install: dbInstall(box)}, Session: dbSessions(t, box, m)[dbSession],
+		Target: move.Side{Machine: here.m, Module: cl, Install: here.in},
+		Native: &move.NativeSide{Target: move.Side{Machine: here.m, Module: m, Install: dbInstall(here)}}}
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Kind != move.KindContinue || len(p.Blockers) > 0 || p.NativeCopy == nil {
+		t.Fatalf("plan: %s %v %v %v", p.Kind, p.Blockers, p.NativeCopy, p.Warnings)
+	}
+	res, err := move.Apply(ctx, p, in, move.Env{StateDir: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Warnings) > 0 {
+		t.Fatalf("warnings: %v", res.Warnings)
+	}
+	if m.Imports() != 1 || !dbagent.Exists(dbInstall(here).Main(), dbSession) {
+		t.Fatalf("the database agent's copy here: %d imports", m.Imports())
+	}
+	j, err := journal.Load(state, res.Journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := vendorEntries(j); len(v) != 1 || !v[0].Created || v[0].Stamp == "" || v[0].Key.Session != dbSession {
+		t.Fatalf("the copy kept here in the journal: %+v", v)
+	}
+	if err := j.Undo(ctx, reachDB(m, box, here), false); err != nil {
+		t.Fatal(err)
+	}
+	if dbagent.Exists(dbInstall(here).Main(), dbSession) || !dbagent.Exists(dbInstall(box).Main(), dbSession) {
+		t.Fatal("undo: the copy here must go, the source stay")
+	}
+}
+
+// Interrupted after the agent imported the copy, and the session used before the move is
+// recovered: the stamp taken right after the import stays the operation's, so the recovery
+// does not take that work for the move's, and an unforced undo keeps it.
+func TestVirtualSessionRecoveryKeepsImportStamp(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seedDB(t, box)
+	os.MkdirAll(dbInstall(here).Main(), 0o700)
+	m := dbagent.New()
+	ctx := context.Background()
+	in := dbInput(t, m, box, here)
+	opt := move.Options{TargetDir: here.repo, OperationID: "import-stamp"}
+	p, err := move.Build(ctx, in, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := move.Env{StateDir: t.TempDir(), Failpoint: func(stage string) error {
+		if stage == "vendor-imported" {
+			return errors.New("simulated process exit")
+		}
+		return nil
+	}}
+	res, err := move.Apply(ctx, p, in, env)
+	if err == nil || !dbagent.Exists(dbInstall(here).Main(), dbSession) {
+		t.Fatalf("the fault: %v", err)
+	}
+	if err := dbagent.Continue(dbInstall(here).Main(), dbSession, dbagent.Message{ID: "msg_3", Role: "user", Text: "Used before the recovery."}); err != nil {
+		t.Fatal(err)
+	}
+	env.Failpoint = nil
+	if p, err = move.Build(ctx, in, opt); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = move.Apply(ctx, p, in, env) // the agent finds other work at the id
+	j, err := journal.Load(env.StateDir, res.Journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Undo(ctx, reachDB(m, box, here), false); !errors.Is(err, journal.ErrChanged) {
+		t.Fatalf("an unforced undo over the work done before the recovery: %v", err)
+	}
+	if s := dbSessions(t, here, m)[dbSession]; s.Size != 3 {
+		t.Fatalf("the session used: %+v", s)
+	}
+}
+
+// Moving a session again with nothing new syncs lineage only: its receipt beside the copy
+// here is guarded by that session's stamp, as its anchor does not change when it is used.
+func TestVirtualSessionNoWorkSync(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seedDB(t, box)
+	os.MkdirAll(dbInstall(here).Main(), 0o700)
+	m := dbagent.New()
+	ctx := context.Background()
+	env := move.Env{StateDir: t.TempDir()}
+	in := dbInput(t, m, box, here)
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	in = dbInput(t, m, box, here)
+	if p, err = move.Build(ctx, in, move.Options{TargetDir: here.repo}); err != nil || !p.NoWork || len(p.Blockers) > 0 {
+		t.Fatalf("plan: no work %v, %v %v", p.NoWork, p.Blockers, err)
+	}
+	res, err := move.Apply(ctx, p, in, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, _ := journal.Load(env.StateDir, res.Journal)
+	guarded := false
+	for _, r := range j.Receipts {
+		guarded = guarded || r.Session != nil && r.Session.Session == dbSession && r.Stamp != ""
+	}
+	if !guarded || m.Imports() != 1 {
+		t.Fatalf("receipts %+v (%d imports)", j.Receipts, m.Imports())
+	}
+}

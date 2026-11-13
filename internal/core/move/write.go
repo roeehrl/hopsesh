@@ -114,16 +114,14 @@ func writeFetched(ctx context.Context, p *Plan, env Env, j *journal.Journal, bas
 	if err != nil {
 		return fmt.Errorf("writing the %s session: %w", spec.Name, err)
 	}
-	if err := recordVendorWritten(j, tm, machine, asked, req, w); err != nil {
+	side := Side{Machine: in.Machine, Module: tm, Install: tin}
+	if err := recordVendorWritten(ctx, j, side, h, asked, req, w); err != nil {
 		return err
 	}
 	key := agent.SessionKey{Agent: spec.ID, Profile: tin.ProfileID(), Session: agent.SessionID(w.SessionID)}
 	j.AddKey(key)
 	pl := agent.Placement{Key: key, SourceID: fp.Session, CWD: fp.Worktree, Location: machine, Name: title}
-	side := Side{Machine: in.Machine, Module: tm, Install: tin}
-	if err := vendorInstall(ctx, side, h, j, pl); err != nil {
-		return err
-	}
+	// An agent that installs its own sessions imported it in Write.
 	if pi, ok := tm.(agent.PostInstaller); ok && !agent.InstallsViaVendor(tm) {
 		if err := pi.AfterInstall(ctx, h, tin, key, pl); err != nil {
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
@@ -232,7 +230,7 @@ func appendWritten(ctx context.Context, p *Plan, env Env, j *journal.Journal, no
 	if err != nil {
 		return fmt.Errorf("adding to %s: %w", o.Title, err)
 	}
-	if err := recordVendorWritten(j, tm, machine, o.Key, req, w); err != nil {
+	if err := recordVendorWritten(ctx, j, Side{Machine: in.Machine, Module: tm, Install: tin}, h, o.Key, req, w); err != nil {
 		return err
 	}
 	old := o
@@ -275,7 +273,8 @@ func appendWritten(ctx context.Context, p *Plan, env Env, j *journal.Journal, no
 	}
 	pl := agent.Placement{Key: o.Key, SourceID: o.Key.Session, CWD: o.CWD, Location: machine, Name: o.Title}
 	if rolled {
-		if pi, ok := tm.(agent.PostInstaller); ok {
+		// An agent that installs its own sessions imported it in Write.
+		if pi, ok := tm.(agent.PostInstaller); ok && !agent.InstallsViaVendor(tm) {
 			if err := pi.AfterInstall(ctx, h, tin, o.Key, pl); err != nil {
 				res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 			}

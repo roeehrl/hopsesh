@@ -147,9 +147,13 @@ func sessionPresent(ctx context.Context, side Side, key agent.SessionKey) (bool,
 }
 
 // vendorInstall has a module whose agent installs its own sessions (VendorInstaller) import
-// the copy placed for pl.Key, after journaling the session it makes, so undo deletes it.
-// It runs before lineage is recorded, and its failure is the operation's. It is idempotent:
-// recovering an interrupted operation runs it again.
+// the copy a move placed for pl.Key, after journaling the session it makes, so undo
+// deletes it, and records its stamp once it is made. It runs before lineage is recorded,
+// and its failure is the operation's. It is idempotent: recovering an interrupted
+// operation runs it again. A write needs none: the writer imports (agent.Writer).
+//
+// An import that finds another session at the id (ErrDiverged) made nothing: unless this
+// operation made that session before (its stamp is recorded), undo leaves it alone.
 func vendorInstall(ctx context.Context, side Side, h agent.Host, j *journal.Journal, pl agent.Placement) error {
 	if !agent.InstallsViaVendor(side.Module) {
 		return nil
@@ -158,29 +162,60 @@ func vendorInstall(ctx context.Context, side Side, h agent.Host, j *journal.Jour
 		return err
 	}
 	if err := side.Module.(agent.PostInstaller).AfterInstall(ctx, h, side.Install, pl.Key, pl); err != nil {
-		return fmt.Errorf("%s did not import the session: %w", side.Module.Spec().Name, err)
+		if errors.Is(err, agent.ErrDiverged) {
+			if e := j.ForgetSession(side.Machine.Name, pl.Key, true); e != nil {
+				return e
+			}
+		}
+		err = fmt.Errorf("%s did not import the session: %w", side.Module.Spec().Name, err)
+		if j.SetAsideSession(side.Machine.Name, pl.Key) {
+			err = fmt.Errorf("%w; the session it replaces was set aside and is backed up: undo puts it back, and running this again retries the import", err)
+		}
+		return err
 	}
+	stampMade(ctx, j, side, h, pl.Key)
 	return nil
+}
+
+// stampMade records the stamp of a session the agent just made for the operation, so a
+// later Seal (a recovery's) does not take work done since for the operation's. A stamp it
+// cannot read now is left to Seal.
+func stampMade(ctx context.Context, j *journal.Journal, side Side, h agent.Host, key agent.SessionKey) {
+	if st, ok, err := StampNow(ctx, side.Module, h, side.Install, key); err == nil && ok {
+		_ = j.StampCreatedSession(side.Machine.Name, key, st)
+	}
 }
 
 // recordVendorWrite journals the session a write is about to make through the agent's own
 // program (a SessionStore module writing a new session), so undo deletes it while unused.
 func recordVendorWrite(j *journal.Journal, m agent.Module, machine string, key agent.SessionKey, req ir.WriteRequest) error {
-	if _, ok := m.(agent.SessionStore); !ok || req.Mode != ir.WriteNew || req.SessionID == "" {
+	if !vendorWrite(m, req) {
 		return nil
 	}
 	key.Session = agent.SessionID(req.SessionID)
 	return j.RecordCreatedSession(machine, key)
 }
 
+// vendorWrite reports whether a write makes a new session through the agent's own program.
+func vendorWrite(m agent.Module, req ir.WriteRequest) bool {
+	_, ok := m.(agent.SessionStore)
+	return ok && req.Mode == ir.WriteNew && req.SessionID != ""
+}
+
 // recordVendorWritten journals the session a write made when the writer chose another id
-// than the one asked for.
-func recordVendorWritten(j *journal.Journal, m agent.Module, machine string, key agent.SessionKey, req ir.WriteRequest, w ir.WriteResult) error {
-	if w.SessionID == "" || w.SessionID == req.SessionID {
-		return nil
+// than the one asked for, and records the stamp the write left it at.
+func recordVendorWritten(ctx context.Context, j *journal.Journal, side Side, h agent.Host, key agent.SessionKey, req ir.WriteRequest, w ir.WriteResult) error {
+	if w.SessionID != "" && w.SessionID != req.SessionID {
+		req.SessionID = w.SessionID
+		if err := recordVendorWrite(j, side.Module, side.Machine.Name, key, req); err != nil {
+			return err
+		}
 	}
-	req.SessionID = w.SessionID
-	return recordVendorWrite(j, m, machine, key, req)
+	if vendorWrite(side.Module, req) {
+		key.Session = agent.SessionID(req.SessionID)
+		stampMade(ctx, j, side, h, key)
+	}
+	return nil
 }
 
 // writeNativeReceipt writes lineage beside an installed copy, guarded by its file; for a
@@ -222,6 +257,12 @@ func setAsideSession(ctx context.Context, side Side, h agent.Host, j *journal.Jo
 		return err
 	}
 	if err := store.Delete(ctx, h, side.Install, key.Session, stamp); err != nil {
+		if errors.Is(err, agent.ErrDiverged) {
+			// Used since its backup: the agent kept it, with that work. Undo leaves it.
+			if e := j.ForgetSession(side.Machine.Name, key, false); e != nil {
+				return e
+			}
+		}
 		return fmt.Errorf("setting aside the %s session %s: %w", side.Module.Spec().Name, key.Session, err)
 	}
 	return nil

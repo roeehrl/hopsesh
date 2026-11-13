@@ -77,6 +77,9 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	s := in.Session
 	spec := tgt.Module.Spec()
 	if opt.Via == ViaImport {
+		if agent.IsVirtual(src.Module) {
+			return nil, fmt.Errorf("%w: --via import reads the session's file, and %s keeps its sessions in a database; leave --via off", agent.ErrUnsupported, src.Module.Spec().Name)
+		}
 		if imp, ok := tgt.Module.(agent.Importer); !ok || !imp.CanImport(src.Module.Spec().ID) {
 			return nil, fmt.Errorf("%w: %s cannot import %s sessions itself", agent.ErrUnsupported, spec.Name, src.Module.Spec().Name)
 		}
@@ -197,9 +200,6 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	if opt.Via == ViaImport {
 		cp.Via = ViaImport
 		cp.Report.Method = "vendor-import"
-		if agent.IsVirtual(src.Module) {
-			return nil, fmt.Errorf("%w: --via import reads the session's file, and %s keeps its sessions in a database; leave --via off", agent.ErrUnsupported, src.Module.Spec().Name)
-		}
 		// The importer may flatten all source history. Use the whole input size as
 		// an upper preflight; never count only the appended Hopsesh briefing.
 		fi, e := srcHost.FS().Stat(s.Path)
@@ -693,7 +693,7 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 		step(fmt.Sprintf("writing the session for %s", tgt.Module.Spec().Name))
 		w, err = tgt.Module.(agent.Writer).Write(ctx, h, tgt.Install, req)
 		if err == nil {
-			err = recordVendorWritten(j, tgt.Module, tgt.Machine.Name, p.Placement.Key, req, w)
+			err = recordVendorWritten(ctx, j, tgt, h, p.Placement.Key, req, w)
 		}
 	}
 	if err != nil {
@@ -712,18 +712,12 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	env.Audit.Write(audit.Entry{Action: "continue.write", Host: p.Source.Location, Session: p.Placement.Key.String(),
 		Detail: map[string]any{"from": p.Key.String(), "path": w.Path, "bytes": res.Bytes, "relation": cp.Relation, "via": cp.Via, "journal": j.ID}})
 
-	pl := p.Placement
-	pl.Name = cp.header.Title
-	// An agent that installs its own sessions has the session before lineage is recorded.
-	if err := vendorInstall(ctx, tgt, h, j, pl); err != nil {
-		if e := j.SealWith(ctx, reachOf(ctx, p, in)); e != nil {
-			res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+e.Error())
-		}
-		return res, err
-	}
 	if err := recordContinuation(ctx, p, in, j, w, nativeDst, nativeHead, res); err != nil {
 		return res, err
 	}
+	pl := p.Placement
+	pl.Name = cp.header.Title
+	// An agent that installs its own sessions imported it in Write, before lineage.
 	if pi, ok := tgt.Module.(agent.PostInstaller); ok && !agent.InstallsViaVendor(tgt.Module) {
 		if err := pi.AfterInstall(ctx, h, tgt.Install, pl.Key, pl); err != nil {
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
