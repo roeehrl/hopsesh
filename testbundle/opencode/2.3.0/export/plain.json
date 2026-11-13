@@ -1,0 +1,95 @@
+{
+  "info": {
+    "id": "ses_e29aa1ec8ffes7x6RCUekHyBbf",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 8735,
+      "output": 3,
+      "reasoning": 17,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1794597315015,
+      "updated": 1794597524919,
+      "busy": 1794597315122,
+      "idle": 1794597379066
+    },
+    "title": "renamed by api",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d655e1e1001hzS9xR19AT9he0",
+      "time": {
+        "created": 1794597315129
+      },
+      "text": "Reply with exactly: hi there",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d655e240001KpmhfUaE3K948K",
+      "time": {
+        "created": 1794597315139,
+        "firstToken": 1794597378808,
+        "streamed": 1794597379055,
+        "completed": 1794597379064
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user wants me to respond with \"hi there\" and nothing else.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597378809,
+            "completed": 1794597379052
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\nhi there"
+        }
+      ],
+      "snapshot": {
+        "start": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "end": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 8735,
+        "output": 3,
+        "reasoning": 17,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d656dbfa001qYc8WjRlOipIl7",
+      "time": {
+        "created": 1794597379066
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

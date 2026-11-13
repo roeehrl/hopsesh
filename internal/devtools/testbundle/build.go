@@ -22,13 +22,14 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/devtools/schemalite"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakeopencode"
 )
 
 // platforms the stand-in program is built for.
 var platforms = []string{"darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64", "windows-amd64", "windows-arm64"}
 
 // standInNames are the names the program answers to (internal/devtools/fakeagent).
-var standInNames = []string{"claude", "codex", "gh", "jules", "devin", "amp", "fakecloud"}
+var standInNames = []string{"claude", "codex", "opencode", "gh", "jules", "devin", "amp", "fakecloud"}
 
 var semver = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`)
 
@@ -108,11 +109,16 @@ func build(root, version, commit, out string) (string, error) {
 	m.StandIns.Program = "fakeagent"
 	m.StandIns.Names = standInNames
 	m.StandIns.Platforms = platforms
-	m.StandIns.Versions = map[string]string{"claude": fakecloud.ClaudeVersionLine, "codex": fakecloud.CodexVersionLine}
+	m.StandIns.Versions = map[string]string{"claude": fakecloud.ClaudeVersionLine, "codex": fakecloud.CodexVersionLine, "opencode": fakecloud.OpenCodeVersionLine}
 	m.StandIns.Env = map[string]string{
-		"FAKE_AGENT_LOG":  "a file each call is appended to: the program, its arguments, app-server methods",
-		"FAKE_CLOUD_DIR":  "the stand-in clouds' state (sessions as JSON files)",
-		"FAKE_CLOUD_FAIL": "one failure to play: signed-out, not-eligible, no-env, repo-mismatch, partial, empty, no-branch, archived, push-refused, bad-record, slow",
+		"FAKE_AGENT_LOG":                "a file each call is appended to: the program, its arguments, app-server methods",
+		"FAKE_CLOUD_DIR":                "the stand-in clouds' state (sessions as JSON files)",
+		"FAKE_CLOUD_FAIL":               "one failure to play: signed-out, not-eligible, no-env, repo-mismatch, partial, empty, no-branch, archived, push-refused, bad-record, slow",
+		"FAKE_OPENCODE_SERVICE":         "opencode: \"running\" (or a URL) for a running background service; stopped otherwise, until a command without --standalone starts it",
+		"FAKE_OPENCODE_SERVICE_VERSION": "opencode: the running service's version (GET /api/info), default the program's",
+		"FAKE_OPENCODE_VERSION":         "opencode: the program's version, default " + fakeopencode.Version,
+		"FAKE_OPENCODE_ACTIVE":          "opencode: session ids with a turn running (GET /api/session/active), comma-separated",
+		"FAKE_OPENCODE_AUTH":            "opencode: what `auth list --format json` prints, default []",
 	}
 
 	add := func(f file, mf manifestFile) {

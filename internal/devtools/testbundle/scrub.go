@@ -36,6 +36,10 @@ var (
 		{"a private key", regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY`)},
 		{"a bearer token", regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}`)},
 		{"a tailnet name", regexp.MustCompile(`(?i)\b[a-z0-9-]+\.ts\.net\b`)},
+		{"a Groq key", regexp.MustCompile(`\bgsk_[A-Za-z0-9]{20,}`)},
+		{"an xAI key", regexp.MustCompile(`\bxai-[A-Za-z0-9]{20,}`)},
+		{"a machine's local network name", regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*\.(?:local|lan|home\.arpa|internal)\b`)},
+		{"a temporary folder of the capturing machine", regexp.MustCompile(`/private/(?:tmp|var)/|/var/folders/|\$bunfs/`)},
 	}
 	// The documentation and loopback ranges, and 100.64.0.0/24 (CONTRIBUTING's made-up peers).
 	madeUpNets = []netip.Prefix{

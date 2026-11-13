@@ -152,9 +152,14 @@ jobs:
           jq -r '.files[] | "\(.sha256)  \(.path)"' manifest.json | sha256sum -c --quiet
           [ "$(jq '.files | length' manifest.json)" = "$(find . -type f ! -name manifest.json | wc -l)" ]
           mkdir -p "$RUNNER_TEMP/stand-ins"
-          for n in claude codex; do cp bin/linux-amd64/fakeagent "$RUNNER_TEMP/stand-ins/$n"; done
+          for n in claude codex opencode; do cp bin/linux-amd64/fakeagent "$RUNNER_TEMP/stand-ins/$n"; done
           [ "$("$RUNNER_TEMP/stand-ins/claude" --version)" = "$(jq -r .standIns.versions.claude manifest.json)" ]
           [ "$("$RUNNER_TEMP/stand-ins/codex" --version)" = "$(jq -r .standIns.versions.codex manifest.json)" ]
+          [ "$("$RUNNER_TEMP/stand-ins/opencode" --version)" = "$(jq -r .standIns.versions.opencode manifest.json)" ]
+          # The opencode stand-in imports an export from the bundle into a database of its own.
+          oc="$RUNNER_TEMP/oc"; mkdir -p "$oc/demo"
+          HOME="$oc" "$RUNNER_TEMP/stand-ins/opencode" session import opencode/2.3.0/export/plain.json --directory "$oc/demo" --standalone | grep -q '^Imported session: ses_'
+          HOME="$oc" "$RUNNER_TEMP/stand-ins/opencode" session export ses_e29aa1ec8ffes7x6RCUekHyBbf --standalone | jq -e '.messages | length == 3'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: testbundle

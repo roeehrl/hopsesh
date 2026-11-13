@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -41,6 +42,16 @@ var slots = []slot{
 	{agent: "claude", dir: "registry", kind: "registry", schema: "claude-registry.schema.json", more: claudeReads},
 	{agent: "codex", dir: "hooks", kind: "hook", schema: "codex-hook.schema.json", event: "hook_event_name"},
 	{agent: "codex", dir: "notify", kind: "notify", schema: "codex-notify.schema.json"},
+	{agent: "opencode", dir: "export", kind: "export", schema: "opencode-transfer.schema.json", more: openCodeExport},
+}
+
+// openCodeExport checks an OpenCode export beyond its schema: each message type's members,
+// and that OpenCode would import it as it is.
+func openCodeExport(doc []byte) error {
+	if err := checkTransfer(doc); err != nil {
+		return err
+	}
+	return openCodeImports(doc)
 }
 
 // entry is one file of the bundle that comes from the repository.
@@ -145,6 +156,7 @@ func check(root string) ([]entry, []string) {
 
 	// The agents' own fixtures, as the module tests use them: <agent>/<version>/home/.
 	reg := schemas["claude-registry.schema.json"]
+	transfer := schemas["opencode-transfer.schema.json"]
 	for _, m := range all.Registry().All() {
 		id := string(m.Spec().ID)
 		dir := filepath.Join(root, "agents", id, "testdata")
@@ -152,6 +164,8 @@ func check(root string) ([]entry, []string) {
 		if err != nil {
 			continue // a cloud-only module has no fixtures
 		}
+		// OpenCode's SQL, by fixture folder ("2.3.0", "synthetic").
+		sqlByDir := map[string]map[string][]byte{}
 		for _, v := range vs {
 			if !v.IsDir() {
 				continue
@@ -176,6 +190,14 @@ func check(root string) ([]entry, []string) {
 					for _, msg := range reg.Validate(b) {
 						bad(where, "%s", msg)
 					}
+				case id == "opencode" && strings.HasPrefix(path.Base(rel), "export-") && strings.HasSuffix(rel, ".json") && transfer != nil:
+					e.schema = "schemas/opencode-transfer.schema.json"
+					for _, msg := range transfer.Validate(b) {
+						bad(where, "%s", msg)
+					}
+					if err := checkTransfer(b); err != nil {
+						bad(where, "%v", err)
+					}
 				case strings.HasSuffix(rel, ".json"):
 					if !json.Valid(b) {
 						bad(where, "not JSON")
@@ -189,9 +211,45 @@ func check(root string) ([]entry, []string) {
 						}
 					}
 				}
+				if id == "opencode" {
+					// OpenCode's fixtures come from a sandbox on a real machine: nothing of it
+					// may stay in them.
+					var found []string
+					switch {
+					case strings.HasSuffix(rel, ".json"):
+						found = scrub(b)
+					case strings.HasSuffix(rel, ".sql"):
+						found = scrubText(b, true)
+						if sqlByDir[v.Name()] == nil {
+							sqlByDir[v.Name()] = map[string][]byte{}
+						}
+						sqlByDir[v.Name()][rel] = b
+					default:
+						found = scrubText(b, false)
+					}
+					for _, f := range found {
+						bad(where, "%s", f)
+					}
+				}
 				out = append(out, e)
 				return nil
 			})
+		}
+		for _, v := range slices.Sorted(maps.Keys(sqlByDir)) {
+			files := sqlByDir[v]
+			if _, ok := files["schema.sql"]; !ok {
+				// Synthetic rows go on top of the newest captured version's.
+				for _, w := range slices.Backward(slices.Sorted(maps.Keys(sqlByDir))) {
+					if base := sqlByDir[w]; agentVersion.MatchString(w) && base["schema.sql"] != nil {
+						files = maps.Clone(files)
+						files["schema.sql"], files["data.sql"] = base["schema.sql"], base["data.sql"]
+						break
+					}
+				}
+			}
+			for _, msg := range checkOpenCodeSQL(files) {
+				bad("agents/"+id+"/testdata/"+v, "%s", msg)
+			}
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/roeehrl/hopsesh/blob/main/testbundle/schemas/opencode-transfer.schema.json",
+  "title": "OpenCode session transfer",
+  "description": "A session as `opencode session export <id>` prints it and `opencode session import <file>` reads it (OpenCode 2.x): the session's info and its settled messages, in order. This schema checks the envelope every message shares (id, type, creation time); each message type's own members are checked by internal/devtools/testbundle (check.go), as this schema language has no oneOf. The file lives in opencode/<OpenCode version>/export/.",
+  "type": "object",
+  "required": ["info", "messages"],
+  "additionalProperties": false,
+  "properties": {
+    "info": {"$ref": "#/$defs/info"},
+    "messages": {"type": "array", "items": {"$ref": "#/$defs/message"}}
+  },
+  "$defs": {
+    "sessionID": {"type": "string", "pattern": "^ses_[0-9A-Za-z]+$", "description": "OpenCode mints ses_ + 12 hex digits + 14 base62 characters; its import checks only the prefix"},
+    "messageID": {"type": "string", "pattern": "^msg_[0-9A-Za-z_]+$"},
+    "millis": {"type": "integer", "minimum": 0},
+    "info": {
+      "type": "object",
+      "required": ["id", "projectID", "cost", "tokens", "time", "location"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {"$ref": "#/$defs/sessionID"},
+        "parentID": {"$ref": "#/$defs/sessionID"},
+        "projectID": {"type": "string", "minLength": 1},
+        "agent": {"type": "string", "minLength": 1},
+        "model": {
+          "type": "object",
+          "required": ["id", "providerID"],
+          "properties": {"id": {"type": "string"}, "providerID": {"type": "string"}, "variant": {"type": "string"}}
+        },
+        "cost": {"type": "number", "minimum": 0},
+        "tokens": {
+          "type": "object",
+          "required": ["input", "output", "reasoning", "cache"],
+          "additionalProperties": false,
+          "properties": {
+            "input": {"type": "number"},
+            "output": {"type": "number"},
+            "reasoning": {"type": "number"},
+            "cache": {
+              "type": "object",
+              "required": ["read", "write"],
+              "additionalProperties": false,
+              "properties": {"read": {"type": "number"}, "write": {"type": "number"}}
+            }
+          }
+        },
+        "outcome": {"enum": ["succeeded", "failed", "interrupted"]},
+        "time": {
+          "type": "object",
+          "required": ["created", "updated"],
+          "additionalProperties": false,
+          "properties": {
+            "created": {"$ref": "#/$defs/millis"},
+            "updated": {"$ref": "#/$defs/millis"},
+            "busy": {"$ref": "#/$defs/millis"},
+            "idle": {"$ref": "#/$defs/millis"},
+            "viewed": {"$ref": "#/$defs/millis"},
+            "archived": {"$ref": "#/$defs/millis"}
+          }
+        },
+        "title": {"type": "string"},
+        "location": {
+          "type": "object",
+          "required": ["directory"],
+          "properties": {"directory": {"type": "string", "minLength": 1}, "workspaceID": {"type": "string"}}
+        },
+        "subpath": {"type": "string"}
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": ["id", "type", "time"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {"$ref": "#/$defs/messageID"},
+        "type": {"enum": ["user", "assistant", "synthetic", "system", "skill", "shell", "compaction", "idle", "agent-switched", "model-switched", "location-switched"]},
+        "metadata": {"type": "object"},
+        "time": {
+          "type": "object",
+          "required": ["created"],
+          "properties": {"created": {"$ref": "#/$defs/millis"}}
+        }
+      }
+    }
+  }
+}
