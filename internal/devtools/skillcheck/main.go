@@ -102,14 +102,18 @@ func check(bin, golden, allow string, printTree bool) ([]string, error) {
 	return errs, nil
 }
 
-// isolated is an environment of a throwaway home: hopsesh's and both agents' folders in
-// it, no Tailscale, no desktop app's runtime, no agent on the PATH.
+// isolated is an environment of a throwaway home: hopsesh's and the agents' folders in it
+// (OpenCode's by the XDG variables, which a real opencode found outside the PATH would
+// use too), no Tailscale, no desktop app's runtime, no agent on the PATH.
 func isolated(home string) []string {
 	env := []string{
 		"HOME=" + home, "USERPROFILE=" + home,
 		"HOPSESH_CONFIG_DIR=" + filepath.Join(home, "hopsesh-config"), "HOPSESH_STATE_DIR=" + filepath.Join(home, "hopsesh-state"),
 		"HOPSESH_MACHINE=skillcheck", "HOPSESH_TAILSCALE=off", "HOPSESH_APP_RUNTIMES=off",
 		"CLAUDE_CONFIG_DIR=" + filepath.Join(home, "claude"), "CODEX_HOME=" + filepath.Join(home, "codex"),
+		"XDG_DATA_HOME=" + filepath.Join(home, "xdg", "data"), "XDG_CONFIG_HOME=" + filepath.Join(home, "xdg", "config"),
+		"XDG_STATE_HOME=" + filepath.Join(home, "xdg", "state"), "XDG_CACHE_HOME=" + filepath.Join(home, "xdg", "cache"),
+		"OPENCODE_DISABLE_AUTOUPDATE=1",
 		"TERM=dumb", "NO_COLOR=1", "LANG=C.UTF-8",
 	}
 	if runtime.GOOS == "windows" {
@@ -143,7 +147,7 @@ var runAs = regexp.MustCompile("Run it as\\s+`([^`]+)`")
 // installedSkill has the program install its skill into the throwaway home and reads it
 // back from Claude Code's skills folder there.
 func installedSkill(bin string, env []string, home string) (map[string][]byte, error) {
-	for _, d := range []string{"claude", "codex"} {
+	for _, d := range []string{"claude", "codex", filepath.Join("xdg", "data", "opencode")} {
 		if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {
 			return nil, err
 		}
