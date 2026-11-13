@@ -70,6 +70,12 @@ const (
 	// folder before; Dir: the new one; Path: its file, Size and Sum as the change left it).
 	// Undo has the agent change it back, and refuses when the file changed since.
 	OpChangeDir Op = "cd"
+	// OpVendorSession is a session an agent keeps in a database (agent.SessionStore), changed
+	// only through the agent's own program (Key; Machine). Created: the operation made it,
+	// and undo deletes it while its stamp is still the one Seal recorded (Stamp). Otherwise
+	// the operation deleted it after backing it up (Backup, a file on Machine, taken at
+	// Stamp), and undo imports that backup again.
+	OpVendorSession Op = "vendor-session"
 )
 
 // Entry is one journaled write.
@@ -100,6 +106,9 @@ type Entry struct {
 	URL     string            `json:"url,omitempty"`
 	Updated time.Time         `json:"updated,omitempty"`
 	Dir     string            `json:"dir,omitempty"` // OpChangeDir: the new folder
+	// Stamp (OpVendorSession, and OpChangeDir of a session kept in a database): the
+	// session's stamp as the operation left it ("" until Seal records it).
+	Stamp agent.SessionStamp `json:"stamp,omitempty"`
 	// OpAdopt and OpChangeDir use Size and Sum for the whole file as adopted.
 	// Keep (OpPushRef): the user chose to keep the branch (delete_branch = "never"), so undo
 	// leaves it where it is and says so.
@@ -244,9 +253,38 @@ func fileState(fsys host.FS, machine, p string) (State, error) {
 // Seal records the state the operation left each file it created or replaced in. Files on
 // machines fsFor cannot reach are left out (their undo is not checked).
 func (j *Journal) Seal(fsFor func(machine string) (host.FS, error)) error {
+	return j.SealWith(context.Background(), Files(fsFor))
+}
+
+// SealWith is Seal that also records the stamp of each session the operation created in
+// an agent's database, through r.Sessions. One it cannot stamp keeps the stamp it had (a
+// session never made has none), and is named in the error: undoing it then needs force.
+func (j *Journal) SealWith(ctx context.Context, r Reach) error {
 	j.mu.Lock()
 	entries := append([]Entry(nil), j.Entries...)
 	j.mu.Unlock()
+	stamps := map[int]agent.SessionStamp{}
+	var unstamped []string
+	for i, e := range entries {
+		if e.Op != OpVendorSession || !e.Created || e.Key == nil {
+			continue
+		}
+		if r.Sessions == nil {
+			unstamped = append(unstamped, fmt.Sprintf("the %s session %s cannot be reached from here", e.Key.Agent, e.Key.Session))
+			continue
+		}
+		st, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
+		switch {
+		case err == nil:
+			stamps[i] = st
+		case !errors.Is(err, agent.ErrNotFound):
+			unstamped = append(unstamped, fmt.Sprintf("the state of the %s session %s: %v", e.Key.Agent, e.Key.Session, err))
+		}
+	}
+	fsFor := r.FS
+	if fsFor == nil {
+		fsFor = func(string) (host.FS, error) { return nil, errors.New("no machine can be reached") }
+	}
 	var after []State
 	seen := map[string]bool{}
 	for _, e := range entries {
@@ -265,7 +303,16 @@ func (j *Journal) Seal(fsFor func(machine string) (host.FS, error)) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.After = after
-	return j.saveLocked()
+	for i, st := range stamps {
+		j.Entries[i].Stamp = st
+	}
+	if err := j.saveLocked(); err != nil {
+		return err
+	}
+	if len(unstamped) > 0 {
+		return fmt.Errorf("not recorded, so undoing it will need force: %s", strings.Join(unstamped, "; "))
+	}
+	return nil
 }
 
 // Changed reports the first thing that changed since the operation (ErrChanged with what
@@ -276,13 +323,16 @@ func (j *Journal) Seal(fsFor func(machine string) (host.FS, error)) error {
 func (j *Journal) Changed(ctx context.Context, r Reach) error { return j.changed(ctx, r, nil) }
 
 // ChangedBesides is Changed for an operation later ones built on (the first leg of a hop):
-// a file a later journal wrote too is left to that journal's own check, since undoing the
-// later one first puts it back.
+// a file a later journal wrote too, or a session kept in a database it changed too, is
+// left to that journal's own check, since undoing the later one first puts it back.
 func (j *Journal) ChangedBesides(ctx context.Context, r Reach, later []*Journal) error {
 	touched := map[string]bool{}
 	for _, l := range later {
 		for _, e := range l.Entries {
 			touched[e.Machine+"\x00"+e.Path] = true
+			if k := sessionMark(e); k != "" {
+				touched[e.Machine+"\x00"+k] = true
+			}
 		}
 	}
 	return j.changed(ctx, r, func(machine, p string) bool { return touched[machine+"\x00"+p] })
@@ -316,7 +366,25 @@ func (j *Journal) changed(ctx context.Context, r Reach, skip func(machine, p str
 				}
 				return fmt.Errorf("%w: %s on %s (%s)", ErrChanged, filepath.Base(e.Path), e.Machine, what)
 			}
-		case OpAdopt, OpChangeDir:
+		case OpVendorSession:
+			if skip(e.Machine, sessionMark(e)) {
+				continue
+			}
+			if err := vendorChanged(ctx, r, e); err != nil {
+				return err
+			}
+		case OpChangeDir:
+			if e.Stamp != "" {
+				if skip(e.Machine, sessionMark(e)) {
+					continue
+				}
+				if err := stampChanged(ctx, r, e, e.Stamp, "undo with force to move it back anyway"); err != nil {
+					return err
+				}
+				continue
+			}
+			fallthrough
+		case OpAdopt:
 			fsys, err := r.fs(e.Machine)
 			if err != nil {
 				continue
@@ -386,6 +454,58 @@ func (j *Journal) changed(ctx context.Context, r Reach, skip func(machine, p str
 		}
 	}
 	return nil
+}
+
+// sessionMark names, for ChangedBesides, a session kept in a database that an entry
+// changed ("" when it changed none).
+func sessionMark(e Entry) string {
+	if e.Key == nil || e.Op != OpVendorSession && (e.Op != OpChangeDir || e.Stamp == "") {
+		return ""
+	}
+	return "session:" + e.Key.String()
+}
+
+// ErrOutOfReach is what a Sessions returns for a machine it does not check from here (a
+// listing of what can be undone checks this machine only): such a session is checked when
+// undoing, as a file on another machine is.
+var ErrOutOfReach = errors.New("not checked from here")
+
+// vendorChanged reports a session the operation created in an agent's database that was
+// used since (its stamp moved on), or whose state was never recorded.
+func vendorChanged(ctx context.Context, r Reach, e Entry) error {
+	if !e.Created || e.Key == nil || r.Sessions == nil {
+		return nil
+	}
+	if e.Stamp == "" {
+		_, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
+		if errors.Is(err, agent.ErrNotFound) || errors.Is(err, ErrOutOfReach) {
+			return nil
+		}
+		return fmt.Errorf("%w: hopsesh did not record the state of the %s session %s (the operation did not finish), so it cannot tell whether it was used since; undo with force to delete it, with whatever it holds now", ErrChanged, e.Key.Agent, e.Key.Session)
+	}
+	return stampChanged(ctx, r, e, e.Stamp, "undo with force to delete it, with that work")
+}
+
+// stampChanged compares a session's stamp now with the one journaled; force says what
+// undoing anyway does. A session gone does not count, nor one on a machine r checks only
+// when undoing (ErrOutOfReach); one whose stamp cannot be read is not undone unforced.
+func stampChanged(ctx context.Context, r Reach, e Entry, was agent.SessionStamp, force string) error {
+	if e.Key == nil || r.Sessions == nil {
+		return nil
+	}
+	now, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
+	switch {
+	case errors.Is(err, agent.ErrNotFound), errors.Is(err, ErrOutOfReach):
+		return nil
+	case err != nil:
+		return fmt.Errorf("%w: hopsesh cannot tell whether the %s session %s was used after this (%v); %s", ErrChanged, e.Key.Agent, e.Key.Session, err, force)
+	case now == was:
+		return nil
+	case now.Format() != was.Format():
+		// The module stamps sessions another way now: hopsesh cannot tell, so it asks.
+		return fmt.Errorf("%w: hopsesh cannot tell whether the %s session %s was used after this (its agent records sessions differently since); check it there, and %s if it was not", ErrChanged, e.Key.Agent, e.Key.Session, force)
+	}
+	return fmt.Errorf("%w: the %s session %s was continued after this; %s", ErrChanged, e.Key.Agent, e.Key.Session, force)
 }
 
 func (r Reach) fs(machine string) (host.FS, error) {
@@ -489,6 +609,20 @@ type Reach struct {
 	// Dirs reaches the agents that recorded a session's new folder (nil: reported, not
 	// undone).
 	Dirs Dirs
+	// Sessions reaches the sessions agents keep in databases (nil: reported, not undone,
+	// and their stamps are not checked).
+	Sessions Sessions
+}
+
+// Sessions changes sessions agents keep in databases, through each module's
+// agent.SessionStore on the machine named, for undo and its checks.
+type Sessions interface {
+	// Stamp is the session's stamp now (agent.ErrNotFound when it is gone).
+	Stamp(ctx context.Context, machine string, key agent.SessionKey) (agent.SessionStamp, error)
+	// Delete deletes the session while its stamp is still expect.
+	Delete(ctx context.Context, machine string, key agent.SessionKey, expect agent.SessionStamp) error
+	// Restore imports a backup of the session again.
+	Restore(ctx context.Context, machine string, key agent.SessionKey, backup string) (agent.SessionStamp, error)
 }
 
 // Dirs has an agent change a session's folder, for undo.
@@ -656,6 +790,39 @@ func (j *Journal) AddRemote(machine, id string) error {
 // agent's own importer), so undo removes it.
 func (j *Journal) RecordCreated(machine, p string) error {
 	return j.record(Entry{Op: OpCreate, Machine: machine, Path: p})
+}
+
+// RecordCreatedSession records a session the agent's own program is about to create in its
+// database on machine for this operation, so undo deletes it, while nothing used it since
+// Seal recorded its stamp. Recording one already recorded does nothing.
+func (j *Journal) RecordCreatedSession(machine string, key agent.SessionKey) error {
+	j.mu.Lock()
+	for _, e := range j.Entries {
+		if e.Op == OpVendorSession && e.Created && e.Machine == machine && e.Key != nil && *e.Key == key {
+			j.mu.Unlock()
+			return nil
+		}
+	}
+	j.mu.Unlock()
+	return j.record(Entry{Op: OpVendorSession, Machine: machine, Key: &key, Created: true})
+}
+
+// DeletedSession records a session about to be deleted from an agent's database on machine
+// (set aside), backed up first to the file backup at stamp, so undo imports it again.
+func (j *Journal) DeletedSession(machine string, key agent.SessionKey, backup string, stamp agent.SessionStamp) error {
+	if backup == "" {
+		return errors.New("a session is deleted only once it is backed up")
+	}
+	return j.record(Entry{Op: OpVendorSession, Machine: machine, Key: &key, Backup: backup, Stamp: stamp})
+}
+
+// ChangedSessionDir is ChangedDir for a session an agent keeps in a database: its stamp
+// after the change guards undo, since its file (an anchor) does not change when it is used.
+func (j *Journal) ChangedSessionDir(machine string, key agent.SessionKey, file, from, dir string, stamp agent.SessionStamp) error {
+	if stamp == "" {
+		return errors.New("a folder change of a session kept in a database names its stamp")
+	}
+	return j.record(Entry{Op: OpChangeDir, Machine: machine, Path: file, Key: &key, From: from, Dir: dir, Stamp: stamp})
 }
 
 // Forget drops the entries for a machine whose own hopsesh journals those writes (the
@@ -1005,6 +1172,15 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 				}
 			}
 			continue
+		case OpVendorSession:
+			if err := undoVendorSession(ctx, r, e, force); err != nil {
+				what := "deleting"
+				if !e.Created {
+					what = "restoring"
+				}
+				problems = append(problems, fmt.Sprintf("%s the %s session %s: %v", what, e.Key.Agent, e.Key.Session, err))
+			}
+			continue
 		case OpCloud:
 			if e.Key == nil {
 				continue
@@ -1051,6 +1227,41 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 		return fmt.Errorf("undo was incomplete:\n  %s", strings.Join(problems, "\n  "))
 	}
 	return nil
+}
+
+// undoVendorSession deletes a session the operation created in an agent's database, at the
+// stamp Seal recorded (forced: at its stamp now), or imports one it deleted from its backup.
+// A created session already gone is fine.
+func undoVendorSession(ctx context.Context, r Reach, e Entry, force bool) error {
+	if e.Key == nil {
+		return nil
+	}
+	if r.Sessions == nil {
+		return errors.New("its agent cannot be reached from here")
+	}
+	if !e.Created {
+		_, err := r.Sessions.Restore(ctx, e.Machine, *e.Key, e.Backup)
+		return err
+	}
+	expect := e.Stamp
+	if force || expect == "" {
+		now, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
+		if errors.Is(err, agent.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if expect == "" && !force {
+			return errors.New("its state was never recorded; undo with force to delete it")
+		}
+		expect = now
+	}
+	err := r.Sessions.Delete(ctx, e.Machine, *e.Key, expect)
+	if errors.Is(err, agent.ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 // undoPushRef deletes a pushed ref while it still points at what was pushed; forced, at
