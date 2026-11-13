@@ -154,7 +154,23 @@ func (in Install) ProfileEnv() []string {
 	if in.NativeDefaultRoot != "" && in.Profile.Default && in.Profile.Root == in.NativeDefaultRoot {
 		return nil
 	}
+	// The default account of an agent with several roots is its own folders: its Root
+	// is the main root, not a folder holding them, so RootVars would point inside it.
+	// Only RootEnv, which names the main root itself, is pinned.
+	if in.defaultOfSeveralRoots() {
+		var env []string
+		for _, key := range in.Accounts.RootEnv {
+			env = append(env, key+"="+in.Profile.Root)
+		}
+		return env
+	}
 	return in.Accounts.EnvFor(in.Profile.Root, profilePath(in.OS, in.Profile.Root))
+}
+
+// defaultOfSeveralRoots reports a default account of an agent whose account folders hold
+// its roots (RootVars): the machine's own variables find its folders, as Detect did.
+func (in Install) defaultOfSeveralRoots() bool {
+	return in.Profile != nil && in.Profile.Default && in.Accounts != nil && len(in.Accounts.RootVars) > 0
 }
 
 // ScopeCommand applies the profile last. Caller-supplied roots and inherited account
@@ -167,6 +183,11 @@ func (in Install) ScopeCommand(c Command) Command {
 		return c
 	}
 	unset := append(append([]string{}, in.Accounts.Unset...), in.Accounts.Vars()...)
+	if in.defaultOfSeveralRoots() {
+		// The machine's RootVars chose the default folders and stay; a caller's may not.
+		unset = append(append([]string{}, in.Accounts.Unset...), in.Accounts.RootEnv...)
+		c.Env = dropEnv(c.Env, in.Accounts.Vars(), in.OS)
+	}
 	filtered := []string{}
 	for _, e := range c.Env {
 		k, _, _ := strings.Cut(e, "=")
@@ -188,6 +209,17 @@ func (in Install) ScopeCommand(c Command) Command {
 		c.Argv[0] = in.Binary
 	}
 	return c
+}
+
+func dropEnv(env, keys []string, goos string) []string {
+	out := []string{}
+	for _, e := range env {
+		k, _, _ := strings.Cut(e, "=")
+		if !slices.ContainsFunc(keys, func(u string) bool { return k == u || goos == "windows" && strings.EqualFold(k, u) }) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // InheritJSON picks settings out of a JSON settings file for a new account folder: each

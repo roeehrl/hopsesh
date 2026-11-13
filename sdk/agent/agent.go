@@ -255,10 +255,23 @@ func (s Spec) MainRoot() Root {
 	return s.Roots[0]
 }
 
-// PinMain returns in with its main root at path and no other root: an account folder,
-// before Detect resolves the other roots against the pinned environment.
+// PinMain returns in with its main root set from the account folder path and no other
+// root, before Detect resolves the other roots against the pinned environment. For an
+// added account (in.Profile set, not the default) of an agent whose account folders hold
+// its roots (ProfileSpec.RootVars), the main root is inside path (ProfileLocate); else it
+// is path itself. Set in.Profile first.
 func (s Spec) PinMain(in Install, path string) Install {
 	in.MainRoot = s.MainRoot().Name
+	if in.Profile != nil && !in.Profile.Default && s.Accounts != nil && len(s.Accounts.RootVars) > 0 {
+		goos := in.OS
+		if goos == "" && (WindowsPath{}).IsAbs(path) {
+			goos = "windows"
+		}
+		// Only the account folder's own variables: a root they do not set is not in it.
+		if main := s.ProfileLocate(in.MainRoot, path, goos, func(string) string { return "" }); PathFor(goos).IsAbs(main) {
+			path = main
+		}
+	}
 	in.Roots = map[string]string{in.MainRoot: path}
 	return in
 }

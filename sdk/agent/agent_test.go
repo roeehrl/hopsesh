@@ -24,6 +24,37 @@ func TestMainRoot(t *testing.T) {
 	if in.Main() != "/d" {
 		t.Fatal("PinMain changed the original install")
 	}
+	// An added account of an agent whose account folders hold its roots: the main root is
+	// inside the folder. The default account's folder is the main root itself.
+	oc := Spec{Roots: []Root{
+		{Name: "data", EnvSub: []EnvSub{{Env: "XDG_DATA_HOME", Sub: "opencode"}}, Default: map[string]string{"*": "~/.local/share/opencode"}},
+		{Name: "config", Env: []string{"OPENCODE_CONFIG_DIR"}, Default: map[string]string{"*": "~/.config/opencode"}},
+	}, Accounts: &ProfileSpec{RootVars: []ProfileVar{{Env: "XDG_DATA_HOME", Sub: "data"}, {Env: "OPENCODE_CONFIG_DIR", Sub: "config"}}}}
+	for _, c := range []struct {
+		in   Install
+		path string
+		want string
+	}{
+		{Install{Profile: &RuntimeProfile{Root: "/p"}}, "/p", "/p/data/opencode"},
+		{Install{OS: "windows", Profile: &RuntimeProfile{Root: `C:\p`}}, `C:\p`, `C:\p\data\opencode`},
+		{Install{Profile: &RuntimeProfile{Root: `C:\p`}}, `C:\p`, `C:\p\data\opencode`},
+		{Install{Profile: &RuntimeProfile{Default: true, Root: "/d"}}, "/d", "/d"},
+		{Install{}, "/d", "/d"},
+	} {
+		if got := oc.PinMain(c.in, c.path).Main(); got != c.want {
+			t.Errorf("PinMain(%+v, %s) = %s, want %s", c.in.Profile, c.path, got, c.want)
+		}
+		if p := c.in.Profile; p != nil && !p.Default {
+			if loc := oc.ProfileLocate("data", c.path, map[bool]string{true: "windows", false: "linux"}[c.want[0] != '/'], func(string) string { return "" }); loc != c.want {
+				t.Errorf("ProfileLocate = %s, PinMain %s", loc, c.want)
+			}
+		}
+	}
+	// A root the account folder's variables do not set is not inside it: the folder stays.
+	plain := Spec{Roots: []Root{{Name: "home", Env: []string{"X_HOME"}}}, Accounts: &ProfileSpec{RootVars: []ProfileVar{{Env: "X_CACHE", Sub: "cache"}}}}
+	if got := plain.PinMain(Install{Profile: &RuntimeProfile{Root: "/p"}}, "/p").Main(); got != "/p" {
+		t.Errorf("PinMain without the main root's variable = %s", got)
+	}
 	// An install from an older peer does not name its main root; a single root is it.
 	var old Install
 	if err := json.Unmarshal([]byte(`{"agent":"claude","roots":{"home":"/h"},"present":true}`), &old); err != nil {

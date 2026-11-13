@@ -150,6 +150,39 @@ func TestMultiVariableProfile(t *testing.T) {
 	}
 }
 
+// The default account of an agent with several roots is its own folders: its Root is the
+// main root, so the variables that would point inside an account folder are not set, and
+// the machine's own ones stay. RootEnv, naming the main root itself, is still pinned.
+func TestDefaultProfileOfSeveralRoots(t *testing.T) {
+	spec := &ProfileSpec{RootVars: []ProfileVar{{Env: "XDG_DATA_HOME", Sub: "data"}, {Env: "OPENCODE_CONFIG_DIR", Sub: "config"}}, Unset: []string{"OPENCODE_PASSWORD"}}
+	in := Install{Agent: "opencode", Accounts: spec, Profile: &RuntimeProfile{ID: "default", Default: true, Root: "/home/u/.local/share/opencode"}}
+	if got := in.ProfileEnv(); len(got) != 0 {
+		t.Fatalf("the default account pins %v", got)
+	}
+	c := in.ScopeCommand(Command{Argv: []string{"opencode"}, Env: []string{"XDG_DATA_HOME=/elsewhere", "OPENCODE_PASSWORD=x", "TERM=xterm"}})
+	if !slices.Equal(c.Env, []string{"TERM=xterm"}) {
+		t.Fatalf("a caller's variables reached the default account: %v", c.Env)
+	}
+	if slices.Contains(c.Unset, "XDG_DATA_HOME") || !slices.Contains(c.Unset, "OPENCODE_PASSWORD") {
+		t.Fatalf("unset %v: the machine's XDG_DATA_HOME found the default folders and stays", c.Unset)
+	}
+	// An added account is pinned as before.
+	work := Install{Agent: "opencode", Accounts: spec, Profile: &RuntimeProfile{ID: "work", Root: "/home/u/accounts/opencode/work"}}
+	if got := work.ProfileEnv(); len(got) != 2 || got[0] != "XDG_DATA_HOME=/home/u/accounts/opencode/work/data" {
+		t.Fatalf("an added account: %v", got)
+	}
+	// The stand-in third agent: RootEnv names the main root, RootVars a folder inside an
+	// account folder. Its default account keeps the first and not the second.
+	third := &ProfileSpec{RootEnv: []string{"THIRD_DATA_DIR"}, RootVars: []ProfileVar{{Env: "THIRD_CONFIG_DIR", Sub: "config"}}}
+	def := Install{Agent: "third", Accounts: third, Profile: &RuntimeProfile{Default: true, Root: "/home/u/.local/share/third"}}
+	if got := def.ProfileEnv(); !slices.Equal(got, []string{"THIRD_DATA_DIR=/home/u/.local/share/third"}) {
+		t.Fatalf("third default: %v", got)
+	}
+	if c := def.ScopeCommand(Command{Argv: []string{"third"}}); !slices.Contains(c.Unset, "THIRD_DATA_DIR") || slices.Contains(c.Unset, "THIRD_CONFIG_DIR") {
+		t.Fatalf("third default unset %v", c.Unset)
+	}
+}
+
 // Where a root of an account folder is, through the same resolver as the default folder.
 func TestProfileLocate(t *testing.T) {
 	s := Spec{Roots: []Root{
