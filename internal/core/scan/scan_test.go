@@ -38,3 +38,24 @@ func TestRedact(t *testing.T) {
 		t.Errorf("%d %q", n, out)
 	}
 }
+
+func TestProviderKeys(t *testing.T) {
+	in := strings.Join([]string{
+		`OPENROUTER_API_KEY=sk-or-v1-` + strings.Repeat("0f", 32),
+		`"apiKey": "gsk_` + strings.Repeat("Ab1", 18) + `"`,
+		`export XAI_API_KEY=xai-` + strings.Repeat("Zy9", 27),
+		`not keys: sk-or-v1-short gsk_short xai-short task-or-v1 sk-or-v1-` + strings.Repeat("G", 64),
+	}, "\n")
+	s, err := Reader(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{"openrouter-api-key", "groq-api-key", "xai-api-key"} {
+		if s.ByRule[rule] != 1 {
+			t.Errorf("%s: %d (%v)", rule, s.ByRule[rule], s.ByRule)
+		}
+	}
+	if s.Total != 3 {
+		t.Errorf("total %d (%v)", s.Total, s.ByRule)
+	}
+}

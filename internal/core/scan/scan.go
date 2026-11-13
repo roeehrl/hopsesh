@@ -24,6 +24,10 @@ var Rules = []Rule{
 	{"slack-token", regexp.MustCompile(`xox[baprs]-[0-9A-Za-z\-]{10,}`)},
 	{"stripe-secret-key", regexp.MustCompile(`(?:sk|rk)_live_[0-9A-Za-z]{24,}`)},
 	{"huggingface-token", regexp.MustCompile(`\bhf_[A-Za-z0-9]{34,}\b`)},
+	// Provider keys OpenCode users often configure.
+	{"openrouter-api-key", regexp.MustCompile(`\bsk-or-v1-[0-9a-f]{64}\b`)},
+	{"groq-api-key", regexp.MustCompile(`\bgsk_[A-Za-z0-9]{48,}\b`)},
+	{"xai-api-key", regexp.MustCompile(`\bxai-[A-Za-z0-9]{70,}\b`)},
 	{"private-key", regexp.MustCompile(`-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----`)},
 	{"jwt", regexp.MustCompile(`\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}`)},
 	{"bearer-token", regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/\-]{24,}=*`)},
