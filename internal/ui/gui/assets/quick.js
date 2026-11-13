@@ -1,5 +1,5 @@
 import "./appearance.js";
-import {api,on,h,fill,view,state,setSystem,sys,errText,agentBadge,loadError,accountShown} from './core.js';
+import {api,on,h,fill,view,state,setSystem,sys,errText,agentBadge,loadError,accountShown,agentShort} from './core.js';
 import {markdown} from './markdown.js';
 import {desktopSettings} from './desktop-settings.js';
 
@@ -36,7 +36,7 @@ function render(){
   const n=e.departure&&e.departure.status!=='forked'?e.departure:null;
   if(n)content.append(h('p',{class:'desktop-note'},`Old copy: this conversation moved to ${n.cloud||`${n.agentName||n.agent} on ${data.scan.machines.some(m=>m.local&&m.name===n.machine)?sys.here:n.machine}`}. Continue the active copy there.`));
   if(ts.length)actions.append(h('button',{class:'btn primary',onclick:()=>{if(ts.length===1)return action(async()=>{await api('TerminalFocus',ts[0].id);await api('QuickClose')});else{scopedTabs=e;screen='tabs';render()}}},ts.length===1?'Show existing terminal tab':`Choose from ${ts.length} open terminal tabs…`));
-  else if(!n&&local(e)&&e.canApp&&!e.live)actions.append(h('button',{class:'btn primary',onclick:()=>action(async()=>{await api('ResumeEntry',e.machine,e.key,true);await api('QuickClose')})},`Open in ${e.agent==='codex'?'Codex':e.agent==='claude'?'Claude':e.agentName} app`));
+  else if(!n&&local(e)&&e.canApp&&!e.live)actions.append(h('button',{class:'btn primary',onclick:()=>action(async()=>{await api('ResumeEntry',e.machine,e.key,true);await api('QuickClose')})},`Open in ${agentShort(e.agent,e.agentName)} app`));
   actions.append(h('button',{class:'btn',onclick:()=>open(e)},'Open session details'));content.append(actions);fill(view,head(true),content);return;
  }
  const waiting=es.filter(needs).length;const input=h('input',{class:'field quick-search',type:'search','aria-label':'Search sessions, accounts or machines',placeholder:'Search sessions, accounts, machines…',value:query,oninput:e=>{query=e.target.value;renderList()},onkeydown:e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector('.quick-list .quick-row')?.click()}}});

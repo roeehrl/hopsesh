@@ -1,7 +1,7 @@
 // The Accounts screen: the accounts you use, who each tool is signed in as on every
 // machine (the grid), and the folders tools keep sessions in. A session keeps the account
 // that ran it, and continues as whoever is signed in to the tool and machine it opens in.
-import { api, h, fill, view, state, screen, go, toast, fail, ask, errText, current, navigationID, sys, on, ago, icon, ICONS, dialog, loading, loadError } from './core.js';
+import { api, h, fill, view, state, screen, go, toast, fail, ask, errText, current, navigationID, sys, on, ago, icon, ICONS, dialog, loading, loadError, agentInfo, agentShort, localAgents } from './core.js';
 
 let data = null, busy = false, problem = '';
 const checking = new Set();
@@ -45,7 +45,9 @@ function avatar(p, size = 22) {
 const pathText = (p) => p.split(/(?<=\/)/).flatMap((part, i) => (i ? [h('wbr'), part] : [part]));
 
 // ---- Your accounts ----------------------------------------------------------------
-const agentWord = (a) => (a === 'codex' ? 'Codex' : 'Claude');
+const agentWord = (a) => agentShort(a);
+// accountAgents are the agents that take account folders, in display order.
+const accountAgents = () => localAgents().filter((a) => a.accounts);
 const sessionsWord = (n) => `${n} session${n === 1 ? '' : 's'}`;
 // unknownName tells an account seen only in records apart from the others: "Claude account 1".
 const unknownName = (p) => `${agentWord(p.agent)} account ${p.number || ''}`.trim();
@@ -72,16 +74,12 @@ function unknownCard(ps) {
       h('span', { class: 'muted' }, 'They ran sessions, but no tool on any machine is signed in to them now. Sign one in to see its email.')),
     h('ul', { class: 'unknown-list' }, ps.map((p) => h('li', { 'data-person': p.id }, avatar(p, 22),
       h('span', {}, h('b', {}, unknownName(p)), h('span', { class: 'muted' }, ` · ${sessionsWord(p.sessions)}${p.ranOn?.length ? ' on ' + p.ranOn.join(', ') : ''}`))))),
-    h('div', { class: 'person-foot' }, h('button', { class: 'btn small', onclick: () => addDialog({ agent: ps[0].agent || 'claude' }) }, 'Sign one in on a machine…')));
+    h('div', { class: 'person-foot' }, h('button', { class: 'btn small', onclick: () => addDialog({ agent: ps[0].agent || '' }) }, 'Sign one in on a machine…')));
 }
 
 // ---- Where you're signed in ---------------------------------------------------------
-const TOOLS = [
-  ['claude-terminal', 'Claude Code · terminal'],
-  ['claude-desktop', 'Claude desktop'],
-  ['codex-terminal', 'Codex · terminal'],
-  ['codex-app', 'Codex app'],
-];
+// tools are the grid's columns, [id, name]: each agent's terminal, then its desktop app.
+const tools = () => localAgents().flatMap((a) => (a.tools || []).map((t) => [t.id, t.name]));
 
 function signInLine(s) {
   const p = person(s.person);
@@ -111,6 +109,7 @@ function machineHead(m) {
 }
 
 function grid(d) {
+  const cols = tools();
   const rows = d.machines.map((m) => {
     // A Mac read over SSH alone can't show its sign-ins (the Keychain is locked to SSH).
     if (!m.local && m.presence === 'ssh' && m.os === 'darwin') {
@@ -119,13 +118,13 @@ function grid(d) {
           h('span', {}, `hopsesh reads ${m.machine}'s sessions over SSH, but can't see who is signed in there: macOS keeps sign-ins in the Keychain, which is locked to SSH.`),
           h('button', { class: 'btn small', style: 'align-self:flex-start', onclick: () => go('machines') }, `Set up hopsesh on ${m.machine}…`)));
     }
-    return h('div', { class: 'trow', role: 'row' }, machineHead(m), TOOLS.map(([t]) => cell(m.cells.find((c) => c.tool === t) || { installed: false })));
+    return h('div', { class: 'trow', role: 'row' }, machineHead(m), cols.map(([t]) => cell(m.cells.find((c) => c.tool === t) || { installed: false })));
   });
   return h('section', { class: 'card', 'aria-labelledby': 'where-h' },
     h('div', { class: 'card-h stacked' }, h('h2', { class: 'name', id: 'where-h' }, "Where you're signed in"),
       h('span', { class: 'muted card-sub' }, "Who each tool is signed in as, in each folder it keeps sessions in.")),
-    h('div', { class: 'tgrid-wrap' }, h('div', { class: 'tgrid', role: 'table', 'aria-label': "Where you're signed in" },
-      h('div', { class: 'trow head', role: 'row' }, h('div', { role: 'columnheader' }, 'Machine'), TOOLS.map(([, name]) => h('div', { role: 'columnheader' }, name))),
+    h('div', { class: 'tgrid-wrap' }, h('div', { class: 'tgrid', role: 'table', 'aria-label': "Where you're signed in", style: `--tools:${cols.length}` },
+      h('div', { class: 'trow head', role: 'row' }, h('div', { role: 'columnheader' }, 'Machine'), cols.map(([, name]) => h('div', { role: 'columnheader' }, name))),
       rows.length ? rows : h('div', { class: 'empty' }, 'Check all machines to see their tools.'))));
 }
 
@@ -198,11 +197,13 @@ function machineOptions() {
   });
 }
 
-export function addDialog({ agent = 'claude', machine = '' } = {}) {
+export function addDialog({ agent = '', machine = '' } = {}) {
   const ms = machineOptions();
   const pick = ms.find((m) => m.name === machine && !m.why) || ms.find((m) => m.local) || ms[0];
+  const choices = accountAgents();
+  if (!choices.some((a) => a.id === agent)) agent = choices[0]?.id || '';
   const agentSel = h('div', { role: 'radiogroup', 'aria-label': 'Agent', class: 'radios' },
-    ['claude', 'codex'].map((a) => h('label', {}, h('input', { type: 'radio', name: 'add-agent', value: a, checked: a === agent }), a === 'claude' ? 'Claude Code' : 'Codex')));
+    choices.map((a) => h('label', {}, h('input', { type: 'radio', name: 'add-agent', value: a.id, checked: a.id === agent }), a.name)));
   const machineSel = h('select', { class: 'field', 'aria-label': 'On which machine' }, ms.map((m) => h('option', { value: m.name, disabled: !!m.why, selected: m === pick }, m.label + (m.why ? ' · ' + m.why : ''))));
   const name = h('input', { class: 'field', maxlength: 120, placeholder: 'work', 'aria-label': 'Name' });
   const cmd = h('input', { type: 'checkbox', checked: !sys.win });
@@ -217,8 +218,12 @@ export function addDialog({ agent = 'claude', machine = '' } = {}) {
     const a = agentSel.querySelector('input:checked').value, m = ms.find((x) => x.name === machineSel.value);
     const remote = m && !m.local, there = m?.label || '';
     fill(cmdLabel, 'Add the ', h('span', { class: 'mono' }, `${a}-${slug()}`), ` command to my shell on ${there}`);
-    fill(what, 'A folder ', h('span', { class: 'mono' }, `~/.hopsesh/accounts/${a}/${slug()}`), ` on ${there}, signed in to ${a === 'claude' ? 'Claude Code' : 'Codex'}. Your other sign-ins aren't touched.`,
-      a === 'claude' ? ' Claude desktop always uses ~/.claude, so sessions here open in a terminal.' : ' Codex keeps its sign-in in it the way your default folder does.');
+    const info = agentInfo(a) || { name: a };
+    // An app with its own sign-in keeps to the default folder; a folder that copies the
+    // default one's settings keeps its sign-in the same way.
+    const how = info.desktop?.ownSignIn ? ` ${info.desktop.tool} always uses ${info.defaultRoot}, so sessions here open in a terminal.`
+      : info.inheritsSignIn ? ` ${info.name} keeps its sign-in in it the way your default folder does.` : '';
+    fill(what, 'A folder ', h('span', { class: 'mono' }, `~/.hopsesh/accounts/${a}/${slug()}`), ` on ${there}, signed in to ${info.name}. Your other sign-ins aren't touched.`, how);
     fill(where, remote ? [h('span', { style: 'font-size:12.5px;font-weight:500' }, 'Sign in'),
       h('label', { class: 'opt' }, fromHere, h('span', {}, h('b', {}, 'From here'), h('span', { class: 'muted' }, `A tab here shows the sign-in; open its link in your browser on ${sys.here}. The account you choose there is the one ${there} uses.`))),
       h('label', { class: 'opt' }, atScreen, h('span', {}, h('b', {}, `On ${there}'s screen`), h('span', { class: 'muted' }, `For when you're sitting at ${there}.`)))] : []);

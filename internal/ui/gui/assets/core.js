@@ -343,7 +343,20 @@ export function cloudState(c) {
 export const cloudTitle = (name) => cloudOf(name)?.title || name;
 // cloudChip names a cloud with its glyph (its id in the tooltip).
 export const cloudChip = (name) => h("span", { class: "chip cloud", title: name }, icon(ICONS.cloud, 12), cloudTitle(name));
+// agentInfo is what the window knows of an agent, from its module: its name, capabilities
+// and facts (short, local, accounts, desktop, tools …). The window keeps no table of agents.
 export const agentInfo = (id) => (state.info?.agents || []).find((a) => a.id === id);
+// agentShort names an agent where space is tight ("Claude").
+export const agentShort = (id, fallback) => agentInfo(id)?.short || fallback || id;
+// agentHas reports whether an agent's module has a capability ("read", "write").
+export const agentHas = (id, cap) => !!agentInfo(id)?.capabilities?.includes(cap);
+// localAgents are the enabled agents that keep sessions on machines, in display order.
+export const localAgents = () => (state.info?.agents || []).filter((a) => a.local && a.enabled !== false);
+// appPlace is the place an agent's desktop app is ("claude-app"); isAppPlace tells one.
+export const appPlace = (id) => id + "-app";
+export const isAppPlace = (kind) => typeof kind === "string" && kind.length > 4 && kind.endsWith("-app");
+// words joins names as a sentence does: "a", "a and b", "a, b and c".
+export const words = (names, last = " and ") => names.length < 2 ? names.join("") : names.slice(0, -1).join(", ") + last + names[names.length - 1];
 
 // dialog fills the small dialog and shows it; close() hides it.
 export function dialog(...kids) {

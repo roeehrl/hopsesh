@@ -1,7 +1,7 @@
 // The Settings screen, in tabs: General, Machines (one machine, everything about it:
 // hopsesh, the command, hooks and skill), Clouds, Desktop presence, Agents, History,
 // Terminal, Updates.
-import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, loading, toast, fail, dialog, agentBadge, sys, cliHow, icon, ask, count, current, loadError, navigationID, errText, agentInfo, localAgents, words } from "./core.js";
 import { desktopSettings } from "./desktop-settings.js";
 import { installGuarded, waitingFor, cancelDeferred, onDeferred } from "./term.js";
 import { withCLI, loadHookHealth } from "./guard.js";
@@ -175,7 +175,7 @@ function terminal() {
   const sw = (key, label, desc) => h("label", { class: "opt" }, h("input", { type: "checkbox", checked: ts[key], onchange: (e) => setTerm({ [key]: e.target.checked }) }),
     h("span", {}, h("b", {}, label), h("span", { class: "muted" }, desc)));
   return [
-    h("span", { class: "muted", style: "font-size:12.5px" }, "Where hopsesh runs Claude Code, Codex and your shell when you resume, bring back, hand off or sign in."),
+    h("span", { class: "muted", style: "font-size:12.5px" }, `Where hopsesh runs ${words([...agentNames(), "your shell"])} when you resume, bring back, hand off or sign in.`),
     card(h("span", { class: "sec-h" }, "Terminal workspace"),
       h("div", {class:"set-row"}, title("Placement", "Move the view of the same running programs. Separate window remains the default until you choose a panel."),
         seg("Terminal placement", ts.placement, [["bottom","Bottom panel"],["right","Right panel"],["separate","Separate window"]], async v => { try { await api("TerminalPlacement",v); } catch(e){fail(e);} })),
@@ -197,13 +197,13 @@ function terminal() {
         ? "A notification when a tab you can't see waits for your answer. hopsesh writes the text; it never shows what the program printed. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications); hopsesh never changes Claude Code's settings for you."
         : "The terminal's taskbar button flashes when a tab you can't see waits for your answer. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications).")),
     card(h("span", { class: "sec-h" }, "Look"),
-      h("div", { class: "set-row" }, title("Font", "Fonts with box-drawing characters draw Claude Code and Codex best. Empty: the system's monospace font."),
+      h("div", { class: "set-row" }, title("Font", `Fonts with box-drawing characters draw ${words(agentNames())} best. Empty: the system's monospace font.`),
         h("input", { class: "field", "aria-label": "Font", list: "term-fonts", value: ts.font, placeholder: sys.mac ? "SF Mono" : sys.win ? "Cascadia Mono" : "monospace", onchange: (e) => setTerm({ font: e.target.value.trim() }) }),
         h("datalist", { id: "term-fonts" }, ["SF Mono", "Menlo", "Monaco", "Cascadia Mono", "Cascadia Code", "Consolas", "JetBrains Mono", "Fira Code", "IBM Plex Mono", "Source Code Pro"].map((f) => h("option", { value: f })))),
       h("div", { class: "set-row" }, title("Size", `${sys.mac ? "⌘= and ⌘-" : "Ctrl+= and Ctrl+-"} in the terminal change it too.`),
         h("select", { "aria-label": "Font size", onchange: (e) => setTerm({ fontSize: Number(e.target.value) }) },
           Array.from({ length: 16 }, (_, i) => i + 9).map((n) => h("option", { value: n, selected: ts.fontSize === n }, `${n} pt`)))),
-      h("div", { class: "set-row" }, title("Colors", "The terminal follows the app's light or dark look. Programs that ask for the background color get the real one, so Claude Code and Codex pick a matching theme."),
+      h("div", { class: "set-row" }, title("Colors", `The terminal follows the app's light or dark look. Programs that ask for the background color get the real one, so ${words(agentNames())} pick a matching theme.`),
         h("span", { class: "ro-val", role: "status", "aria-label": "Colors: follow the app (not a setting)", title: "The only choice for now" }, "Follow the app")),
       h("div", { class: "set-row" }, title("Scrollback", "Kept in memory only, and gone when the tab closes."),
         h("select", { "aria-label": "Scrollback", onchange: (e) => setTerm({ scrollback: Number(e.target.value) }) },
@@ -214,7 +214,7 @@ function terminal() {
     sys.win ? card(h("span", { class: "sec-h" }, "On Windows"),
       h("label", { class: "opt" }, h("input", { type: "checkbox", checked: !ts.systemConsole, disabled: !ts.bundled, onchange: (e) => setTerm({ systemConsole: !e.target.checked }) }),
         h("span", {}, h("b", {}, "Use the bundled console host (recommended)"), h("span", { class: "muted" }, ts.bundled
-          ? "hopsesh carries Microsoft's newer console host for its tabs; Claude Code and Codex draw correctly with it. Turn it off only if a security tool blocks it."
+          ? `hopsesh carries Microsoft's newer console host for its tabs; ${words(agentNames())} draw correctly with it. Turn it off only if a security tool blocks it.`
           : "This copy of hopsesh has no bundled console host, so tabs use Windows' own.")))) : null,
     card(h("span", { class: "sec-h" }, "Safety"),
       [["Programs can never read your clipboard.", "Pasting is always something you do."],
@@ -436,10 +436,13 @@ screen("settings", async (which, pick) => {
   await load();
 });
 
+// agentNames name the agents on machines, for sentences.
+const agentNames = () => localAgents().map((a) => a.name);
+const agentName = (id) => agentInfo(id)?.name || id;
+
 // hookName is the agent's name, with the account only when the agent has several here.
-const AGENT_NAMES = { claude: "Claude Code", codex: "Codex" };
 function hookName(hook, hooks) {
-  const name = AGENT_NAMES[hook.agent] || hook.agent;
+  const name = agentName(hook.agent);
   return hooks.filter((x) => x.agent === hook.agent).length > 1 ? `${name} (${hook.profileLabel || hook.profile || "default account"})` : name;
 }
 
@@ -447,7 +450,7 @@ function hookName(hook, hooks) {
 // cannot take the hook).
 const installHooks = (id, profile) => withCLI(() => api("InstallNoticeHooks", id, profile)).then((res) => {
   const bad = (res || []).filter((x) => x.result === "failed" || id && x.result === "unsupported");
-  if (bad.length) throw new Error(bad.map((x) => `${AGENT_NAMES[x.agent] || x.agent}: ${x.reason}`).join("; "));
+  if (bad.length) throw new Error(bad.map((x) => `${agentName(x.agent)}: ${x.reason}`).join("; "));
   return res;
 });
 
@@ -456,7 +459,8 @@ function noticeSetup() {
   const off = s.original === "off";
   const trustWords = (t) => !t ? "" : t.state === "trusted" ? " · trusted by the agent" : t.state === "needs-review" ? " · waiting for your approval in the agent" : t.state === "disabled" ? " · turned off in the agent" : t.state === "missing" ? " · not seen by the agent" : " · trust not verified";
   return card(h("span", {class:"sec-h"}, "Protection hooks"),
-    h("span", {class:"muted"}, "Blocking and warnings work through a small hook each agent runs before a prompt. The hooks run the hopsesh command. Codex runs a new hook only after you approve it in Codex (/hooks); hopsesh checks and tells you, and never approves hooks for you."),
+    h("span", {class:"muted"}, "Blocking and warnings work through a small hook each agent runs before a prompt. The hooks run the hopsesh command."
+      + localAgents().filter((a) => a.hookReview).map((a) => ` ${a.name} runs a new hook only after you approve it in ${a.name} (/hooks); hopsesh checks and tells you, and never approves hooks for you.`).join("")),
     s.noticeHooksError && s.cliReady ? h("span", {class:"warn"}, s.noticeHooksError) : null,
     !s.cliReady ? h("span", {class:"warn"}, "The hopsesh command is not installed; installing a hook installs it first.") : null,
     ...hooks.map(hook => h("div", {class:"set-row"},

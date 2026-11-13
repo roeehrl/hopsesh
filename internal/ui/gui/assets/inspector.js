@@ -3,7 +3,7 @@
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
 import { role, chip as roleChip, isOldCopy, oldCopiesOf } from "./guard.js";
-import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $, accountShown, copyEntry } from "./core.js";
+import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $, accountShown, copyEntry, agentInfo, agentShort, isAppPlace } from "./core.js";
 import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
@@ -11,12 +11,11 @@ import { markdown } from "./markdown.js";
 import { movementNotice, resolveDestination, returnCard, oldCopyBanner, oldCopiesSection } from "./returns.js";
 import { tabs } from "./term.js";
 
-const AGENT_SHORT = { claude: "Claude", codex: "Codex" };
 const PLACE_ICON = {
   hopsesh: ["M3 4h18v16H3z", "m7 10 3 2.5L7 15M12 15h5"], iterm2: ["M3 4h18v16H3z", "M3 9h18"], terminal: ["M3 4h18v16H3z", "M3 9h18"], wt: ["M3 4h18v16H3z", "M3 9h18"],
   ide: ["M8 6 3 12l5 6M16 6l5 6-5 6"], tmux: ["M3 4h18v16H3z", "M12 4v16"], ssh: ["M4 12h16M14 6l6 6-6 6"], unknown: ["M3 4h18v16H3z"],
 };
-export const placeIcon = (kind, size = 12) => (kind === "claude-app" || kind === "codex-app" ? null : icon(PLACE_ICON[kind] || PLACE_ICON.unknown, size));
+export const placeIcon = (kind, size = 12) => (isAppPlace(kind) ? null : icon(PLACE_ICON[kind] || PLACE_ICON.unknown, size));
 
 // splitButton is the primary action and, when there are other places, the chevron that
 // lists them (picking one runs it, and for Resume makes it the agent's default).
@@ -97,7 +96,7 @@ function header(e, viewJourney) {
   // Continuing it here runs under the folder's sign-in now, which may not be the account
   // that ran it: say so before anyone continues.
   const now=e.profile?.account?.loggedIn?(e.profile.account.email||e.profile.account.label):"";
-  if(now&&e.owner?.recorded&&!e.owner.current) facts.push(h("span",{class:"owner-switch",title:e.agent==="claude"?"Claude Code continues it under that account; reasoning recorded under the other account is not visible to it.":"Codex cannot resume it as it is under another account; Move to this same place continues a cleaned copy."},`Continues as ${now}`));
+  if(now&&e.owner?.recorded&&!e.owner.current) facts.push(h("span",{class:"owner-switch",title:agentInfo(e.agent)?.resumeAcrossAccounts?`${e.agentName} continues it under that account; reasoning recorded under the other account is not visible to it.`:`${e.agentName} cannot resume it as it is under another account; Move to this same place continues a cleaned copy.`},`Continues as ${now}`));
   if (e.cloud) {
     if (e.cloud.repo || !g.noRepo) facts.push(h("span", {}, (e.cloud.repo || g.name).split("/").pop()));
     if (e.cloud.branch) facts.push(h("span", { class: "mono" }, e.cloud.branch));
@@ -170,11 +169,12 @@ function remoteLine(e, m, places) {
   if (!m.live || (m.remoteControl !== "on" && m.remoteControl !== "off")) return null;
   const on = m.remoteControl === "on";
   // In a hopsesh Terminal tab here, hopsesh types the agent's own command for you.
-  const inTab = !on && e.agent === "claude" && e.machine === here() && places.some((p) => p.kind === "hopsesh");
+  const typed = agentInfo(e.agent)?.remoteControlTyped || "";
+  const inTab = !on && !!typed && e.machine === here() && places.some((p) => p.kind === "hopsesh");
   const turnOn = async () => { try { await api("TurnOnRemoteControl", e.machine, e.key); toast("Turning on Remote Control…"); } catch (err) { toast(cap(errText(err))); } };
   return h("div", { class: "open-line rc-line" }, h("span", { class: "open-ic" + (on ? " accent" : "") }, icon(ICONS.external, 13)),
     h("span", { class: "open-t" }, on ? "Remote Control" : "Remote Control is off",
-      h("span", { class: "muted" }, on ? " — reach it from claude.ai or the Claude app" : inTab ? " — reach it from claude.ai or the Claude app once it's on" : m.app ? ` — turn it on with the session's Remote Control switch in ${m.app}` : " — type /remote-control in the session to reach it from claude.ai or the Claude app")),
+      h("span", { class: "muted" }, on ? " — reach it from claude.ai or the Claude app" : inTab ? " — reach it from claude.ai or the Claude app once it's on" : m.app ? ` — turn it on with the session's Remote Control switch in ${m.app}` : ` — type ${typed || "/remote-control"} in the session to reach it from claude.ai or the Claude app`)),
     on && m.remoteUrl ? h("button", { class: "btn small", onclick: () => api("OpenURL", m.remoteUrl).catch(fail) }, "Open") : null,
     inTab ? h("button", { class: "btn small", onclick: turnOn }, "Turn on") : null);
 }
@@ -202,7 +202,7 @@ function conversation(e) {
 
 const skeleton = () => h("div", { class: "skel", role: "status" }, h("span", { class: "visually-hidden" }, "Reading conversation…"), h("span", { style: "width:30%" }), h("span", { style: "width:92%" }), h("span", { style: "width:70%" }));
 
-const who = (e) => AGENT_SHORT[e.agent] || e.agentName;
+const who = (e) => agentShort(e.agent, e.agentName);
 function stamp(iso) { return iso ? h("span", { class: "msg-t", title: when(iso) }, ago(iso)) : null; }
 
 // A separate expansion button leaves formatted text selectable and links usable.

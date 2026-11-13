@@ -7,7 +7,7 @@
 import { refreshSelection } from "./sessions.js";
 import { changeDirDialog } from "./cd-dialog.js";
 import { role, removeBlock, restoreBlock, isOldCopy, askOldCopy, onContinueOld, destination, movedTo } from "./guard.js";
-import { go, api, state, sys, here, agentInfo, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
+import { go, api, state, sys, here, agentInfo, agentShort, agentHas, localAgents, appPlace, isAppPlace, words, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
 import { planFor, chooseTarget, bringLive } from "./plan.js";
 import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
@@ -23,8 +23,7 @@ export function liveOf(e) {
 }
 
 // appWord names an agent's desktop app: "Claude" for Claude Code.
-const APPS = { claude: "Claude", codex: "Codex" };
-export const appWord = (e) => liveOf(e).app || APPS[e.agent] || e.agentName;
+export const appWord = (e) => liveOf(e).app || agentShort(e.agent, e.agentName);
 
 // placeName is a place for people: "hopsesh Terminal", "iTerm2", "VS Code", "Claude app".
 export function placeName(p, e) {
@@ -33,11 +32,14 @@ export function placeName(p, e) {
     case "iterm2": return "iTerm2";
     case "terminal": return "Terminal";
     case "wt": return "Windows Terminal";
-    case "claude-app": return "Claude app";
-    case "codex-app": return `${liveOf(e || {}).app || "ChatGPT"} desktop`; // one shared app process: shown, never quit
     case "ide": return p.app || "an editor";
     case "tmux": return "tmux";
     case "ssh": return "an ssh login";
+  }
+  if (isAppPlace(p.kind)) {
+    // An app with one shared process for every session is shown, never quit.
+    const a = agentInfo(p.kind.slice(0, -4)), name = a?.appName || a?.short || p.kind.slice(0, -4);
+    return a?.desktop?.shared ? `${liveOf(e || {}).app || name} desktop` : `${name} app`;
   }
   return e?.app ? `${e.app} app` : "Unknown window";
 }
@@ -59,7 +61,7 @@ export function placesOf(e) {
   if (ts.length) out.push({ kind: "hopsesh", count: ts.length, waiting: ts.some((t) => t.attention), tabs: ts });
   const lv = liveOf(e);
   if (lv.live) for (const p of lv.places || []) out.push(Object.assign({}, p, { waiting: p.waiting || (lv.needs && !ts.length && (lv.places || []).length === 1) }));
-  if (lv.live && !ts.length && !(lv.places || []).length) out.push({ kind: lv.app ? (e.agent === "codex" ? "codex-app" : "claude-app") : "unknown", count: 1, waiting: !!lv.needs });
+  if (lv.live && !ts.length && !(lv.places || []).length) out.push({ kind: lv.app ? appPlace(e.agent) : "unknown", count: 1, waiting: !!lv.needs });
   return out;
 }
 export const placeCount = (ps) => ps.reduce((n, p) => n + (p.count || 1), 0);
@@ -72,9 +74,9 @@ const canShow = (p) => p.kind !== "unknown" && p.kind !== "tmux" && p.kind !== "
 export function showPlace(e, p) {
   switch (p.kind) {
     case "hopsesh": return showTerminal(p.tabs[0].id);
-    case "claude-app": case "codex-app": return api("ShowApp", e.machine, e.key).catch((err) => toast(cap(errText(err))));
     case "ide": return api("ShowPlace", p.app).catch((err) => toast(cap(errText(err))));
   }
+  if (isAppPlace(p.kind)) return api("ShowApp", e.machine, e.key).catch((err) => toast(cap(errText(err))));
   return api("ShowEntry", e.machine, e.key).catch((err) => toast(`Couldn't show “${e.title}”: ${errText(err)}`));
 }
 
@@ -102,7 +104,7 @@ export function watchRemote(machine, k, title) {
 export function resumePlaces(e) {
   const out = [{ id: "here", name: "hopsesh Terminal", note: "Tab ends when hopsesh quits" },
     { id: "terminal", name: sys.terminal, note: "Keeps running after hopsesh quits" }];
-  if (agentInfo(e.agent)?.capabilities?.includes("app")) out.push({ id: "app", disabled:e.canApp===false, why:e.appWhy, name: `${APPS[e.agent] || e.agentName} app`, note: e.appWhy || `Opens this conversation in the ${APPS[e.agent] || e.agentName} app` });
+  if (agentInfo(e.agent)?.capabilities?.includes("app")) out.push({ id: "app", disabled:e.canApp===false, why:e.appWhy, name: `${agentShort(e.agent, e.agentName)} app`, note: e.appWhy || `Opens this conversation in the ${agentShort(e.agent, e.agentName)} app` });
   return out;
 }
 
@@ -193,7 +195,7 @@ function oldCopyModel(e) {
   const m = { primary: null, chevron: [], fix: null, caption: "", move: [], more: more(e, local), places: local ? placesOf(e).filter((p) => p.kind !== "unknown") : [], twice: false, chevronLabel: "Other choices", returns: [] };
   m.primary = { id: "destination", label: `Go to the active copy ${destination(e)}`, short: "Go to the active copy", run: () => showMovementDestination(e.departure, selectFn) };
   const presence = local ? "" : (state.scan?.machines || []).find((x) => x.name === e.machine)?.presence;
-  const why = local ? "" : !["claude", "codex"].includes(e.agent) ? `hopsesh can't continue ${e.agentName} sessions on ${e.machine}`
+  const why = local ? "" : !agentInfo(e.agent)?.local ? `hopsesh can't continue ${e.agentName} sessions on ${e.machine}`
     : presence === "login" ? "" : { ssh: `Needs hopsesh on ${e.machine}: set it up in Machines`, older: `Update hopsesh on ${e.machine} first (Machines)`, installed: `hopsesh on ${e.machine} isn't running in a login session` }[presence] || `hopsesh on ${e.machine} isn't reached now`;
   // Not awaited: the question is not work in progress (what follows it shows its own).
   m.chevron.push({ id: "continue-old", label: "Continue this old copy anyway…", sub: why ? "" : "Not recommended: the two copies diverge", danger: true, disabled: !!why, why, run: () => { continueOldCopy(e); } });
@@ -217,8 +219,8 @@ function localModel(e) {
     const guardedDeparture = e.guard?.mode === "block" && moved?.machine && moved?.key;
     if (places.length && !guardedDeparture) {
       const first = tab || places.find(canShow) || places[0];
-      const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : p.kind === "codex-app" ? `Open in ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
-        disabled: !canShow(p) || ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp), why: ((p.kind === "claude-app" || p.kind === "codex-app") && !e.canApp) ? e.appWhy : canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
+      const show = (p) => ({ id: "show:" + p.kind, label: canShow(p) ? (p.kind === "ide" ? `Show ${placeName(p, e)}` : isAppPlace(p.kind) && agentInfo(p.kind.slice(0, -4))?.desktop?.shared ? `Open in ${placeName(p, e)}` : `Show in ${placeName(p, e)}`) : `Running in ${placeName(p, e)}`, short: "Show",
+        disabled: !canShow(p) || (isAppPlace(p.kind) && !e.canApp), why: (isAppPlace(p.kind) && !e.canApp) ? e.appWhy : canShow(p) ? "" : `hopsesh can't show a session in ${placeName(p, e)}`, run: () => showPlace(e, p) });
       m.primary = show(first);
       if (n >= 2) {
         m.twice = true;
@@ -238,7 +240,7 @@ function localModel(e) {
         m.chevronLabel = "Resume elsewhere";
         m.caption = "Its window could not be identified. If it is still open somewhere, close it there first: two copies writing one session can interleave.";
       }
-      else if (first.kind === "claude-app" || first.kind === "codex-app") m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
+      else if (isAppPlace(first.kind)) m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
     } else if ((e.departure || e.movement)?.machine && (e.departure || e.movement)?.key) {
       const n = e.departure || e.movement;
       const there = n.cloud || n.agentName || n.agent;
@@ -275,7 +277,7 @@ function localModel(e) {
     // sign-in works there) and is worked in here.
     const there = { id: "continue-there", label: `Continue on ${e.machine}`, short: `Continue on ${e.machine}`, sub: "Runs there, with its files and sign-in; you work in it here",
       run: () => pending(`Opening ${e.title} on ${e.machine}`, () => api("ContinueOnMachine", e.machine, e.key).catch(fail), `remote:${key(e)}`) };
-    if (presence === "login" && ["claude", "codex"].includes(e.agent)) {
+    if (presence === "login" && agentInfo(e.agent)?.local) {
       m.primary = there;
       m.chevron = [bring];
       m.chevronLabel = "Other choices";
@@ -327,7 +329,7 @@ function cloudModel(e) {
     m.primary = bring(e.bringIn.id, `Bring to ${sys.here}…`);
     m.chevron = e.continueIn.map((t) => bring(t.id, `Bring to ${sys.here} into ${t.name}…`));
   } else if (cl && !cl.codeOnly && !agentInfo(e.agent)?.capabilities?.includes("write")) {
-    const no = "No agent here takes its messages: install Claude Code or Codex, or get the code only.";
+    const no = `No agent here takes its messages: install ${words(localAgents().filter((a) => a.capabilities?.includes("write")).map((a) => a.name), " or ")}, or get the code only.`;
     m.primary = { id: "bring", label: `Bring to ${sys.here}…`, short: "Bring…", disabled: true, why: why || no, run: () => {} };
     m.caption = why || no;
   } else {
@@ -373,15 +375,15 @@ function moveGroups(e, local, inTab) {
   const out = [];
   const block = (it) => (inTab ? Object.assign(it, { disabled: true, why: IN_TAB }) : it);
   const machine = [];
-  if (["claude", "codex"].includes(e.agent)) machine.push(block({ id: "targets", label: "Choose where it continues…", sub: "Any machine, folder and tool, with who it runs as there", icon: icon(ICONS.here, 16), run: () => chooseTarget(e) }));
+  if (agentInfo(e.agent)?.local) machine.push(block({ id: "targets", label: "Choose where it continues…", sub: "Any machine, folder and tool, with who it runs as there", icon: icon(ICONS.here, 16), run: () => chooseTarget(e) }));
   if (local) {
     const peers = state.scan?.peers || [];
     for (const p of peers) machine.push(block({ id: "send:" + p, label: `Send to ${p}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "", sendTo: p }) }));
     if (!peers.length) machine.push({ id: "send", label: "Send to another machine…", icon: icon(ICONS.here, 16), disabled: true, why: "No other machine with hopsesh is reached" });
   } else machine.push({ id: "bring", label: `Bring to ${sys.here}…`, icon: icon(ICONS.here, 16), run: () => planFor(e, { target: "" }) });
   out.push({ heading: "Machine", items: machine });
-  if (["claude","codex"].includes(e.agent)) out.push({heading:"Account",items:[block({id:"account",label:local ? "Move to another account…" : `Move to an account on ${sys.here}…`,sub:local ? "Choose a profile and review the portable conversation" : `Bring this session from ${e.machine} into a profile on ${sys.here}`,run:()=>planFor(e,{target:e.agent})})]});
-  if (local && ["claude","codex"].includes(e.agent)) out.push({heading:"Context recovery",items:[block({id:"bounded",label:"Create bounded continuation…",sub:"Keep the original and archive; prepare a smaller working context on this branch",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})})]});
+  if (agentInfo(e.agent)?.accounts) out.push({heading:"Account",items:[block({id:"account",label:local ? "Move to another account…" : `Move to an account on ${sys.here}…`,sub:local ? "Choose a profile and review the portable conversation" : `Bring this session from ${e.machine} into a profile on ${sys.here}`,run:()=>planFor(e,{target:e.agent})})]});
+  if (local && agentHas(e.agent, "read") && agentHas(e.agent, "write")) out.push({heading:"Context recovery",items:[block({id:"bounded",label:"Create bounded continuation…",sub:"Keep the original and archive; prepare a smaller working context on this branch",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})})]});
   const agents = (e.continueIn || []).map((t) => block({ id: "continue:" + t.id, label: `Continue with ${t.name}${local ? "" : " on " + sys.here}…`, icon: agentBadge(t.id, t.name), run: () => planFor(e, { target: t.id }),
     chip: t.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null }));
   if (agents.length) out.push({ heading: "Agent", items: agents });

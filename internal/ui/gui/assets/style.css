@@ -913,7 +913,8 @@ body.terminal-right .divider[data-pane="inspector"]{display:none}
 .unknown-list li { display: flex; gap: 8px; align-items: center; min-width: 0; }
 /* Where you're signed in */
 .tgrid-wrap { overflow-x: auto; padding: 0 16px 16px; }
-.tgrid { display: grid; min-width: 860px; grid-template-columns: minmax(120px, .7fr) repeat(4, minmax(0, 1fr)); border: 1px solid var(--line2); border-radius: 10px; }
+/* --tools is the number of tool columns (set by the page from the agents it shows). */
+.tgrid { --tools: 4; display: grid; min-width: calc(140px + var(--tools) * 180px); grid-template-columns: minmax(120px, .7fr) repeat(var(--tools), minmax(0, 1fr)); border: 1px solid var(--line2); border-radius: 10px; }
 .trow { display: contents; }
 .trow > * { padding: 12px; border-top: 1px solid var(--line2); min-width: 0; }
 .trow.head > * { border-top: 0; font-size: 11.5px; font-weight: 600; color: var(--muted); }
