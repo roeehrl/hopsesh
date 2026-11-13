@@ -357,6 +357,14 @@ func IsVirtual(m Module) bool {
 	return ok
 }
 
+// AnchorRel is where a virtual session's anchor file sits, relative to its install's main
+// root (slash-separated): hopsesh/<agent>/sessions/<id>.jsonl. A module with
+// VirtualSessions keeps Summary.Path there, so the core finds a session's anchor, and the
+// lineage beside it, from the session's id alone (a notice hook gets no path).
+func AnchorRel(agent ID, id SessionID) string {
+	return "hopsesh/" + string(agent) + "/sessions/" + string(id) + ".jsonl"
+}
+
 // SessionStamp is a module's opaque mark of a session's state: two equal stamps mean
 // nothing was added or changed in between. "" is no stamp. A stamp starts with its form
 // and a colon ("v1:…"), and a module that changes how it stamps changes that prefix, so
