@@ -12,6 +12,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
+	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 var (
@@ -41,7 +42,7 @@ func TestSpecDeniesCredentialTables(t *testing.T) {
 	if s.MainRoot().Name != rootData || !slices.Contains(s.SQLFiles, "{data}/opencode*.db") || !slices.Contains(s.SQLFiles, "{db}") {
 		t.Errorf("main root %s, SQL files %v", s.MainRoot().Name, s.SQLFiles)
 	}
-	for _, sec := range []string{"{config}/opencode.json", "{data}/auth.json", "{state}/service*.json"} {
+	for _, sec := range []string{"{config}/opencode.json", "{config}/config.json", "{data}/auth.json", "{state}/service*.json"} {
 		if !slices.Contains(s.Secrets, sec) {
 			t.Errorf("%s is not a secret", sec)
 		}
@@ -204,8 +205,11 @@ func TestListSummaryFields(t *testing.T) {
 	if s.Path != dataDir+"/hopsesh/opencode/sessions/"+sesRenamed+".jsonl" {
 		t.Errorf("anchor %s", s.Path)
 	}
-	if !strings.HasPrefix(s.LastPrompt, "Reply with") && s.LastPrompt == "" {
+	if s.LastPrompt != "Reply with exactly: hi there" {
 		t.Errorf("last prompt %q", s.LastPrompt)
+	}
+	if s := summaryFor(t, l, sesLong); s.LastPrompt != "What number did I ask you to remember? Reply with just it." {
+		t.Errorf("last prompt of a longer session %q", s.LastPrompt)
 	}
 	// The move put the shell session in another folder.
 	if s := summaryFor(t, l, sesShell); s.CWD != "/home/u/git/other" {
@@ -216,6 +220,41 @@ func TestListSummaryFields(t *testing.T) {
 	mixed := summaryFor(t, l, sesMixed)
 	if mixed.Title != "Look at the screenshot and fix the build" || mixed.TitleSource != "prompt" || mixed.Size != 6 {
 		t.Errorf("untitled session: %q (%s), size %d", mixed.Title, mixed.TitleSource, mixed.Size)
+	}
+}
+
+func TestListSummaryTitles(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	// An untitled session with several prompts is named by its first.
+	setRow(t, fh, sesLong, "title = NULL")
+	// A title an older hopsesh labelled shows without its label.
+	setRow(t, fh, sesFiles, "title = ?", "↪ continued in Codex on laptop · file tools")
+	// An untitled session whose first prompt names nothing (a command) stays untitled.
+	setRow(t, fh, sesShell, "title = ?", "New session - 2026-11-13T12:00:00.000Z")
+	if err := fh.ExecSQL(dbPath, `UPDATE session_message SET data = json_set(data, '$.text', '/init') WHERE session_id = ? AND type = 'user' AND seq = (SELECT min(seq) FROM session_message WHERE session_id = ? AND type = 'user')`, sesShell, sesShell); err != nil {
+		t.Fatal(err)
+	}
+	// A long last prompt is clipped.
+	long := strings.Repeat("word ", 100)
+	if err := fh.ExecSQL(dbPath, `INSERT INTO session_message VALUES ('msg_zzlong', ?, 'user', 999, 1, 1, json_object('time', json_object('created', 1), 'text', ?))`, sesRenamed, long); err != nil {
+		t.Fatal(err)
+	}
+	l, err := m.List(ctx, h, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := summaryFor(t, l, sesLong); s.Title != "Remember the number 7. Reply 'noted'." || s.TitleSource != "prompt" {
+		t.Errorf("untitled session: %q (%s)", s.Title, s.TitleSource)
+	}
+	if s := summaryFor(t, l, sesFiles); s.Title != "file tools" || s.LegacyLabel == nil || s.LegacyLabel.AgentName != "Codex" {
+		t.Errorf("labelled title: %q %+v", s.Title, s.LegacyLabel)
+	}
+	if s := summaryFor(t, l, sesShell); s.Title != "" || s.TitleSource != "" {
+		t.Errorf("untitled, no usable prompt: %q (%s)", s.Title, s.TitleSource)
+	}
+	if s := summaryFor(t, l, sesRenamed); len([]rune(s.LastPrompt)) != 200 || !strings.HasSuffix(s.LastPrompt, "…") {
+		t.Errorf("long last prompt: %d runes", len([]rune(s.LastPrompt)))
 	}
 }
 
@@ -273,6 +312,104 @@ func TestSchemaGateMissingColumn(t *testing.T) {
 	if !strings.Contains(err.Error(), "time_suspended") || !strings.Contains(err.Error(), "20261201000000_drop_suspended") {
 		t.Errorf("the error does not say what is missing: %v", err)
 	}
+}
+
+// Every read is gated, not only the listing.
+func TestSchemaGateGuardsEveryRead(t *testing.T) {
+	fh := schemaHost(t, func(s string) string {
+		return strings.Replace(s, "`time_viewed` integer,", "", 1)
+	}, `INSERT INTO migration VALUES ('20261201000001_drop_viewed', 1);`)
+	m, h, in := open(t, fh)
+	s := agent.Summary{Key: sessionKey(in, sesFiles)}
+	var se *schemaError
+	if _, err := m.Read(ctx, h, in, s, ir.Cursor{}); !errors.As(err, &se) {
+		t.Errorf("Read: %v", err)
+	}
+	if _, err := m.Preview(ctx, h, in, s, 2); !errors.As(err, &se) {
+		t.Errorf("Preview: %v", err)
+	}
+	if _, err := m.SessionStamp(ctx, h, in, sesFiles); !errors.As(err, &se) {
+		t.Errorf("SessionStamp: %v", err)
+	}
+	if _, err := m.Materialize(ctx, h, in, s, agent.BundleFile{Role: agent.RoleMain}); !errors.As(err, &se) {
+		t.Errorf("Materialize: %v", err)
+	}
+	// Capacity is an estimate: an unknown schema makes it unknown, not an error.
+	if c, err := m.ContextCapacity(ctx, h, in, &s); err != nil || !c.Unknown {
+		t.Errorf("ContextCapacity: %+v %v", c, err)
+	}
+}
+
+// A database last opened by OpenCode 2.1.x or 2.2.0 has no session_part table and no
+// time_busy column: it is read all the same.
+func TestSchemaOfOpenCode21(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	if err := fh.ExecSQL(dbPath, `DELETE FROM session_part; DROP TABLE session_part; ALTER TABLE session_v2 DROP COLUMN time_busy; `+
+		`DELETE FROM migration WHERE id >= '20261029002625'`); err != nil {
+		t.Fatal(err)
+	}
+	m, h, in := open(t, fh)
+	l, err := m.List(ctx, h, in)
+	if err != nil || len(l.Sessions) != 12 {
+		t.Fatalf("listing a 2.1 database: %d sessions, %v", len(l.Sessions), err)
+	}
+	for _, s := range l.Sessions {
+		if _, err := m.Read(ctx, h, in, s, ir.Cursor{}); err != nil {
+			t.Errorf("Read %s: %v", s.Key.Session, err)
+		}
+		if _, err := m.Preview(ctx, h, in, s, 2); err != nil {
+			t.Errorf("Preview %s: %v", s.Key.Session, err)
+		}
+	}
+	setRow(t, fh, sesFiles, "time_suspended = 1794597600000")
+	live, err := m.Live(ctx, h, in, []agent.SessionID{sesFiles, sesRenamed})
+	if err != nil || live[sesFiles].State != agent.Live || live[sesRenamed].State != agent.Ended {
+		t.Fatalf("Live on a 2.1 database: %+v %v", live, err)
+	}
+}
+
+// The gate checks a database once per migration: OpenCode changes its schema only by
+// migrations.
+func TestSchemaGateRunsOncePerMigration(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	if err := fh.ExecSQL(dbPath, `INSERT INTO migration VALUES ('20991231000000_gate_cache_test', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	m := New()
+	in, _ := m.Detect(ctx, fh)
+	var n int
+	h := agent.Confine(countingHost{fh, &n}, m.Spec(), in)
+	if _, err := m.List(ctx, h, in); err != nil || n == 0 {
+		t.Fatalf("first listing: %d column checks, %v", n, err)
+	}
+	n = 0
+	if _, err := m.List(ctx, h, in); err != nil || n != 0 {
+		t.Fatalf("second listing: %d column checks, %v", n, err)
+	}
+	if err := fh.ExecSQL(dbPath, `INSERT INTO migration VALUES ('20991231000001_gate_cache_test', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.List(ctx, h, in); err != nil || n == 0 {
+		t.Fatalf("after a migration: %d column checks, %v", n, err)
+	}
+}
+
+// countingHost counts the schema checks of its SQL.
+type countingHost struct {
+	*agenttest.FakeHost
+	n *int
+}
+
+func (h countingHost) SQL() agent.SQL { return countingSQL{h.FakeHost.SQL(), h.n} }
+
+type countingSQL struct {
+	agent.SQL
+	n *int
+}
+
+func (c countingSQL) Columns(ctx context.Context, db, table string) ([]string, error) {
+	*c.n++
+	return c.SQL.Columns(ctx, db, table)
 }
 
 func TestSchemaGateOpenCode1(t *testing.T) {
@@ -354,6 +491,33 @@ func TestPlanMoveKeepBothAndOtherAccount(t *testing.T) {
 	}
 }
 
+// Descendants of every depth travel with the root session, and count as its subagents.
+func TestGrandchildren(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	const grand = "ses_e29a832f0ffeGrandchild0000"
+	if err := fh.ExecSQL(dbPath, `CREATE TEMP TABLE g AS SELECT * FROM session_v2 WHERE id = '`+sesChild+`'; `+
+		`UPDATE g SET id = '`+grand+`', parent_id = '`+sesChild+`', slug = 'grand'; INSERT INTO session_v2 SELECT * FROM g`); err != nil {
+		t.Fatal(err)
+	}
+	m, h, in := open(t, fh)
+	l, _ := m.List(ctx, h, in)
+	s := summaryFor(t, l, sesSubagent)
+	if s.Subagents != 2 || len(l.Sessions) != 12 {
+		t.Fatalf("subagents %d, %d sessions listed", s.Subagents, len(l.Sessions))
+	}
+	b, err := m.Bundle(ctx, h, in, s)
+	if err != nil || len(b.Files) != 3 || b.Files[2].Rel != childRel(sesSubagent, grand) {
+		t.Fatalf("bundle %+v %v", b.Files, err)
+	}
+	data, err := m.Materialize(ctx, h, in, s, b.Files[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess, _, err := decodeJSONL("grandchild", data); err != nil || sess.ID != grand || sess.ParentID != sesChild {
+		t.Fatalf("grandchild file: %s parent %s, %v", sess.ID, sess.ParentID, err)
+	}
+}
+
 // Until the module installs through OpenCode's import, no move places a session.
 func TestVerifyRefusesMoves(t *testing.T) {
 	if err := New().Verify(ctx, nil, agent.MovePlan{}, nil, agent.Placement{}); !errors.Is(err, agent.ErrUnsupported) {
@@ -382,8 +546,13 @@ func TestChannelDatabase(t *testing.T) {
 	if got := dbFile(fh, in); got != dataDir+"/opencode-dev.db" {
 		t.Errorf("channel database %s", got)
 	}
+	// Detect chose it, so the watcher watches it.
+	if w := New().SessionWatchPaths(in, agent.PosixPath{}); w[0] != dataDir+"/opencode-dev.db" || w[1] != dataDir+"/opencode-dev.db-wal" {
+		t.Errorf("watch %v", w)
+	}
 	fh.Put(dbPath, []byte("x"), time.Unix(1, 0))
-	if got := dbFile(fh, in); got != dbPath {
-		t.Errorf("with opencode.db: %s", got)
+	in, _ = New().Detect(ctx, fh)
+	if got := dbFile(fh, in); got != dbPath || in.Root(rootDB) != "" {
+		t.Errorf("with opencode.db: %s (db root %q)", got, in.Root(rootDB))
 	}
 }

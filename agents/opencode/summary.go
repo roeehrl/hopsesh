@@ -35,7 +35,10 @@ func summaryOf(h agent.Host, in agent.Install, l listed, subagents int) agent.Su
 		LastPrompt:   clip(agent.PreviewText(l.LastPrompt)),
 	}
 	if untitled(s) {
-		sum.Title, sum.TitleSource = agent.PromptTitle(l.FirstPrompt), "prompt"
+		// Named by its first prompt; the API tier knows no prompts, so it stays untitled.
+		if t := agent.PromptTitle(l.FirstPrompt); t != "" {
+			sum.Title, sum.TitleSource = t, "prompt"
+		}
 	} else {
 		sum.Title, sum.TitleSource = s.Title, "generated"
 		if lab, orig, ok := agent.StripLegacyLabel(s.Title); ok {

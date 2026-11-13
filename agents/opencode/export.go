@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
@@ -67,7 +68,7 @@ func decodeJSONL(path string, data []byte) (session, []message, error) {
 			s = sessionOf(in)
 			continue
 		}
-		m, err := decodeMessage(raw)
+		m, err := decodeMessage(upgradeRaw(raw))
 		if err != nil {
 			return session{}, nil, &agent.FormatError{Path: path, Line: lineN, Err: err}
 		}
@@ -95,7 +96,7 @@ func fromTransfer(raw []byte) (session, []message, error) {
 	}
 	var msgs []message
 	for _, r := range t.Messages {
-		m, err := decodeMessage(r)
+		m, err := decodeMessage(upgradeRaw(r)) // an export may keep a pre-2.1 shape
 		if err != nil {
 			return session{}, nil, fmt.Errorf("OpenCode's export: %w", err)
 		}
@@ -117,7 +118,11 @@ func exportSession(ctx context.Context, h agent.Host, svc service, sid agent.Ses
 		return session{}, nil, err
 	}
 	if res.Code != 0 {
-		return session{}, nil, commandError("session export", res)
+		err := commandError("session export", res)
+		if strings.Contains(strings.ToLower(string(res.Stderr)), "session not found") {
+			return session{}, nil, fmt.Errorf("%w (%v)", agent.ErrNotFound, err)
+		}
+		return session{}, nil, err
 	}
 	return fromTransfer(res.Stdout)
 }

@@ -5,9 +5,10 @@ import "github.com/roeehrl/hopsesh/sdk/agent"
 // The rewrite policy for a session's JSON lines (§3.8 of the design).
 
 // protectKeys are values the path rewriter never changes: provider replay data
-// (native), ids, signatures and model names. A media reference ("media:<sha256>") or a
-// hash has no path in it to rewrite.
-var protectKeys = []string{"native", "id", "callID", "call_id", "hash", "signature", "providerID", "model"}
+// (native, and its names before OpenCode 2.1, which the module upgrades on reading but a
+// file may still carry), ids, signatures and model names. A media reference
+// ("media:<sha256>") or a hash has no path in it to rewrite.
+var protectKeys = []string{"native", "providerState", "providerResultState", "providerContext", "id", "callID", "call_id", "hash", "signature", "providerID", "model"}
 
 // renameKeys give a keep-both copy its new session id, also where they are protected.
 // Message and call ids stay: OpenCode's import gives a copy fresh ones when it needs them.

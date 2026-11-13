@@ -7,9 +7,9 @@ import (
 )
 
 // dbFile is the database OpenCode keeps its sessions in (OpenCode's databasePath):
-// OPENCODE_DB when set (Detect resolved it into the "db" root), else opencode.db in the
-// data root, which the release channels use. A build of another channel names its own
-// (opencode-<channel>.db); the newest one is used when there is no opencode.db.
+// the "db" root when Detect set it, else opencode.db in the data root, which the release
+// channels use. A build of another channel names its own (opencode-<channel>.db); the
+// newest one is used when there is no opencode.db.
 func dbFile(h agent.Host, in agent.Install) string {
 	if p := in.Root(rootDB); p != "" {
 		return p

@@ -242,7 +242,8 @@ func decodeMessage(raw json.RawMessage) (message, error) {
 
 // rowMessage builds a message from its session_message row as OpenCode's own history
 // does: the row's data with its id and type, and, for an assistant, its session_part
-// rows (each with the row's type) before any content still inline (F5).
+// rows (each with the row's type) before any content still inline (F5), all upgraded
+// from the shape OpenCode wrote before 2.1.
 func rowMessage(msgID, typ string, seq int64, data string, parts []json.RawMessage) (message, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(data), &fields); err != nil {
@@ -262,6 +263,7 @@ func rowMessage(msgID, typ string, seq int64, data string, parts []json.RawMessa
 		}
 		fields["content"] = merged
 	}
+	upgradeMessage(typ, fields) // a row written before OpenCode 2.1, as OpenCode reads it
 	fields["id"], _ = json.Marshal(msgID)
 	fields["type"], _ = json.Marshal(typ)
 	raw, err := json.Marshal(fields)

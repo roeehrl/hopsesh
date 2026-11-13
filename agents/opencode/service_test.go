@@ -44,15 +44,37 @@ func TestCommandsNeverStartTheService(t *testing.T) {
 	if _, err := m.Account(ctx, h, in); err != nil {
 		t.Fatal(err)
 	}
+	// A turn in flight: Live and Stop ask OpenCode.
+	setRow(t, fh, sesRenamed, "time_busy = time_idle + 10, time_suspended = 1794597600000")
 	if _, err := m.Live(ctx, h, in, []agent.SessionID{s.Key.Session}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Stop(ctx, h, in, s, time.Second); !errors.Is(err, ErrSuspended) {
+		t.Fatal(err)
+	}
+	if _, err := m.ResumeOn(ctx, h, in, s.Key, agent.Placement{CWD: s.CWD}, agent.ResumeOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := exportSession(ctx, h, probeService(ctx, h), sesRenamed); err != nil {
 		t.Fatal(err)
 	}
+	// Where the database cannot be read: the API listing, children and export.
+	api := agent.Confine(noSQL{fh}, m.Spec(), in)
+	al, err := m.List(ctx, api, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Bundle(ctx, api, in, summaryFor(t, al, sesSubagent)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Live(ctx, api, in, []agent.SessionID{s.Key.Session}); err != nil {
+		t.Fatal(err)
+	}
 	cmds := f.commands()
-	if len(cmds) < 5 {
-		t.Fatalf("commands %v", cmds)
+	for _, want := range []string{"auth list", "api --standalone PATCH", "session export", "api --standalone GET /api/session?"} {
+		if !slices.ContainsFunc(cmds, func(c string) bool { return strings.HasPrefix(c, want) }) {
+			t.Errorf("no %q among %v", want, cmds)
+		}
 	}
 	for i, c := range cmds {
 		switch {
@@ -128,6 +150,24 @@ func TestRenameRefusesAnOlderStandaloneBinary(t *testing.T) {
 	}
 }
 
+// A private server of an OpenCode older than 2.1.0 changes nothing, even where the
+// database cannot be read to compare versions.
+func TestRenameRefusesABinaryBelowTheFloor(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	fh.AddBinary(binName, "opencode v2.0.30")
+	m, _, in := open(t, fh)
+	h := agent.Confine(noSQL{fh}, m.Spec(), in)
+	err := m.Rename(ctx, h, in, agent.Summary{Key: sessionKey(in, sesFiles)}, "x")
+	if !errors.Is(err, agent.ErrUnsupported) || !strings.Contains(err.Error(), minVersion) {
+		t.Fatalf("rename through a 2.0 binary: %v", err)
+	}
+	for _, c := range f.commands() {
+		if strings.HasPrefix(c, "api") {
+			t.Errorf("ran %q", c)
+		}
+	}
+}
+
 func TestResumeCommand(t *testing.T) {
 	in := agent.Install{Agent: id}
 	c := New().Resume(in, sessionKey(in, sesFiles), agent.Placement{CWD: "/home/u/git/demo"}, agent.ResumeOptions{Prompt: "go on", Fork: true})
@@ -196,6 +236,26 @@ func TestResumeProgramMatchesTheService(t *testing.T) {
 			t.Fatalf("%v", err)
 		}
 	})
+	t.Run("probe failed", func(t *testing.T) {
+		// The service may run (here 2.2.7, the PATH opencode 2.3.0): the TUI could replace it.
+		h, f := stagedHost(t)
+		f.onCall = func(argv []string) (agent.Result, bool) {
+			return agent.Result{Code: 1, Stderr: []byte("unexpected")}, argv[0] == "service"
+		}
+		c, err := resumeOn(t, h, sesFiles)
+		if err == nil || !strings.Contains(err.Error(), "restart") {
+			t.Fatalf("resumed with %v after a failed probe: %v", c.Argv, err)
+		}
+	})
+	t.Run("service older than 2.1.0", func(t *testing.T) {
+		h, f := stagedHost(t)
+		f.version = "2.0.30"
+		h.Put("/Applications/OpenCode.app/Contents/Resources/opencode-cli", []byte("bin"), timeZero)
+		h.Put("/Applications/OpenCode.app/Contents/Resources/opencode-cli.version", []byte("2.0.30\n"), timeZero)
+		if _, err := resumeOn(t, h, sesFiles); !errors.Is(err, agent.ErrUnsupported) {
+			t.Fatalf("resume with a 2.0 service: %v", err)
+		}
+	})
 	t.Run("service version unknown", func(t *testing.T) {
 		fh, f := newMachine(t, setup{})
 		f.status = serviceURL
@@ -224,48 +284,93 @@ func setRow(t *testing.T, fh *agenttest.FakeHost, sid, set string, args ...any) 
 	}
 }
 
+// Rows as OpenCode writes them: a turn claims its session (time_suspended) and sets
+// time_busy when it starts; it releases the claim and sets time_idle when it ends; a
+// service that shuts down mid-turn keeps the claim and sets no idle.
 func TestLive(t *testing.T) {
 	fh, f := newMachine(t, setup{})
 	m, h, in := open(t, fh)
-	setRow(t, fh, sesFiles, "time_busy = time_idle + 10")
-	setRow(t, fh, sesShell, "time_suspended = 1794597600000")
-	setRow(t, fh, sesLong, "time_compacting = 1794597600000")
-	ids := []agent.SessionID{sesFiles, sesShell, sesLong, sesRenamed, sesSubagent, "ses_missing"}
+	ids := []agent.SessionID{sesFiles, sesShell, sesRenamed, sesSubagent, "ses_missing"}
+	// No turn in flight: the rows answer, nothing is run.
 	live, err := m.Live(ctx, h, in, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[agent.SessionID]agent.LiveInfo{
-		sesFiles:      {State: agent.Live, Status: statusWorking},
-		sesShell:      {State: agent.Live, Status: statusSuspended},
-		sesLong:       {State: agent.Live, Status: statusWorking},
-		sesRenamed:    {State: agent.Ended},
-		sesSubagent:   {State: agent.Ended},
-		"ses_missing": {State: agent.Unknown},
-	}
-	for sid, w := range want {
-		if live[sid].State != w.State || live[sid].Status != w.Status {
-			t.Errorf("%s: %+v, want %+v", sid, live[sid], w)
+	for sid, w := range map[agent.SessionID]agent.Liveness{sesFiles: agent.Ended, sesRenamed: agent.Ended, "ses_missing": agent.Unknown} {
+		if live[sid].State != w {
+			t.Errorf("%s: %+v, want %s", sid, live[sid], w)
 		}
 	}
-	// The running service's active sessions are open too.
-	f.status, f.active = serviceURL, []string{sesRenamed}
-	live, _ = m.Live(ctx, h, in, []agent.SessionID{sesRenamed})
-	if live[sesRenamed].State != agent.Live {
-		t.Errorf("an active session: %+v", live[sesRenamed])
+	if c := f.commands(); len(c) != 0 {
+		t.Errorf("Live with nothing in flight ran %v", c)
+	}
+	inFlight := "time_busy = time_idle + 10, time_suspended = 1794597600000"
+	setRow(t, fh, sesFiles, inFlight)
+	setRow(t, fh, sesShell, inFlight)
+	// The service is stopped: a claimed turn runs in a window with its own server, or is
+	// suspended until the service starts.
+	live, _ = m.Live(ctx, h, in, ids)
+	for _, sid := range []agent.SessionID{sesFiles, sesShell} {
+		if live[sid].State != agent.Live || live[sid].Status != statusSuspended {
+			t.Errorf("%s with the service stopped: %+v", sid, live[sid])
+		}
+	}
+	// The service runs one of them; the other runs in a window with its own server.
+	f.status, f.active = serviceURL, []string{sesFiles}
+	live, _ = m.Live(ctx, h, in, ids)
+	for _, sid := range []agent.SessionID{sesFiles, sesShell} {
+		if live[sid].State != agent.Live || live[sid].Status != statusWorking {
+			t.Errorf("%s with the service running: %+v", sid, live[sid])
+		}
+	}
+	if live[sesRenamed].State != agent.Ended || live[sesSubagent].State != agent.Ended {
+		t.Errorf("idle sessions: %+v %+v", live[sesRenamed], live[sesSubagent])
+	}
+	// Before OpenCode 2.2.2 rows have no time_busy: the claim alone says a turn is in flight.
+	f.status, f.active = "stopped", nil
+	setRow(t, fh, sesFiles, "time_busy = NULL")
+	if live, _ = m.Live(ctx, h, in, []agent.SessionID{sesFiles}); live[sesFiles].Status != statusSuspended {
+		t.Errorf("a claim without time_busy: %+v", live[sesFiles])
+	}
+	// An ended turn: idle after busy, claim released.
+	setRow(t, fh, sesFiles, "time_busy = time_idle - 10, time_suspended = NULL")
+	if live, _ = m.Live(ctx, h, in, []agent.SessionID{sesFiles}); live[sesFiles].State != agent.Ended {
+		t.Errorf("an ended turn: %+v", live[sesFiles])
+	}
+}
+
+// Where the database cannot be read, the running service says which sessions it runs.
+func TestLiveThroughTheAPI(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	m, _, in := open(t, fh)
+	h := agent.Confine(noSQL{fh}, m.Spec(), in)
+	ids := []agent.SessionID{sesFiles, sesRenamed}
+	live, err := m.Live(ctx, h, in, ids)
+	if err != nil || live[sesFiles].State != agent.Unknown || live[sesRenamed].State != agent.Unknown {
+		t.Fatalf("service stopped, no database: %+v %v", live, err)
+	}
+	f.status, f.active = serviceURL, []string{sesFiles}
+	live, err = m.Live(ctx, h, in, ids)
+	if err != nil || live[sesFiles].State != agent.Live || live[sesRenamed].State != agent.Ended {
+		t.Fatalf("service running, no database: %+v %v", live, err)
 	}
 }
 
 func TestStopInterruptsThroughTheService(t *testing.T) {
 	fh, f := newMachine(t, setup{})
 	m, h, in := open(t, fh)
-	setRow(t, fh, sesFiles, "time_busy = time_idle + 10")
-	f.status = serviceURL
+	setRow(t, fh, sesFiles, "time_busy = time_idle + 10, time_suspended = 1794597600000")
+	f.status, f.active = serviceURL, []string{sesFiles}
 	f.interupt = func(sid string) bool {
-		setRow(t, fh, sid, "time_idle = time_busy + 5")
+		setRow(t, fh, sid, "time_idle = time_busy + 5, time_suspended = NULL")
+		f.active = nil
 		return true
 	}
+	// An OpenCode process holds the database; Stop must not signal it.
 	fh.PIDs[4242] = true
+	fh.PIDNames[4242] = "opencode"
+	fh.LocksHeld[dbPath] = true
+	fh.LockHolders[dbPath] = []int{4242}
 	if err := m.Stop(ctx, h, in, agent.Summary{Key: sessionKey(in, sesFiles)}, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -290,18 +395,20 @@ func TestStopCases(t *testing.T) {
 			t.Errorf("ran %q", c)
 		}
 	}
-	// Working with the service stopped: another process with its own server runs it.
-	setRow(t, fh, sesFiles, "time_busy = time_idle + 10")
-	if err := m.Stop(ctx, h, in, s, time.Second); !errors.Is(err, ErrOwnServer) {
-		t.Errorf("a standalone turn: %v", err)
+	// A claimed turn with the service stopped (as a shutdown leaves it, and as a window
+	// with its own server runs it): it says both.
+	setRow(t, fh, sesFiles, "time_busy = time_idle + 10, time_suspended = 1794597600000")
+	err := m.Stop(ctx, h, in, s, time.Second)
+	if !errors.Is(err, ErrSuspended) || !strings.Contains(err.Error(), "own server") || !strings.Contains(err.Error(), "starts again") {
+		t.Errorf("a claimed turn: %v", err)
 	}
-	// Suspended with the service stopped: it waits for the service, which hopsesh never starts.
-	setRow(t, fh, sesFiles, "time_busy = NULL, time_suspended = 1794597600000")
-	if err := m.Stop(ctx, h, in, s, time.Second); !errors.Is(err, ErrSuspended) {
-		t.Errorf("a suspended turn: %v", err)
+	// Busy without a claim, with the service stopped: a process with its own server.
+	setRow(t, fh, sesFiles, "time_suspended = NULL")
+	if err := m.Stop(ctx, h, in, s, time.Second); !errors.Is(err, ErrOwnServer) {
+		t.Errorf("an unclaimed busy turn: %v", err)
 	}
 	// The service runs but did not interrupt, and the row still says working.
-	setRow(t, fh, sesFiles, "time_suspended = NULL, time_busy = time_idle + 10")
+	setRow(t, fh, sesFiles, "time_suspended = 1794597600000")
 	f.status = serviceURL
 	if err := m.Stop(ctx, h, in, s, time.Second); !errors.Is(err, ErrOwnServer) {
 		t.Errorf("a turn the service does not run: %v", err)
@@ -348,7 +455,15 @@ func TestDeniedTablesAreNeverRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	var ids []agent.SessionID
-	for _, s := range l.Sessions {
+	for i, s := range l.Sessions {
+		if i == 0 {
+			if err := m.Rename(ctx, h, in, s, "renamed"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := m.ResumeOn(ctx, h, in, s.Key, agent.Placement{CWD: s.CWD}, agent.ResumeOptions{}); err != nil && !errors.As(err, new(*restartError)) {
+				t.Fatal(err)
+			}
+		}
 		ids = append(ids, s.Key.Session)
 		if _, err := m.Read(ctx, h, in, s, ir.Cursor{}); err != nil {
 			t.Fatal(err)

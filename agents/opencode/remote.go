@@ -15,12 +15,11 @@ import (
 // export` to read. That is slower (each call is a process, and a private server when the
 // background service is stopped) and returns no credential bytes.
 
-// apiSessionPage is how many sessions one API call asks for; apiSessionMax how many a
-// listing reads in all.
-const (
-	apiSessionPage = 500
-	apiSessionMax  = 20000
-)
+// apiSessionPage is how many sessions one API call asks for (tests ask fewer);
+// apiSessionMax how many a listing reads in all.
+var apiSessionPage = 500
+
+const apiSessionMax = 20000
 
 // apiSessions lists every session (children and archived ones included) through the API,
 // page by page.
@@ -54,8 +53,9 @@ func apiSessions(ctx context.Context, h agent.Host, svc service) ([]session, err
 	return out, nil
 }
 
-// listAPI is List through OpenCode's API. A session's size (its settled messages) is
-// not known without exporting it, so it is left 0 here; SessionStamp exports.
+// listAPI is List through OpenCode's API. A session's size (its settled messages), its
+// prompts and the OpenCode version that wrote it are not known without exporting it, so
+// they are left empty here (an untitled session stays untitled); SessionStamp exports.
 func (m *Module) listAPI(ctx context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
 	svc := probeService(ctx, h)
 	all, err := apiSessions(ctx, h, svc)
@@ -72,8 +72,14 @@ func (m *Module) listAPI(ctx context.Context, h agent.Host, in agent.Install) (a
 // transcript is a session and its settled messages: from the database, else from
 // OpenCode's export.
 func (m *Module) transcript(ctx context.Context, h agent.Host, in agent.Install, sid agent.SessionID) (session, []message, error) {
-	if r, ok := newSQLReader(h, in); ok {
-		s, msgs, err := r.transcript(ctx, sid)
+	if r, ok, err := openSQL(ctx, h, in); ok {
+		var (
+			s    session
+			msgs []message
+		)
+		if err == nil {
+			s, msgs, err = r.transcript(ctx, sid)
+		}
 		if !readUnsupported(err) {
 			return s, msgs, err
 		}
@@ -83,8 +89,11 @@ func (m *Module) transcript(ctx context.Context, h agent.Host, in agent.Install,
 
 // children are a session's descendants, parents first.
 func (m *Module) children(ctx context.Context, h agent.Host, in agent.Install, sid agent.SessionID) ([]agent.SessionID, error) {
-	if r, ok := newSQLReader(h, in); ok {
-		kids, err := r.descendants(ctx, sid)
+	if r, ok, err := openSQL(ctx, h, in); ok {
+		var kids []agent.SessionID
+		if err == nil {
+			kids, err = r.descendants(ctx, sid)
+		}
 		if !readUnsupported(err) {
 			return kids, err
 		}
@@ -105,8 +114,11 @@ func (m *Module) children(ctx context.Context, h agent.Host, in agent.Install, s
 // SessionStamp is a session's settled-message count and last update, the same from the
 // database and from OpenCode's export. A session that is not there is ErrNotFound.
 func (m *Module) SessionStamp(ctx context.Context, h agent.Host, in agent.Install, sid agent.SessionID) (agent.SessionStamp, error) {
-	if r, ok := newSQLReader(h, in); ok {
-		st, err := r.stamp(ctx, sid)
+	if r, ok, err := openSQL(ctx, h, in); ok {
+		var st agent.SessionStamp
+		if err == nil {
+			st, err = r.stamp(ctx, sid)
+		}
 		if !readUnsupported(err) {
 			return st, err
 		}

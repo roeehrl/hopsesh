@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -14,20 +15,32 @@ import (
 // from the newest reply of any) and its window from the models.dev catalog OpenCode
 // caches in its database. OpenCode's config file holds provider keys, so it is never read
 // (decision D6): a model the catalog does not know (a local provider) gets the fallback
-// window. A session's usage is its newest reply's tokens, plus the bytes of what follows.
+// window. A session's usage is its newest reply's tokens, plus the bytes of what follows;
+// after a compaction newer than that reply, the bytes from the compaction on. Where the
+// database cannot be read (none yet, another machine's closed WAL, a schema hopsesh does
+// not know), an existing session's usage is unknown.
 func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Install, s *agent.Summary) (ir.Capacity, error) {
 	c := ir.Capacity{Window: ir.FallbackWindow, Source: "conservative fallback; OpenCode's model window unknown"}
-	r, ok := newSQLReader(h, in)
-	if !ok {
-		c.Unknown = s != nil
-		return c, nil
+	r, ok, err := openSQL(ctx, h, in)
+	if ok && err == nil {
+		err = r.capacity(ctx, s, &c)
 	}
+	if !ok || errors.Is(err, agent.ErrNotInstalled) || errors.Is(err, agent.ErrUnsupported) {
+		fallback := ir.Capacity{Window: ir.FallbackWindow, Source: c.Source, Unknown: s != nil}
+		return fallback, nil
+	}
+	return c, err
+}
+
+func (r sqlReader) capacity(ctx context.Context, s *agent.Summary, c *ir.Capacity) error {
 	var model modelRef
 	if s != nil {
-		rows, err := r.sq.Query(ctx, r.db, lastAssistantQuery, string(s.Key.Session))
+		sid := string(s.Key.Session)
+		rows, err := r.sq.Query(ctx, r.db, lastAssistantQuery, sid)
 		if err != nil {
-			return c, err
+			return err
 		}
+		from := int64(0) // usage counts the bytes of messages after this seq
 		if len(rows.Rows) > 0 {
 			row := rows.Rows[0]
 			_ = json.Unmarshal([]byte(row.String("model")), &model)
@@ -35,26 +48,27 @@ func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Ins
 			if json.Unmarshal([]byte(row.String("tokens")), &t) == nil {
 				c.Existing = int(t.Input + t.Output + t.Reasoning + t.Cache.Read + t.Cache.Write)
 			}
-			after, err := r.sq.Query(ctx, r.db, afterQuery, string(s.Key.Session), row.Int("seq"))
-			if err != nil {
-				return c, err
-			}
-			if len(after.Rows) > 0 {
-				c.Existing += int(after.Rows[0].Int("n"))
-			}
-		} else {
-			n, err := r.sq.Query(ctx, r.db, afterQuery, string(s.Key.Session), 0)
-			if err != nil {
-				return c, err
-			}
-			if len(n.Rows) > 0 {
-				c.Existing = int(n.Rows[0].Int("n"))
-			}
+			from = row.Int("seq")
+		}
+		comp, err := r.sq.Query(ctx, r.db, lastCompactionQuery, sid)
+		if err != nil {
+			return err
+		}
+		if len(comp.Rows) > 0 && !comp.Rows[0].Null("seq") && comp.Rows[0].Int("seq") > from {
+			// The compaction replaced what came before: its summary and what follows.
+			c.Existing, from = 0, comp.Rows[0].Int("seq")-1
+		}
+		after, err := r.sq.Query(ctx, r.db, afterQuery, sid, from)
+		if err != nil {
+			return err
+		}
+		if len(after.Rows) > 0 {
+			c.Existing += int(after.Rows[0].Int("n"))
 		}
 	} else {
 		rows, err := r.sq.Query(ctx, r.db, anyAssistantQuery)
 		if err != nil {
-			return c, err
+			return err
 		}
 		if len(rows.Rows) > 0 {
 			_ = json.Unmarshal([]byte(rows.Rows[0].String("model")), &model)
@@ -63,13 +77,13 @@ func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Ins
 	c.Model = model.String()
 	digest, window, err := r.catalogWindow(ctx, model)
 	if err != nil {
-		return c, err
+		return err
 	}
 	c.ConfigHash = fmt.Sprintf("%x", sha256.Sum256([]byte(c.Model+"\x00"+digest)))
 	if window > 0 {
 		c.Window, c.Source = window, "models.dev catalog cached by OpenCode"
 	}
-	return c, nil
+	return nil
 }
 
 // catalogWindow is a model's usable context in the cached models.dev catalog (its input

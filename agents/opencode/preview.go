@@ -13,8 +13,11 @@ import (
 // that grows until it holds n messages), or the whole session from OpenCode's export, and
 // its first prompt.
 func (m *Module) Preview(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, n int) (agent.Preview, error) {
-	if r, ok := newSQLReader(h, in); ok {
-		p, err := r.preview(ctx, s.Key.Session, n)
+	if r, ok, err := openSQL(ctx, h, in); ok {
+		var p agent.Preview
+		if err == nil {
+			p, err = r.preview(ctx, s.Key.Session, n)
+		}
 		if !readUnsupported(err) {
 			return p, err
 		}
@@ -113,10 +116,16 @@ func (m *Module) Rename(ctx context.Context, h agent.Host, in agent.Install, s a
 		return err
 	}
 	svc := probeService(ctx, h)
-	if r, ok := newSQLReader(h, in); ok && svc.standalone() {
-		newest, err := r.maxVersion(ctx)
-		if err != nil && !readUnsupported(err) {
-			return err
+	if svc.standalone() {
+		// A private server opens the database: its OpenCode must read what is there.
+		newest := ""
+		if r, ok, err := openSQL(ctx, h, in); ok {
+			if err == nil {
+				newest, err = r.maxVersion(ctx)
+			}
+			if err != nil && !readUnsupported(err) {
+				return err
+			}
 		}
 		if err := checkStandalone(svc, in.Version, newest); err != nil {
 			return err
@@ -128,7 +137,7 @@ func (m *Module) Rename(ctx context.Context, h agent.Host, in agent.Install, s a
 		return err
 	}
 	if res.Code != 0 {
-		return fmt.Errorf("OpenCode did not rename the session: %w", commandError("api PATCH", res))
+		return fmt.Errorf("OpenCode did not rename the session: %w", apiError("PATCH", "/api/session/"+string(s.Key.Session), res))
 	}
 	return nil
 }

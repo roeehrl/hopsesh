@@ -23,7 +23,9 @@ type serviceState string
 const (
 	serviceRunning serviceState = "running"
 	serviceStopped serviceState = "stopped"
-	serviceUnknown serviceState = "unknown" // the probe failed: treated as stopped
+	// serviceUnknown: the probe failed. Commands run their own server, as with the
+	// service stopped; a resume, which could replace a running service, is refused.
+	serviceUnknown serviceState = "unknown"
 )
 
 // service is what the probe found.
@@ -43,8 +45,9 @@ const commandTimeout = 90 * time.Second
 // runEnv is the environment of every OpenCode command hopsesh runs: no self-update.
 var runEnv = []string{"OPENCODE_DISABLE_AUTOUPDATE=1"}
 
-// run runs OpenCode's program with argv after it. A program that could not run at all
-// (none there, or a machine where nothing runs: a peer's package) is an execError.
+// run runs OpenCode's program with argv after it (the confined Host runs the binary
+// Detect found). A program that could not run at all (none there, or a machine where
+// nothing runs: a peer's package) is an execError.
 func run(ctx context.Context, h agent.Host, argv []string, o agent.RunOptions) (agent.Result, error) {
 	o.Env = append(append([]string{}, runEnv...), o.Env...)
 	if o.Timeout == 0 {
@@ -53,6 +56,10 @@ func run(ctx context.Context, h agent.Host, argv []string, o agent.RunOptions) (
 	res, err := h.Exec().Run(ctx, append([]string{binName}, argv...), o)
 	if err != nil {
 		return res, &execError{err}
+	}
+	if res.Code == 126 || res.Code == 127 {
+		// The shell could not run it (over SSH a missing program is a result, not an error).
+		return res, &execError{fmt.Errorf("exit status %d: %s", res.Code, strings.TrimSpace(firstLine(res.Stderr)))}
 	}
 	return res, nil
 }
@@ -112,7 +119,7 @@ func apiJSON(ctx context.Context, h agent.Host, svc service, method, path string
 		return err
 	}
 	if res.Code != 0 {
-		return commandError("api "+method+" "+path, res)
+		return apiError(method, path, res)
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(res.Stdout), v); err != nil {
 		return fmt.Errorf("OpenCode's answer to %s %s: %w", method, path, err)
@@ -120,18 +127,27 @@ func apiJSON(ctx context.Context, h agent.Host, svc service, method, path string
 	return nil
 }
 
-// commandError describes a failed OpenCode command by its exit code and the end of
-// what it printed on stderr. "not found" there is agent.ErrNotFound.
-func commandError(what string, res agent.Result) error {
-	msg := strings.TrimSpace(string(res.Stderr))
-	if len(msg) > 400 {
-		msg = "…" + msg[len(msg)-400:]
-	}
-	err := fmt.Errorf("opencode %s exited with %d: %s", what, res.Code, msg)
-	if strings.Contains(strings.ToLower(msg), "not found") {
+// apiError describes a failed API call: `opencode api` prints the answer's body on
+// stdout and "HTTP <status>" on stderr. A 404 for a session is agent.ErrNotFound.
+func apiError(method, path string, res agent.Result) error {
+	err := commandError("api "+method+" "+path, res)
+	if strings.HasPrefix(strings.TrimSpace(string(res.Stderr)), "HTTP 404") && strings.HasPrefix(path, "/api/session/") {
 		return fmt.Errorf("%w (%v)", agent.ErrNotFound, err)
 	}
 	return err
+}
+
+// commandError describes a failed OpenCode command by its exit code and the end of
+// what it printed (stderr, and the answer's body an API call prints on stdout).
+func commandError(what string, res agent.Result) error {
+	msg := strings.TrimSpace(string(res.Stderr))
+	if body := strings.TrimSpace(string(res.Stdout)); body != "" {
+		msg = strings.TrimSpace(msg + " " + body)
+	}
+	if len(msg) > 400 {
+		msg = "…" + msg[len(msg)-400:]
+	}
+	return fmt.Errorf("opencode %s exited with %d: %s", what, res.Code, msg)
 }
 
 // serviceVersion asks the running service its version (GET /api/info).
@@ -186,10 +202,14 @@ func checkStandalone(svc service, binary, newest string) error {
 // the desktop app or another window), so it must be of the running service's version.
 // The PATH opencode when it is; else the desktop app's bundled CLI, or a CLI the desktop
 // app staged, of that version (found by their version files and folder names: nothing is
-// run). With the service stopped, any opencode will do.
+// run). With the service stopped, any opencode will do; when the probe failed, none.
 func resumeProgram(ctx context.Context, h agent.Host, in agent.Install, svc service) (string, error) {
-	if svc.State != serviceRunning {
+	switch svc.State {
+	case serviceStopped:
 		return binName, nil
+	case serviceUnknown:
+		return "", errors.New("hopsesh could not tell whether OpenCode's background service is running (`opencode service status` failed); " +
+			"opening the session with another version than the service's would restart it, which the desktop app shares. Check `opencode service status`, then try again")
 	}
 	want, err := serviceVersion(ctx, h, svc)
 	if err != nil {

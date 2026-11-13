@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/roeehrl/hopsesh/internal/core/rewrite"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
 	"github.com/roeehrl/hopsesh/sdk/ir"
@@ -357,22 +359,156 @@ func mustSQL(t *testing.T, h agent.Host, in agent.Install) sqlReader {
 	return r
 }
 
+// The policy a move to another account uses, applied to the session's file as a move
+// applies it, drops its reasoning and nothing else: the copy projects onto the source.
 func TestSanitizedProjection(t *testing.T) {
 	fh, _ := newMachine(t, setup{synthetic: true})
 	m, h, in := open(t, fh)
-	src := readAll(t, m, h, in, agent.Summary{Key: sessionKey(in, sesMixed)})
-	var kept []ir.Node
-	for _, n := range src.Nodes {
-		if n.Kind != ir.KindReasoning {
-			kept = append(kept, n)
+	s := agent.Summary{Key: sessionKey(in, sesMixed)}
+	src := readAll(t, m, h, in, s)
+	f := agent.BundleFile{Root: rootData, Rel: agent.AnchorRel(id, s.Key.Session), Role: agent.RoleMain, Virtual: true}
+	data, err := m.Materialize(ctx, h, in, s, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp, err := m.PlanMove(in, in, s, agent.Bundle{Files: []agent.BundleFile{f}}, agent.Placement{Key: s.Key, OtherAccount: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	st, err := rewrite.JSONL(bytes.NewReader(data), &out, rewrite.Options{Policy: mp.Policy})
+	if err != nil || st.DroppedElems != 1 {
+		t.Fatalf("sanitizing dropped %d items, %v", st.DroppedElems, err)
+	}
+	sess, msgs, err := decodeJSONL("sanitized", out.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := segment(sess, msgs, ir.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range target.Nodes {
+		if n.Kind == ir.KindReasoning {
+			t.Fatalf("the sanitized copy kept reasoning: %q", n.Text)
 		}
 	}
-	ps, err := m.ProjectSanitized(src, ir.Segment{Nodes: kept})
-	if err != nil || len(ps) != len(kept) {
-		t.Fatalf("%d projections, %v", len(ps), err)
+	ps, err := m.ProjectSanitized(src, target)
+	if err != nil || len(ps) != len(target.Nodes) || len(target.Nodes) != len(src.Nodes)-1 {
+		t.Fatalf("%d projections of %d nodes (source %d), %v", len(ps), len(target.Nodes), len(src.Nodes), err)
 	}
-	if _, err := m.ProjectSanitized(src, ir.Segment{Nodes: kept[1:]}); !errors.Is(err, agent.ErrDiverged) {
+	if _, err := m.ProjectSanitized(src, ir.Segment{Nodes: target.Nodes[1:]}); !errors.Is(err, agent.ErrDiverged) {
 		t.Fatalf("a changed shape: %v", err)
+	}
+}
+
+// Rows OpenCode wrote before 2.1 read, export and keep their replay data as OpenCode
+// upgrades them (SessionLegacy).
+func TestLegacyRows(t *testing.T) {
+	fh, _ := newMachine(t, setup{legacy: true})
+	m, h, in := open(t, fh)
+	s := agent.Summary{Key: sessionKey(in, sesLegacy), Path: anchorOf(fh, in, sesLegacy)}
+	seg := readAll(t, m, h, in, s)
+	var opaque, toolResults int
+	for _, n := range seg.Nodes {
+		if n.Kind == ir.KindReasoning && n.Reasoning != nil && n.Reasoning.Opaque {
+			opaque++
+		}
+		if n.Kind == ir.KindToolResult && n.Result.Output == "remember 7" {
+			toolResults++
+		}
+	}
+	if opaque != 1 || toolResults != 1 {
+		t.Fatalf("encrypted reasoning nodes %d, tool results %d", opaque, toolResults)
+	}
+	f := agent.BundleFile{Root: rootData, Rel: agent.AnchorRel(id, s.Key.Session), Role: agent.RoleMain, Virtual: true}
+	data, err := m.Materialize(ctx, h, in, s, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("%d lines", len(lines))
+	}
+	want := []string{
+		`{"id":"msg_1d65d0000002LegacyShape002","type":"assistant","time":{"created":1794590002000,"completed":1794590003000},"agent":"build",` +
+			`"model":{"id":"gpt-5.5-pro","providerID":"openai"},"native":{"openai":{"responseId":"resp_legacy"}},"content":[` +
+			`{"type":"tool","id":"call_legacy1","name":"read","state":{"status":"completed","input":{"path":"/home/u/git/demo/notes.txt"},"content":[{"type":"text","text":"remember 7"}]},` +
+			`"native":{"openai":{"output":"out_legacy"}},"time":{"created":1794590002100,"completed":1794590002200}},` +
+			`{"type":"reasoning","text":"","native":{"openai":{"encrypted":"gAAAAlegacy"}}},` +
+			`{"type":"text","text":"Read them.","native":{"openai":{"itemId":"msg_legacy"}}}],` +
+			`"finish":"stop","cost":0,"tokens":{"input":100,"output":10,"reasoning":5,"cache":{"read":0,"write":0}}}`,
+		`{"id":"msg_1d65d0000003LegacyShape003","type":"compaction","time":{"created":1794590004000,"completed":1794590005000},"status":"completed","reason":"auto",` +
+			`"summary":"Earlier the notes were read.","metadata":{"recent":"Read them."},` +
+			`"native":{"messages":[{"role":"user","content":[{"type":"media","media":{"source":{"type":"base64","data":"aGk=","mediaType":"image/png"}}},{"type":"text","text":"see"}]}]}}`,
+		`{"id":"msg_1d65d0000004LegacyShape004","type":"assistant","time":{"created":1794590006000,"completed":1794590007000},"agent":"build",` +
+			`"model":{"id":"gpt-5.5-pro","providerID":"openai"},"content":[{"type":"text","text":"Done.","native":{"new":2}}],` +
+			`"finish":"stop","cost":0,"tokens":{"input":50,"output":5,"reasoning":0,"cache":{"read":0,"write":0}}}`,
+	}
+	for i, w := range want {
+		var got, exp any
+		if err := json.Unmarshal([]byte(lines[i+2]), &got); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(w), &exp); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, exp) {
+			t.Errorf("message %d\n got %s\nwant %s", i+2, lines[i+2], w)
+		}
+	}
+	// The file and an export in the old shape read as the database does.
+	fh.Put(s.Path, data, time.Now())
+	sameNodes(t, "file", seg, readAll(t, m, agent.Confine(placed{fh}, m.Spec(), in), in, s))
+	var old struct {
+		Info     json.RawMessage   `json:"info"`
+		Messages []json.RawMessage `json:"messages"`
+	}
+	r := mustSQL(t, h, in)
+	rows, err := r.sq.Query(ctx, r.db, "SELECT id, type, data FROM session_message WHERE session_id = ? ORDER BY seq", sesLegacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, _ := json.Marshal(infoOf(sessionOf(info{ID: sesLegacy, Version: "2.0.30", Location: location{Directory: "/home/u/git/demo"}})))
+	old.Info = info
+	for _, row := range rows.Rows {
+		var f map[string]json.RawMessage
+		_ = json.Unmarshal([]byte(row.String("data")), &f)
+		f["id"], _ = json.Marshal(row.String("id"))
+		f["type"], _ = json.Marshal(row.String("type"))
+		if row.String("id") == "msg_1d65d0000002LegacyShape002" { // its tool, inline as 2.0 kept it
+			var c []json.RawMessage
+			_ = json.Unmarshal(f["content"], &c)
+			c = append([]json.RawMessage{json.RawMessage(`{"type":"tool","id":"call_legacy1","name":"read","state":{"status":"completed","input":{"path":"/home/u/git/demo/notes.txt"},"content":[{"type":"text","text":"remember 7"}]},"providerState":{"openai":{"itemId":"fc_legacy"}},"providerResultState":{"openai":{"output":"out_legacy"}},"time":{"created":1794590002100,"completed":1794590002200}}`)}, c...)
+			f["content"], _ = json.Marshal(c)
+		}
+		b, _ := json.Marshal(f)
+		old.Messages = append(old.Messages, b)
+	}
+	raw, _ := json.Marshal(old)
+	es, emsgs, err := fromTransfer(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromExport, err := segment(es, emsgs, ir.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameNodes(t, "old export", seg, fromExport)
+}
+
+// A shell command that timed out or was killed failed, with or without an exit code.
+func TestShellStatuses(t *testing.T) {
+	for status, want := range map[string]ir.ToolStatus{"exited": ir.StatusCompleted, "timeout": ir.StatusFailed, "killed": ir.StatusFailed} {
+		raw := json.RawMessage(`{"id":"msg_1","type":"shell","time":{"created":1},"command":"sleep 99","status":"` + status + `"}`)
+		msg, err := decodeMessage(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nodes := lift(msg)
+		if len(nodes) != 2 || nodes[1].Result.Status != want {
+			t.Errorf("%s: %+v", status, nodes)
+		}
 	}
 }
 

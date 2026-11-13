@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -61,6 +62,60 @@ func TestCapacityFallback(t *testing.T) {
 	c, _ = m.ContextCapacity(ctx, agent.Confine(placed{fh}, m.Spec(), in), in, &s)
 	if !c.Unknown {
 		t.Fatalf("without the database: %+v", c)
+	}
+}
+
+// A compaction after the newest reply replaced what came before it: usage counts from it.
+func TestCapacityAfterCompaction(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	s := agent.Summary{Key: sessionKey(in, sesFiles)}
+	before, err := m.ContextCapacity(ctx, h, in, &s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comp := `{"time":{"created":1794597500000,"completed":1794597500100},"status":"completed","reason":"auto","summary":"short"}`
+	if err := fh.ExecSQL(dbPath, `INSERT INTO session_message VALUES ('msg_zzcomp', ?, 'compaction', 900, 1794597500000, 1794597500100, ?)`, sesFiles, comp); err != nil {
+		t.Fatal(err)
+	}
+	after, err := m.ContextCapacity(ctx, h, in, &s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := len(comp) + 32; after.Existing != want || before.Existing <= want {
+		t.Errorf("existing %d after the compaction (want %d), %d before", after.Existing, want, before.Existing)
+	}
+}
+
+// Where the database is missing or cannot be read, capacity is the fallback: unknown
+// for an existing session, never an error.
+func TestCapacityWithoutReadableDatabase(t *testing.T) {
+	fh, _ := newMachine(t, setup{noDB: true})
+	m, h, in := open(t, fh)
+	s := agent.Summary{Key: sessionKey(in, sesFiles)}
+	for name, host := range map[string]agent.Host{"no database": h, "closed WAL": agent.Confine(placedSQL{fh}, m.Spec(), in)} {
+		c, err := m.ContextCapacity(ctx, host, in, &s)
+		if err != nil || !c.Unknown || c.Window != ir.FallbackWindow {
+			t.Errorf("%s: %+v %v", name, c, err)
+		}
+		if c, err = m.ContextCapacity(ctx, host, in, nil); err != nil || c.Unknown {
+			t.Errorf("%s, a new session: %+v %v", name, c, err)
+		}
+	}
+}
+
+// A custom models source is cached under its own key; its meta entries are not catalogs.
+func TestCapacityCustomCatalog(t *testing.T) {
+	fh, _ := newMachine(t, setup{synthetic: true})
+	body, _ := json.Marshal(map[string]string{"digest": "custom", "body": `{"openai":{"models":{"gpt-5.5-pro":{"limit":{"context":500000}}}}}`})
+	key := "models-dev:v2:catalog:" + strings.Repeat("ab", 20)
+	if err := fh.ExecSQL(dbPath, `INSERT INTO kv VALUES (?, ?, 1, 9999999999999), (?, '{"updatedAt":1}', 1, 99999999999999)`, key, string(body), key+":meta"); err != nil {
+		t.Fatal(err)
+	}
+	m, h, in := open(t, fh)
+	c, err := m.ContextCapacity(ctx, h, in, &agent.Summary{Key: sessionKey(in, sesMixed)})
+	if err != nil || c.Window != 500000 {
+		t.Fatalf("custom catalog: %+v %v", c, err)
 	}
 }
 
@@ -173,11 +228,23 @@ func TestPreview(t *testing.T) {
 	if err != nil || viaExport.Messages() != 2 || viaExport.Items[len(viaExport.Items)-1].Text != last.Text || viaExport.First.Text != p.First.Text {
 		t.Fatalf("preview from the export: %+v %v", viaExport, err)
 	}
+	// A session longer than the window the preview reads: its first prompt is read apart.
+	for i := range 20 {
+		if err := fh.ExecSQL(dbPath, `INSERT INTO session_message VALUES (?, ?, 'user', ?, 1, 1, '{"time":{"created":1},"text":"more"}')`, fmt.Sprintf("msg_zzmore%02d", i), sesLong, 1000+i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err = m.Preview(ctx, h, in, s, 2)
+	if err != nil || !p.More || p.First == nil || p.First.Text != "Remember the number 7. Reply 'noted'." {
+		t.Fatalf("preview of a longer session: %+v %v", p.First, err)
+	}
 }
 
 // Where hopsesh cannot read the database, it lists and reads through OpenCode's API and
 // export: the same root sessions, kinds and messages.
 func TestRemoteAPITier(t *testing.T) {
+	defer func(n int) { apiSessionPage = n }(apiSessionPage)
+	apiSessionPage = 5 // 14 sessions: three pages
 	fh, f := newMachine(t, setup{})
 	m, h, in := open(t, fh)
 	viaSQL, _ := m.List(ctx, h, in)
@@ -191,8 +258,13 @@ func TestRemoteAPITier(t *testing.T) {
 	}
 	for _, s := range viaSQL.Sessions {
 		a := summaryFor(t, viaAPI, string(s.Key.Session))
-		if a.Title != s.Title || a.CWD != s.CWD || !slices.Equal(a.Kinds, s.Kinds) || a.Subagents != s.Subagents || a.NativeParent != s.NativeParent {
+		if a.Title != s.Title || a.TitleSource != s.TitleSource || a.CWD != s.CWD || !slices.Equal(a.Kinds, s.Kinds) || a.Subagents != s.Subagents ||
+			a.NativeParent != s.NativeParent || !a.LastActivity.Equal(s.LastActivity) || a.Path != s.Path || a.Key != s.Key {
 			t.Errorf("%s: API %+v, database %+v", s.Key.Session, a, s)
+		}
+		// What the API tier cannot know without an export per session.
+		if a.Size != 0 || a.LastPrompt != "" || a.AgentVersion != "" {
+			t.Errorf("%s: API size %d, prompt %q, version %q", s.Key.Session, a.Size, a.LastPrompt, a.AgentVersion)
 		}
 		sameNodes(t, "API "+string(s.Key.Session), readAll(t, m, h, in, s), readAll(t, m, api, in, a))
 	}
@@ -200,10 +272,59 @@ func TestRemoteAPITier(t *testing.T) {
 	if err != nil || len(b.Files) != 2 || !b.Files[1].Virtual {
 		t.Fatalf("bundle through the API %+v %v", b, err)
 	}
+	pages := 0
 	for _, c := range f.commands() {
 		if c != "service status" && !strings.Contains(c, "--standalone") {
 			t.Errorf("%q", c)
 		}
+		if strings.HasPrefix(c, "api --standalone GET /api/session?") && strings.Contains(c, "limit=5") {
+			pages++
+		}
+	}
+	if pages%3 != 0 || pages == 0 {
+		t.Errorf("%d page requests; each listing reads three pages", pages)
+	}
+	// An untitled session the API lists has no prompt to be named by: it stays untitled.
+	sum := summaryOf(fh, in, listed{session: session{ID: sesMixed, Title: "New session - 2026-11-13T12:28:20.000Z", HasTitle: true}}, 0)
+	if sum.Title != "" || sum.TitleSource != "" {
+		t.Errorf("untitled through the API: %q (%s)", sum.Title, sum.TitleSource)
+	}
+}
+
+// A session OpenCode does not have is ErrNotFound through its export and its API; a
+// program that is not there is not.
+func TestNotFound(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	m, _, in := open(t, fh)
+	h := agent.Confine(noSQL{fh}, m.Spec(), in)
+	const missing = "ses_e29a00000ffeNotThereAtAll0"
+	if _, err := m.SessionStamp(ctx, h, in, missing); !errors.Is(err, agent.ErrNotFound) {
+		t.Errorf("stamp through the export: %v", err)
+	}
+	if _, err := m.Read(ctx, h, in, agent.Summary{Key: sessionKey(in, missing)}, ir.Cursor{}); !errors.Is(err, agent.ErrNotFound) {
+		t.Errorf("read through the export: %v", err)
+	}
+	if _, err := m.ResumeOn(ctx, h, in, sessionKey(in, missing), agent.Placement{}, agent.ResumeOptions{}); !errors.Is(err, agent.ErrNotFound) {
+		t.Errorf("resume through the export: %v", err)
+	}
+	if err := m.Rename(ctx, h, in, agent.Summary{Key: sessionKey(in, missing)}, "x"); !errors.Is(err, agent.ErrNotFound) {
+		t.Errorf("rename through the API: %v", err)
+	}
+	// Over SSH a missing program is exit status 127 with "not found" on stderr.
+	f.onCall = func(argv []string) (agent.Result, bool) {
+		return agent.Result{Code: 127, Stderr: []byte("sh: 1: opencode: not found")}, true
+	}
+	_, err := m.SessionStamp(ctx, h, in, sesFiles)
+	if errors.Is(err, agent.ErrNotFound) || !notRun(err) {
+		t.Errorf("a missing program: %v", err)
+	}
+	// Other failures keep what OpenCode said, the answer's body included.
+	f.onCall = func(argv []string) (agent.Result, bool) {
+		return agent.Result{Code: 1, Stdout: []byte(`{"name":"BadRequest","message":"title too long"}`), Stderr: []byte("HTTP 400 Bad Request")}, argv[0] == "api"
+	}
+	err = m.Rename(ctx, h, in, agent.Summary{Key: sessionKey(in, sesFiles)}, "x")
+	if errors.Is(err, agent.ErrNotFound) || err == nil || !strings.Contains(err.Error(), "title too long") {
+		t.Errorf("a failed rename: %v", err)
 	}
 }
 

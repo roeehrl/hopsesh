@@ -50,11 +50,16 @@ var (
 // VirtualSessions: a session is rows of a database, its size a count of messages.
 func (*Module) VirtualSessions() {}
 
-// Detect resolves the roots (and OPENCODE_DB) and, on a Mac, the desktop app.
+// Detect resolves the roots and, on a Mac, the desktop app. The "db" root names the
+// database when it is not {data}/opencode.db: OPENCODE_DB's, or another channel's.
 func (m *Module) Detect(_ context.Context, h agent.Host) (agent.Install, error) {
 	in := agent.DefaultInstall(m.Spec(), h)
 	if db := resolveDB(h, in.Root(rootData), h.Facts().Env["OPENCODE_DB"]); db != "" {
 		in.Roots[rootDB] = db
+	} else if data := in.Root(rootData); data != "" {
+		if db := dbFile(h, in); db != h.Path().Join(data, "opencode.db") {
+			in.Roots[rootDB] = db
+		}
 	}
 	detectDesktop(h, &in)
 	return in, nil
@@ -90,9 +95,9 @@ func detectDesktop(h agent.Host, in *agent.Install) {
 
 // List lists the root sessions: child sessions (subagents) are counted on their root,
 // as OpenCode's own list shows them; archived sessions are of the kind "archived".
-// The database is checked first for every column the module reads.
+// The database is checked first for every column the module reads (as every read does).
 func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agent.Listing, error) {
-	r, ok := newSQLReader(h, in)
+	r, ok, err := openSQL(ctx, h, in)
 	if !ok {
 		l, err := m.listAPI(ctx, h, in)
 		if notRun(err) {
@@ -100,7 +105,6 @@ func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agen
 		}
 		return l, err
 	}
-	err := r.checkSchema(ctx)
 	if err == nil {
 		var rows []listed
 		if rows, err = r.list(ctx); err == nil {
@@ -266,8 +270,8 @@ func (m *Module) ResumeOn(ctx context.Context, h agent.Host, in agent.Install, k
 	return resumeCommand(in, program, key, p, o), nil
 }
 
-// SessionWatchPaths are the database and its WAL (every change lands there) and
-// hopsesh's own files; never logs, snapshots or the config.
+// SessionWatchPaths are the database Detect chose and its WAL (every change lands there)
+// and hopsesh's own files; never logs, snapshots or the config.
 func (m *Module) SessionWatchPaths(in agent.Install, pa agent.Path) []string {
 	data := in.Root(rootData)
 	if data == "" {

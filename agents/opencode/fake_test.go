@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +42,7 @@ const (
 	sesImported = "ses_e29a40000ffeHandMadeImport"
 	sesImpChild = "ses_e29a3ffffffeHandMadeChild0"
 	sesMixed    = "ses_e29a20000ffeSyntheticMix00"
+	sesLegacy   = "ses_e29a10000ffeLegacyShape000"
 )
 
 // fakeOpenCode answers like OpenCode 2.3.0's program, from the fixture. It records every
@@ -100,11 +103,7 @@ func (f *fakeOpenCode) run(argv []string, o agent.RunOptions) agent.Result {
 			b, _ := json.Marshal(map[string]any{"data": m})
 			return ok(string(b))
 		case method == "GET" && strings.HasPrefix(path, "/api/session?"):
-			b, err := os.ReadFile(filepath.Join(fixture, "api-session-list.json"))
-			if err != nil {
-				return fail(1, err.Error())
-			}
-			return ok(string(b))
+			return f.sessionPage(path)
 		case method == "PATCH" && strings.HasPrefix(path, "/api/session/"):
 			var body struct {
 				Title string `json:"title"`
@@ -113,6 +112,9 @@ func (f *fakeOpenCode) run(argv []string, o agent.RunOptions) agent.Result {
 				return fail(1, "HTTP 400 Bad Request")
 			}
 			sid := strings.TrimPrefix(path, "/api/session/")
+			if strings.Contains(sid, "NotThere") { // the tests' id of a session OpenCode does not have
+				return agent.Result{Code: 1, Stdout: []byte(`{"name":"SessionNotFoundError"}`), Stderr: []byte("HTTP 404 Not Found")}
+			}
 			if f.fh != nil {
 				_ = f.fh.ExecSQL(dbPath, "UPDATE session_v2 SET title = ?, time_updated = time_updated + 1 WHERE id = ?", body.Title, sid)
 			}
@@ -125,6 +127,35 @@ func (f *fakeOpenCode) run(argv []string, o agent.RunOptions) agent.Result {
 		return fail(1, "HTTP 404 Not Found")
 	}
 	return fail(1, "unknown command "+strings.Join(args, " "))
+}
+
+// sessionPage answers GET /api/session from the fixture's listing, a page of ?limit=
+// sessions from ?cursor= (an offset here; OpenCode's are opaque). Like OpenCode it gives
+// a next cursor even on the last page.
+func (f *fakeOpenCode) sessionPage(path string) agent.Result {
+	b, err := os.ReadFile(filepath.Join(fixture, "api-session-list.json"))
+	if err != nil {
+		return agent.Result{Code: 1, Stderr: []byte(err.Error())}
+	}
+	var all struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(b, &all); err != nil {
+		return agent.Result{Code: 1, Stderr: []byte(err.Error())}
+	}
+	u, err := url.Parse(path)
+	if err != nil {
+		return agent.Result{Code: 1, Stderr: []byte("HTTP 400 Bad Request")}
+	}
+	limit, _ := strconv.Atoi(u.Query().Get("limit"))
+	from := 0
+	if c := u.Query().Get("cursor"); c != "" {
+		from, _ = strconv.Atoi(strings.TrimPrefix(c, "at"))
+	}
+	to := min(len(all.Data), from+limit)
+	page := map[string]any{"data": all.Data[from:to], "cursor": map[string]string{"next": fmt.Sprintf("at%d", to)}}
+	out, _ := json.Marshal(page)
+	return agent.Result{Stdout: out}
 }
 
 // commands are the commands run so far, each as one line.
@@ -159,6 +190,7 @@ func exportIndex(t testing.TB) map[string]string {
 
 type setup struct {
 	synthetic bool // load the synthetic sessions
+	legacy    bool // load the session in OpenCode's pre-2.1 shape
 	secrets   bool // load the fake credential rows
 	noDB      bool
 }
@@ -178,6 +210,9 @@ func newMachine(t testing.TB, s setup) (*agenttest.FakeHost, *fakeOpenCode) {
 	files := []string{filepath.Join(fixture, "schema.sql"), filepath.Join(fixture, "data.sql")}
 	if s.synthetic {
 		files = append(files, "testdata/synthetic/mixed.sql")
+	}
+	if s.legacy {
+		files = append(files, "testdata/synthetic/legacy.sql")
 	}
 	if s.secrets {
 		files = append(files, "testdata/synthetic/secrets.sql")

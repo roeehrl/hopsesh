@@ -13,21 +13,35 @@ import (
 // The module's queries. Each names only allowed tables and columns (the permission
 // column of session_v2 shares its name with a denied table, so it is never named).
 
-// sessionCols are the session_v2 columns a session is read with.
-const sessionCols = `s.id, s.project_id, s.workspace_id, s.parent_id, s.fork_session_id, s.fork_boundary, s.slug, s.directory, s.path, s.title, s.version, ` +
-	`s.metadata, s.cost, s.tokens_input, s.tokens_output, s.tokens_reasoning, s.tokens_cache_read, s.tokens_cache_write, s.revert, s.agent, s.model, ` +
-	`s.time_created, s.time_updated, s.time_busy, s.time_idle, s.time_viewed, s.idle_outcome, s.time_archived, s.time_suspended, s.time_compacting`
+// sessionCols are the session_v2 columns a session is read with (time_busy is NULL in a
+// database from before OpenCode 2.2.2).
+func (d dbSchema) sessionCols() string {
+	busy := `s.time_busy`
+	if !d.busy {
+		busy = `NULL AS time_busy`
+	}
+	return `s.id, s.project_id, s.workspace_id, s.parent_id, s.fork_session_id, s.fork_boundary, s.slug, s.directory, s.path, s.title, s.version, ` +
+		`s.metadata, s.cost, s.tokens_input, s.tokens_output, s.tokens_reasoning, s.tokens_cache_read, s.tokens_cache_write, s.revert, s.agent, s.model, ` +
+		`s.time_created, s.time_updated, ` + busy + `, s.time_idle, s.time_viewed, s.idle_outcome, s.time_archived, s.time_suspended, s.time_compacting`
+}
 
 // listQuery is every session with what a listing shows: its settled-message and part
 // counts (the listing cache's signature) and the first and last prompts.
-const listQuery = `SELECT ` + sessionCols + `, ` +
-	`(SELECT count(*) FROM session_message m WHERE m.session_id = s.id AND ` + settledSQL + `) AS settled, ` +
-	`(SELECT count(*) FROM session_part p WHERE p.session_id = s.id) AS parts, ` +
-	`(SELECT coalesce(json_extract(m.data, '$.metadata.displayText'), json_extract(m.data, '$.text')) FROM session_message m WHERE m.session_id = s.id AND m.type = 'user' ORDER BY m.seq DESC LIMIT 1) AS last_prompt, ` +
-	`(SELECT coalesce(json_extract(m.data, '$.metadata.displayText'), json_extract(m.data, '$.text')) FROM session_message m WHERE m.session_id = s.id AND m.type = 'user' ORDER BY m.seq LIMIT 1) AS first_prompt ` +
-	`FROM session_v2 s ORDER BY s.time_updated DESC`
+func (d dbSchema) listQuery() string {
+	parts := `(SELECT count(*) FROM session_part p WHERE p.session_id = s.id) AS parts, `
+	if !d.parts {
+		parts = `0 AS parts, `
+	}
+	return `SELECT ` + d.sessionCols() + `, ` +
+		`(SELECT count(*) FROM session_message m WHERE m.session_id = s.id AND ` + settledSQL + `) AS settled, ` + parts +
+		`(SELECT coalesce(json_extract(m.data, '$.metadata.displayText'), json_extract(m.data, '$.text')) FROM session_message m WHERE m.session_id = s.id AND m.type = 'user' ORDER BY m.seq DESC LIMIT 1) AS last_prompt, ` +
+		`(SELECT coalesce(json_extract(m.data, '$.metadata.displayText'), json_extract(m.data, '$.text')) FROM session_message m WHERE m.session_id = s.id AND m.type = 'user' ORDER BY m.seq LIMIT 1) AS first_prompt ` +
+		`FROM session_v2 s ORDER BY s.time_updated DESC`
+}
 
-const sessionQuery = `SELECT ` + sessionCols + ` FROM session_v2 s WHERE s.id = ?`
+func (d dbSchema) sessionQuery() string {
+	return `SELECT ` + d.sessionCols() + ` FROM session_v2 s WHERE s.id = ?`
+}
 
 const messagesQuery = `SELECT id, type, seq, data FROM session_message WHERE session_id = ? ORDER BY seq`
 
@@ -46,14 +60,23 @@ const stampQuery = `SELECT s.time_updated, (SELECT count(*) FROM session_message
 
 const familyQuery = `SELECT id, parent_id FROM session_v2 WHERE parent_id IS NOT NULL`
 
-const liveQuery = `SELECT id, time_busy, time_idle, time_suspended, time_compacting FROM session_v2`
+func (d dbSchema) liveQuery() string {
+	busy := `time_busy`
+	if !d.busy {
+		busy = `NULL AS time_busy`
+	}
+	return `SELECT id, ` + busy + `, time_idle, time_suspended, time_compacting FROM session_v2`
+}
 
 const maxVersionQuery = `SELECT version FROM session_v2`
 
 const migrationQuery = `SELECT id FROM migration ORDER BY id DESC LIMIT 1`
 
-// catalogQuery reads the models.dev catalog OpenCode caches, and only it, from kv.
-const catalogQuery = `SELECT value FROM kv WHERE key LIKE 'models-dev:%catalog' ORDER BY key DESC LIMIT 1`
+// catalogQuery reads the models.dev catalog OpenCode caches, and only it, from kv: the
+// default source's (models-dev:v2:catalog) or a custom one's (models-dev:v2:catalog:<sha1>),
+// whichever OpenCode wrote last; never their ":meta" entries.
+const catalogQuery = `SELECT value FROM kv WHERE (key = 'models-dev:v2:catalog' OR key LIKE 'models-dev:v2:catalog:%') AND key NOT LIKE '%:meta' ` +
+	`ORDER BY time_updated DESC LIMIT 1`
 
 // The model and usage of the newest completed assistant message: of one session, or of
 // any (for a new session).
@@ -63,14 +86,20 @@ const lastAssistantQuery = `SELECT m.seq, json_extract(m.data, '$.model') AS mod
 const anyAssistantQuery = `SELECT json_extract(m.data, '$.model') AS model FROM session_message m WHERE m.type = 'assistant' ` +
 	`AND json_extract(m.data, '$.time.completed') IS NOT NULL ORDER BY m.time_created DESC LIMIT 1`
 
+// The newest completed compaction of a session.
+const lastCompactionQuery = `SELECT max(m.seq) AS seq FROM session_message m WHERE m.session_id = ? AND m.type = 'compaction' ` +
+	`AND json_extract(m.data, '$.status') = 'completed'`
+
 const afterQuery = `SELECT sum(length(m.data) + 32) AS n FROM session_message m WHERE m.session_id = ? AND m.seq > ?`
 
 // sqlReader reads one install's database.
 type sqlReader struct {
-	sq agent.SQL
-	db string
+	sq     agent.SQL
+	db     string
+	schema dbSchema // what the gate found (open)
 }
 
+// newSQLReader is the install's database before the schema gate (openSQL runs it).
 func newSQLReader(h agent.Host, in agent.Install) (sqlReader, bool) {
 	sq, ok := agent.HostSQL(h)
 	if !ok {
@@ -114,7 +143,7 @@ type listed struct {
 }
 
 func (r sqlReader) list(ctx context.Context) ([]listed, error) {
-	rows, err := r.sq.Query(ctx, r.db, listQuery)
+	rows, err := r.sq.Query(ctx, r.db, r.schema.listQuery())
 	if err != nil {
 		return nil, err
 	}
@@ -128,14 +157,18 @@ func (r sqlReader) list(ctx context.Context) ([]listed, error) {
 
 // transcript is a session with its settled messages, read in one snapshot.
 func (r sqlReader) transcript(ctx context.Context, sid agent.SessionID) (session, []message, error) {
-	rs, err := r.sq.Batch(ctx, r.db, []agent.Statement{
-		{Query: sessionQuery, Args: []any{string(sid)}},
+	stmts := []agent.Statement{
+		{Query: r.schema.sessionQuery(), Args: []any{string(sid)}},
 		{Query: messagesQuery, Args: []any{string(sid)}},
-		{Query: partsQuery, Args: []any{string(sid)}},
-	})
+	}
+	if r.schema.parts {
+		stmts = append(stmts, agent.Statement{Query: partsQuery, Args: []any{string(sid)}})
+	}
+	rs, err := r.sq.Batch(ctx, r.db, stmts)
 	if err != nil {
 		return session{}, nil, err
 	}
+	rs = append(rs, agent.Rows{})
 	if len(rs[0].Rows) == 0 {
 		return session{}, nil, fmt.Errorf("%w: %s", agent.ErrNotFound, sid)
 	}
@@ -146,14 +179,18 @@ func (r sqlReader) transcript(ctx context.Context, sid agent.SessionID) (session
 // tail is a session and its newest n messages (settled ones, oldest first), and whether
 // it has older ones.
 func (r sqlReader) tail(ctx context.Context, sid agent.SessionID, n int) (session, []message, bool, error) {
-	rs, err := r.sq.Batch(ctx, r.db, []agent.Statement{
-		{Query: sessionQuery, Args: []any{string(sid)}},
+	stmts := []agent.Statement{
+		{Query: r.schema.sessionQuery(), Args: []any{string(sid)}},
 		{Query: tailQuery, Args: []any{string(sid), n + 1}},
-		{Query: tailPartsQuery, Args: []any{string(sid), string(sid), n}},
-	})
+	}
+	if r.schema.parts {
+		stmts = append(stmts, agent.Statement{Query: tailPartsQuery, Args: []any{string(sid), string(sid), n}})
+	}
+	rs, err := r.sq.Batch(ctx, r.db, stmts)
 	if err != nil {
 		return session{}, nil, false, err
 	}
+	rs = append(rs, agent.Rows{})
 	if len(rs[0].Rows) == 0 {
 		return session{}, nil, false, fmt.Errorf("%w: %s", agent.ErrNotFound, sid)
 	}
@@ -193,7 +230,7 @@ func joinParts(msgRows, partRows agent.Rows) ([]message, error) {
 }
 
 func (r sqlReader) session(ctx context.Context, sid agent.SessionID) (session, error) {
-	rows, err := r.sq.Query(ctx, r.db, sessionQuery, string(sid))
+	rows, err := r.sq.Query(ctx, r.db, r.schema.sessionQuery(), string(sid))
 	if err != nil {
 		return session{}, err
 	}

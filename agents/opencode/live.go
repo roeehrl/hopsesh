@@ -10,34 +10,43 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// A session is open while OpenCode runs a turn of it: its row says so (time_busy after
-// time_idle, or compacting), or the background service lists it as active. A turn the
-// service was running when it stopped stays claimed (time_suspended) and resumes when the
-// service starts again: such a session is open too. An idle TUI or desktop window that
-// shows a session leaves no trace hopsesh can see.
+// A session is open while OpenCode runs a turn of it. Its row says when a turn is in
+// flight: OpenCode claims the session (time_suspended, the execution claim) when a turn
+// starts, in any process, and releases it when the turn ends; since 2.2.2 it also sets
+// time_busy, and time_idle once the turn ends. When the background service shuts down
+// mid-turn, it keeps the claim and records no idle, and resumes the turn when it starts
+// again; a process that dies leaves the claim too. So a claimed row is a running turn or a
+// suspended one, and only the processes tell which: the running service lists the
+// sessions it has a turn of (GET /api/session/active), and a window with its own server
+// (--standalone) cannot be asked. An idle TUI or desktop window that shows a session
+// leaves no trace hopsesh can see.
 
 // Words for LiveInfo.Status.
 const (
-	statusWorking   = "working"
-	statusSuspended = "suspended until OpenCode's background service starts again"
+	statusWorking = "working"
+	// statusSuspended: the row claims a turn while the background service is not running.
+	statusSuspended = "working in an OpenCode window with its own server, or suspended until OpenCode's background service starts again"
 )
 
 // liveRow is what a session's row says about its turns.
 type liveRow struct {
-	busy, idle, suspended, compacting int64
+	busy, idle, claimed, compacting int64
 }
 
-func (r liveRow) working() bool { return r.busy != 0 && r.busy > r.idle || r.compacting != 0 }
+// inFlight reports a turn started and not ended: running, or suspended.
+func (r liveRow) inFlight() bool {
+	return r.claimed != 0 || r.busy != 0 && r.busy > r.idle || r.compacting != 0
+}
 
 func (r sqlReader) liveRows(ctx context.Context) (map[agent.SessionID]liveRow, error) {
-	rows, err := r.sq.Query(ctx, r.db, liveQuery)
+	rows, err := r.sq.Query(ctx, r.db, r.schema.liveQuery())
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[agent.SessionID]liveRow, len(rows.Rows))
 	for _, row := range rows.Rows {
 		out[agent.SessionID(row.String("id"))] = liveRow{busy: row.Int("time_busy"), idle: row.Int("time_idle"),
-			suspended: row.Int("time_suspended"), compacting: row.Int("time_compacting")}
+			claimed: row.Int("time_suspended"), compacting: row.Int("time_compacting")}
 	}
 	return out, nil
 }
@@ -61,34 +70,50 @@ func activeSessions(ctx context.Context, h agent.Host, svc service) (map[agent.S
 	return out, nil
 }
 
-// Live says which sessions run a turn now (or have one suspended).
+// Live says which sessions run a turn now (or have one suspended). The rows answer alone
+// unless one of the sessions has a turn in flight (or they cannot be read): only then is
+// OpenCode asked, since each question is a process, and a service that stops between the
+// probe and the API call would be started again by that call.
 func (m *Module) Live(ctx context.Context, h agent.Host, in agent.Install, ids []agent.SessionID) (map[agent.SessionID]agent.LiveInfo, error) {
 	var rows map[agent.SessionID]liveRow
-	if r, ok := newSQLReader(h, in); ok {
-		var err error
-		rows, err = r.liveRows(ctx)
+	if r, ok, err := openSQL(ctx, h, in); ok {
+		if err == nil {
+			rows, err = r.liveRows(ctx)
+		}
 		switch {
 		case errors.Is(err, agent.ErrNotInstalled):
 			rows = map[agent.SessionID]liveRow{}
-		case readUnsupported(err):
-			rows = nil
+		case errors.Is(err, agent.ErrUnsupported):
+			rows = nil // a database hopsesh cannot read here, or does not recognise
 		case err != nil:
 			return nil, err
 		}
 	}
-	svc := probeService(ctx, h)
-	active, err := activeSessions(ctx, h, svc)
-	if err != nil {
-		active = nil // the rows still say what they say
+	ask := rows == nil
+	for _, sid := range ids {
+		ask = ask || rows[sid].inFlight()
+	}
+	svc := service{State: serviceUnknown}
+	var active map[agent.SessionID]bool
+	if ask {
+		svc = probeService(ctx, h)
+		var err error
+		if active, err = activeSessions(ctx, h, svc); err != nil {
+			active = nil // the rows still say what they say
+		}
 	}
 	out := make(map[agent.SessionID]agent.LiveInfo, len(ids))
 	for _, sid := range ids {
 		row, known := rows[sid]
 		switch {
-		case active[sid] || known && row.working():
+		case active[sid]:
 			out[sid] = agent.LiveInfo{State: agent.Live, Status: statusWorking}
-		case known && row.suspended != 0:
+		case known && row.inFlight() && row.claimed != 0 && svc.State != serviceRunning:
 			out[sid] = agent.LiveInfo{State: agent.Live, Status: statusSuspended}
+		case known && row.inFlight():
+			// With the service running, a turn it does not list runs in a window with
+			// its own server.
+			out[sid] = agent.LiveInfo{State: agent.Live, Status: statusWorking}
 		case known || rows == nil && active != nil && svc.State == serviceRunning:
 			out[sid] = agent.LiveInfo{State: agent.Ended}
 		default:
@@ -103,8 +128,10 @@ var (
 	// ErrOwnServer: the turn runs in an OpenCode process with a server of its own
 	// (--standalone), which hopsesh cannot reach.
 	ErrOwnServer = errors.New("the session runs in an OpenCode window with its own server (opencode --standalone); stop it there (Esc)")
-	// ErrSuspended: the turn waits for the background service, which hopsesh never starts.
-	ErrSuspended = errors.New("the session's turn stopped with OpenCode's background service and continues when it starts again; open OpenCode and stop the turn there (Esc)")
+	// ErrSuspended: the background service is not running and the session's row claims a
+	// turn: a window with its own server runs it, or it waits for the service, which
+	// hopsesh never starts. Nothing tells the two apart.
+	ErrSuspended = errors.New("the session's turn runs in an OpenCode window with its own server (opencode --standalone), or it stopped with OpenCode's background service and continues when the service starts again; stop it in that window (Esc), or open OpenCode and stop it there")
 	// ErrStillRunning: the turn did not end within the grace period.
 	ErrStillRunning = errors.New("the OpenCode session is still working; stop it in OpenCode (Esc), then try again")
 )
@@ -123,10 +150,10 @@ func (m *Module) Stop(ctx context.Context, h agent.Host, in agent.Install, s age
 		return nil
 	}
 	svc := probeService(ctx, h)
-	switch {
-	case svc.State != serviceRunning && li.Status == statusSuspended:
-		return ErrSuspended
-	case svc.State != serviceRunning:
+	if svc.State != serviceRunning {
+		if li.Status == statusSuspended {
+			return ErrSuspended
+		}
 		return ErrOwnServer
 	}
 	var ans struct {
@@ -135,7 +162,7 @@ func (m *Module) Stop(ctx context.Context, h agent.Host, in agent.Install, s age
 	if err := apiJSON(ctx, h, svc, "POST", "/api/session/"+string(s.Key.Session)+"/interrupt", nil, &ans); err != nil {
 		return fmt.Errorf("OpenCode did not interrupt the session: %w", err)
 	}
-	if !ans.Interrupted && li.Status != statusSuspended {
+	if !ans.Interrupted {
 		// The service runs no turn of it: another process with its own server does.
 		if again, err := m.Live(ctx, h, in, []agent.SessionID{s.Key.Session}); err == nil && again[s.Key.Session].State == agent.Live {
 			return ErrOwnServer

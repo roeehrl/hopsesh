@@ -28,8 +28,14 @@ func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s age
 
 // readSession reads a session's settled messages from wherever they are.
 func (m *Module) readSession(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary) (session, []message, error) {
-	if r, ok := newSQLReader(h, in); ok {
-		sess, msgs, err := r.transcript(ctx, s.Key.Session)
+	if r, ok, err := openSQL(ctx, h, in); ok {
+		var (
+			sess session
+			msgs []message
+		)
+		if err == nil {
+			sess, msgs, err = r.transcript(ctx, s.Key.Session)
+		}
 		if !readUnsupported(err) {
 			return sess, msgs, err
 		}
@@ -159,7 +165,8 @@ func lift(msg message) []ir.Node {
 		if msg.Output != nil {
 			res.Output = msg.Output.Output
 		}
-		if msg.Status == "failed" || res.ExitCode != nil && *res.ExitCode != 0 {
+		// A shell's status is running, exited, timeout or killed (schema/src/shell.ts).
+		if msg.Status == "timeout" || msg.Status == "killed" || res.ExitCode != nil && *res.ExitCode != 0 {
 			res.Status = ir.StatusFailed
 		}
 		out = append(out,
