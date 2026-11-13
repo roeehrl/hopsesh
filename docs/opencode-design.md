@@ -154,7 +154,7 @@ Abbreviations:
 | File | Contents |
 |---|---|
 | `opencode.go` | `Module`; `Spec()`; `Detect`; `List`; `Bundle`; `PlanMove`; `Verify`; `Resume`; `SessionWatchPaths`. |
-| `spec.go` | • ID `opencode`, Name "OpenCode", Vendor "Anomaly" (verify the legal name), Stability `Experimental`, Tested.<br>• Binaries: `opencode` (VersionArgs `--version`).<br>• Roots: `data`, `config`, `state`, and on macOS `desktop` (`~/Library/Application Support/ai.opencode.desktop`) (§3.2). Main root: `data`.<br>• Secrets: `{state}/service*.json`, `{config}/service.json`, `{data}/auth.json`, `{config}/opencode.json`, `{config}/opencode.jsonc`, `{data}/opencode*.db*` (so no file path, bundle copy or peer package can copy the DB; SQL access is separate, §3.3).<br>• `LoginEnv`: `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `OPENCODE_CONFIG_DIR`, `OPENCODE_DB` (GUI started from Finder).<br>• `Tools` (feeds the briefing's tool names).<br>• Instructions `["AGENTS.md"]`; GlobalInstructions `{config}/AGENTS.md`.<br>• Worktrees: the OpenCode-managed worktree dir.<br>• Kinds `["archived"]`.<br>• TerminalEnv `OPENCODE_SESSION_ID`.<br>• `Icon.Apps`: `/Applications/OpenCode.app`. `DesktopScheme: "opencode"` (detection only, D11).<br>• `Accounts`: `RootEnv` (multi-var, §3.7), `Unset` (provider key variables, `OPENCODE_DB`, `OPENCODE_PASSWORD`, `OPENCODE_SERVER_PASSWORD`, `OPENCODE_SERVER*`), `Login` `opencode auth login`, `LoginElsewhere` text. Exact `auth login` syntax taken from the `--help` snapshot.<br>• `SQLTables` allowlist (§3.3).<br>• Features: CapFork only after verification; no CapApp. |
+| `spec.go` | • ID `opencode`, Name "OpenCode", Vendor "Anomaly" (verify the legal name), Stability `Experimental`, Tested.<br>• Binaries: `opencode` (VersionArgs `--version`).<br>• Roots: `data`, `config`, `state`, and on macOS `desktop` (`~/Library/Application Support/ai.opencode.desktop`) (§3.2). Main root: `data`.<br>• Secrets: `{state}/service*.json`, `{config}/service.json`, `{data}/auth.json`, `{config}/opencode.json`, `{config}/opencode.jsonc`, `{data}/opencode*.db*` (so no file path, bundle copy or peer package can copy the DB; SQL access is separate, §3.3).<br>• `LoginEnv`: `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `OPENCODE_CONFIG_DIR`, `OPENCODE_DB` (GUI started from Finder).<br>• `Tools` (feeds the briefing's tool names).<br>• Instructions `["AGENTS.md"]`; GlobalInstructions `{config}/AGENTS.md`.<br>• Worktrees: the OpenCode-managed worktree dir.<br>• Kinds `["archived"]`.<br>• TerminalEnv `OPENCODE_SESSION_ID`.<br>• `Icon.Apps`: `/Applications/OpenCode.app`. `DesktopScheme: "opencode"` (detection only, D11).<br>• `Accounts`: `RootEnv` (multi-var, §3.7), `Unset` (provider key variables, `OPENCODE_DB`, `OPENCODE_PASSWORD`, `OPENCODE_SERVER_PASSWORD`, `OPENCODE_SERVER*`), `Login` `opencode auth login`, `LoginElsewhere` text. Exact `auth login` syntax taken from the `--help` snapshot.<br>• `SQLFiles` `{data}/opencode*.db` and `{db}`; `SQLTables` allowlist and `SQLDenied` (§3.3).<br>• Features: CapFork only after verification; no CapApp. |
 | `paths.go` | Resolves roots and the DB file (F2, F3); picks the channel DB. |
 | `service.go` | `serviceState(h)`: `opencode service status` → URL or stopped; `GET /api/info` → version. `execArgs(...)` adds `--standalone` when stopped (and the binary-version check from §2), and sets `OPENCODE_DISABLE_AUTOUPDATE=1`. `resumeBinary()` (§3.4). |
 | `schema.go` | Required-column manifest; `checkSchema(db)`; latest migration id. |
@@ -503,7 +503,8 @@ the anchor is computed from the data root (§3.5). Output for OpenCode:
 - `sdk/agent/hooks.go`: `HookDir`. The checks that a hook file sits directly in the main root
   (`internal/app/movement_hooks.go`, `remote_default.go`) use it, so a plugin under
   `{config}/plugins/hopsesh` passes (PR 6 depends on this).
-- `sdk/agent/sql.go`, `sdk/agent/confine.go` (`confinedSQL`; the DB stays a Secret for FS access),
+- `sdk/agent/sql.go`, `sdk/agent/confine.go` (`confinedSQL`; the DB, named by `Spec.SQLFiles`, stays a
+  Secret for FS access),
   `sdk/agent/listing.go` (`ListingSummaryKey`).
 - `sdk/agent/runtime_profile.go`: multi-var `RootEnv`, JSON `Inherit`.
 - `sdk/agent/agenttest/{suite.go,fakehost.go}`: FakeHost SQL (modernc on a temp file built from fixture
@@ -698,25 +699,47 @@ neutral names (`opencode/…`).
 
 **Left by PR 1a for later PRs.** PR 1a adds the SDK contracts as optional interfaces; no core code
 calls them yet, so Claude Code and Codex behave as before. Names differ slightly from §3.5: the
-stamp is `agent.SessionStamp` (a string) from an optional `SessionStamper`, `SessionStore` adds
-`Backup`, the install flag is `VendorInstaller.InstallsViaVendor()`, and `Spec.SQLDenied` lists the
-denied tables beside `Spec.SQLTables`.
-- PR 1b, host: `moduleHost` implements `agent.SQLHost`; its reader implements
-  `agent.SQLTableLimiter` (modernc authorizer, as `agenttest/sqlhost.go` does) and uses
-  `agent.ScanRows`; remote tiers check their JSON rows with `agent.CheckRows` and return whole
-  numbers as `int64`. `agent.Confine` already checks each query (`agent.CheckSQLQuery`) and the
-  database path. The snapshot host returns no reader.
+stamp is `agent.SessionStamp` (a string starting with its form, `v1:…`) from an optional
+`SessionStamper`, `SessionStore` adds `Backup`, the install flag is
+`VendorInstaller.InstallsViaVendor()`, `Spec.SQLDenied` lists the denied tables beside
+`Spec.SQLTables`, and `Spec.SQLFiles` names the database files SQL may open (`{data}/opencode*.db`,
+and `{db}` for `OPENCODE_DB`; each is a Secret for file access, with its `-wal`/`-shm` files, so
+the spec need not list the DB under `Secrets`).
+- PR 1b, local reader: `moduleHost` implements `agent.SQLHost`; its reader implements
+  `agent.SQLTableLimiter` with a modernc authorizer as `agenttest/sqlhost.go` does: allow
+  `agent.SQLTableFuncs()` and the allowed tables, never the denied ones, and a read with no
+  column of a name that is no table or view of the database (a WITH name; read the schema's
+  names before the authorizer is registered). Register it on a dedicated connection never
+  reused for another module. Set `SQLITE_LIMIT_LENGTH` to the statements' `MaxBytes`, read rows
+  with one `agent.NewSQLBudget()` per Batch, and map SQLite's "too big" to `ErrTooLarge`.
+  `agent.Confine` already checks each query (`agent.CheckSQLQuery`), the database file
+  (`SQLFiles`) and gives each call `DefaultSQLTimeout`. The snapshot host returns no reader.
+- PR 1b, remote tiers: the remote reader implements `SQLTableLimiter` too. After `sqlquote` puts
+  the arguments in, run `agent.CheckSQLQuery` again on the final text. sqlite3 tier:
+  `-readonly -safe -bail -init /dev/null -json` (`-safe` needs 3.37). python3 tier:
+  `conn.set_authorizer` with the same rules. Escape `?`, `#` and `%` in `file:` URIs. Cap the
+  bytes read from stdout before decoding; fill `Rows.Columns` in the query's order, repeats
+  included, and check with `agent.CheckRows` (or the Batch's `SQLBudget`); return whole numbers
+  as `int64`.
 - PR 1b, move: stage, write and `packageOf` call `agent.Materializer` for `BundleFile.Virtual`;
   `apply.go` checks `agent.InstallsViaVendor`; `keepBoth`, `repo.go`, `write.go` and `capacity.go`
   use `agent.NewSessionID`; the journal's `OpVendorSession` uses `SessionStore`; `Seal`, the
-  receipts, `movement_read.go` and `movement_memo.go` use `agent.StampOf` and tolerate a missing
-  anchor when `agent.IsVirtual`.
+  receipts, `movement_read.go` and `movement_memo.go` use `agent.StampOf` (with a fresh Summary,
+  never the listing cache's) and tolerate a missing anchor when `agent.IsVirtual`. When a
+  journaled stamp's `Format()` differs from the module's current one, undo asks instead of
+  refusing for good.
 - PR 6: install `HookIntegration.Dir` with `agent.InstallHookDir` / `RemoveHookDir` over a local
-  `HookDirFS`, and check it with `HookDir.In`. The default staging folder sits beside the plugin
-  folder with a leading dot; the OpenCode module sets `Staging` outside `plugins/`.
-- PR 7: `movementHookProfile` and `PinMain` still take an account folder as the main root; with
-  `ProfileSpec.RootVars` the main root is inside it (`Spec.ProfileLocate`). Code that lists an
-  account's variables reads `ProfileSpec.Vars()`, not `RootEnv`.
+  `HookDirFS` whose `ReadDir` uses Lstat, under the machine's hook lock, and check it with
+  `HookDir.In`. `Staging` is required, inside the same root and outside `plugins/` (for
+  OpenCode, `{config}/.hopsesh`).
+- PR 7: `PinMain` places an added account's main root inside its folder (`Spec.ProfileLocate`) and
+  a default account keeps the machine's `RootVars` variables. Inherit keys may name a root
+  (`{config}/opencode.json`); only plain values are copied. Code that lists an account's
+  variables reads `ProfileSpec.Vars()`, not `RootEnv`.
+- PR 2: with `permission` denied, a query cannot name `session_v2.permission` (the checker refuses
+  any mention of a denied name). Fine unless PR 2 needs that column.
+- Not changed: `WindowsPath.Clean` turns a UNC root (`\\server\share`) into `\server\share`,
+  which affects `EnvSub` on network home folders; it predates PR 1a.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
