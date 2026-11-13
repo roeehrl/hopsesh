@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io/fs"
+	"path"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode/utf16"
 )
@@ -19,7 +23,10 @@ type MovementHookIntegrator interface {
 }
 
 type HookIntegration struct {
-	File           *HookFile
+	File *HookFile
+	// Dir is a folder hopsesh owns whole (an agent plugin), for an agent whose hooks are
+	// not entries in a shared file; nil when File is used.
+	Dir            *HookDir
 	Reason         string
 	Evidence       string
 	DisabledReason string // vendor setting prevents delivery; install/remove must preserve it
@@ -28,6 +35,9 @@ type HookIntegration struct {
 // HookFile edits only hooks owned by this integration in a shared vendor file.
 // All functions are pure; the app owns bounded local reads and atomic writes.
 type HookFile struct {
+	// Root names the Spec root the file sits directly in ("" for the main root): the only
+	// place the app edits it.
+	Root   string
 	Path   string
 	Merge  func([]byte) ([]byte, error)
 	Remove func([]byte) ([]byte, error)
@@ -36,6 +46,25 @@ type HookFile struct {
 	// the program it runs: how another machine's hook is checked from here, where the
 	// exact arguments hopsesh there used are unknown. nil: only Has is known.
 	Runs func([]byte) (program string, ok bool)
+}
+
+// In reports whether the file sits directly in its root's folder of in.
+func (f *HookFile) In(in Install, pa Path) bool {
+	return DirectlyIn(in, f.Root, f.Path, pa)
+}
+
+// DirectlyIn reports whether p is a file directly in the folder of in's root ("" for the
+// main root).
+func DirectlyIn(in Install, root, p string, pa Path) bool {
+	dir := in.Main()
+	if root != "" {
+		dir = in.Root(root)
+	}
+	if dir == "" || p == "" {
+		return false
+	}
+	rel, ok := pa.Rel(dir, p)
+	return ok && rel != "." && !strings.ContainsAny(rel, `/\`)
 }
 
 // noticeHookIn finds a notice hook command (NoticeHookCommand) and its agent.
@@ -95,4 +124,206 @@ func EncodedPowerShellHook(script string) string {
 		binary.LittleEndian.PutUint16(raw[i*2:], c)
 	}
 	return "powershell.exe -NoLogo -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand " + base64.StdEncoding.EncodeToString(raw)
+}
+
+// HookDir is a folder hopsesh owns whole, holding several files: an agent plugin
+// ({config}/plugins/hopsesh) rather than entries in a shared settings file. Its functions
+// are pure, over the folder's files by slash-separated path. InstallHookDir and
+// RemoveHookDir build the new folder aside and swap it in with renames, so the agent never
+// loads a half-written one.
+type HookDir struct {
+	// Root names the Spec root the folder is inside ("" for the main root); Path is the
+	// folder, anywhere inside that root's folder.
+	Root string
+	Path string
+	// Staging is where the new and old copies wait while the folder is replaced: a folder
+	// on the same filesystem that the agent does not scan for plugins. "" is beside Path,
+	// named with a leading dot.
+	Staging string
+	// Merge returns the folder's files with hopsesh's installed, from what is there now
+	// (empty when there is no folder).
+	Merge func(existing map[string][]byte) (map[string][]byte, error)
+	// Remove returns what stays after hopsesh's are taken out; nil or empty removes the
+	// folder. A nil Remove always removes it.
+	Remove func(existing map[string][]byte) (map[string][]byte, error)
+	// Has reports whether the folder runs this hopsesh, with these arguments.
+	Has func(existing map[string][]byte) bool
+	// Runs returns the program the folder's notice hook runs, whatever its arguments, as
+	// HookFile.Runs.
+	Runs func(existing map[string][]byte) (program string, ok bool)
+}
+
+// In reports whether the folder is inside its root's folder of in.
+func (d *HookDir) In(in Install, pa Path) bool {
+	dir := in.Main()
+	if d.Root != "" {
+		dir = in.Root(d.Root)
+	}
+	if dir == "" || d.Path == "" {
+		return false
+	}
+	rel, ok := pa.Rel(dir, d.Path)
+	return ok && rel != "."
+}
+
+// HookDirFS is the filesystem a HookDir is read and replaced through, with that
+// machine's paths. WriteFile creates parent folders; Rename moves a folder.
+type HookDirFS interface {
+	ReadDir(p string) ([]fs.FileInfo, error)
+	ReadFile(p string, limit int64) ([]byte, error)
+	WriteFile(p string, b []byte, perm fs.FileMode) error
+	MkdirAll(p string) error
+	Rename(from, to string) error
+	RemoveAll(p string) error
+}
+
+// Limits on a HookDir, which holds a few small files.
+const (
+	hookDirMaxFiles = 64
+	hookDirMaxBytes = 4 << 20
+)
+
+// ReadHookDir reads the folder's files (none when it does not exist).
+func ReadHookDir(fsys HookDirFS, pa Path, d *HookDir) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	var total int64
+	var walk func(dir, rel string) error
+	walk = func(dir, rel string) error {
+		entries, err := fsys.ReadDir(dir)
+		if err != nil {
+			if rel == "" && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		for _, e := range entries {
+			name := path.Join(rel, e.Name())
+			switch {
+			case e.IsDir():
+				if err := walk(pa.Join(dir, e.Name()), name); err != nil {
+					return err
+				}
+			case e.Mode().IsRegular():
+				if len(out) >= hookDirMaxFiles {
+					return fmt.Errorf("%s holds more than %d files; not changing it", d.Path, hookDirMaxFiles)
+				}
+				b, err := fsys.ReadFile(pa.Join(dir, e.Name()), hookDirMaxBytes-total)
+				if err != nil {
+					return err
+				}
+				total += int64(len(b))
+				out[name] = b
+			default:
+				return fmt.Errorf("%s holds %s, which is not a file; not changing it", d.Path, name)
+			}
+		}
+		return nil
+	}
+	return out, walk(d.Path, "")
+}
+
+// InstallHookDir puts hopsesh's files in the folder (Merge) and reports whether it changed
+// anything.
+func InstallHookDir(fsys HookDirFS, pa Path, d *HookDir) (bool, error) {
+	old, err := ReadHookDir(fsys, pa, d)
+	if err != nil {
+		return false, err
+	}
+	files, err := d.Merge(old)
+	if err != nil {
+		return false, err
+	}
+	if sameHookFiles(old, files) {
+		return false, nil
+	}
+	return true, replaceHookDir(fsys, pa, d, len(old) > 0, files)
+}
+
+// RemoveHookDir takes hopsesh's files out (Remove, or the whole folder) and reports
+// whether it changed anything.
+func RemoveHookDir(fsys HookDirFS, pa Path, d *HookDir) (bool, error) {
+	old, err := ReadHookDir(fsys, pa, d)
+	if err != nil || len(old) == 0 {
+		return false, err
+	}
+	var files map[string][]byte
+	if d.Remove != nil {
+		if files, err = d.Remove(old); err != nil {
+			return false, err
+		}
+		if sameHookFiles(old, files) {
+			return false, nil
+		}
+	}
+	return true, replaceHookDir(fsys, pa, d, true, files)
+}
+
+// replaceHookDir writes files into a new copy in Staging, moves the folder there, moves
+// the new copy in, then deletes the old one. With no files the folder only moves out.
+// A failure puts the old folder back.
+func replaceHookDir(fsys HookDirFS, pa Path, d *HookDir, exists bool, files map[string][]byte) error {
+	staging := d.Staging
+	if staging == "" {
+		staging = pa.Dir(d.Path)
+	}
+	base := "." + pa.Base(d.Path) + ".hopsesh"
+	next, prev := pa.Join(staging, base+"-new"), pa.Join(staging, base+"-old")
+	for _, p := range []string{next, prev} {
+		if err := fsys.RemoveAll(p); err != nil {
+			return err
+		}
+	}
+	for _, p := range []string{staging, pa.Dir(d.Path)} {
+		if err := fsys.MkdirAll(p); err != nil {
+			return err
+		}
+	}
+	if len(files) > 0 {
+		names := make([]string, 0, len(files))
+		for name := range files {
+			if name == "" || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, `\`) {
+				return fmt.Errorf("invalid hook file name %q", name)
+			}
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if err := fsys.WriteFile(pa.Join(append([]string{next}, strings.Split(name, "/")...)...), files[name], 0o644); err != nil {
+				_ = fsys.RemoveAll(next)
+				return err
+			}
+		}
+	}
+	if exists {
+		if err := fsys.Rename(d.Path, prev); err != nil {
+			_ = fsys.RemoveAll(next)
+			return err
+		}
+	} else if err := fsys.RemoveAll(d.Path); err != nil { // empty folders only: no files were read there
+		_ = fsys.RemoveAll(next)
+		return err
+	}
+	if len(files) > 0 {
+		if err := fsys.Rename(next, d.Path); err != nil {
+			if exists {
+				_ = fsys.Rename(prev, d.Path)
+			}
+			_ = fsys.RemoveAll(next)
+			return err
+		}
+	}
+	return fsys.RemoveAll(prev)
+}
+
+func sameHookFiles(a, b map[string][]byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		w, ok := b[k]
+		if !ok || !bytes.Equal(v, w) {
+			return false
+		}
+	}
+	return true
 }
