@@ -515,7 +515,7 @@ func remove(db *sql.DB, sid string) error {
 	return tx.Commit()
 }
 
-// rename sets a session's title (PATCH /api/session/{id}).
+// update sets a session's title or metadata (PATCH /api/session/{id}).
 func update(db *sql.DB, sid string, body *value, now time.Time) error {
 	if _, err := getRow(db, sid); err != nil {
 		return err
