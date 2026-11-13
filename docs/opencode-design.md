@@ -751,6 +751,24 @@ the spec need not list the DB under `Secrets`).
 - Not changed: `WindowsPath.Clean` turns a UNC root (`\\server\share`) into `\server\share`,
   which affects `EnvSub` on network home folders; it predates PR 1a.
 
+**Left by PR 1b for later PRs.** The core now stages, installs, journals and undoes sessions kept
+in a database; `internal/testkit/dbagent` is a stand-in module that keeps them in SQLite (its
+program writes in the test's process) and the e2e and app tests run moves, continuations, cd, peer
+packages and undo through it.
+- PR 2/4/5 (the module): keep `Summary.Path` at `agent.AnchorRel` (the notice hook finds lineage
+  from the session id alone); `Write` uses `WriteRequest.SessionID` (the core minted it with
+  `agent.NewSessionID` and journaled the session before the write; a writer that picks another id
+  is followed, and that id is journaled after the write); `AfterInstall` imports idempotently (it
+  runs again after an interrupted move or continuation); `Restore` refuses over newer work.
+- Undo of a session kept in a database runs on this machine only, as cd undo does; the activity
+  list checks this machine's sessions and leaves other machines' to the undo
+  (`journal.ErrOutOfReach`). A receipt whose session is gone is dropped (stale), not retried.
+- The remote SQL probe still runs on its own 20-second context (`SQLHost.SQL()` takes none); a
+  failed probe is kept 30 seconds. On a machine with only an older sqlite3 shell (no python3),
+  BLOBs read as text.
+- PR 11 (append into an existing session): the continue path reads an expected destination by its
+  key (`Copies`), but appending and its rollback are not exercised with a virtual target yet.
+
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
 
