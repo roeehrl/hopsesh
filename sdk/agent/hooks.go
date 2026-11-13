@@ -130,15 +130,16 @@ func EncodedPowerShellHook(script string) string {
 // ({config}/plugins/hopsesh) rather than entries in a shared settings file. Its functions
 // are pure, over the folder's files by slash-separated path. InstallHookDir and
 // RemoveHookDir build the new folder aside and swap it in with renames, so the agent never
-// loads a half-written one.
+// loads a half-written one. The caller holds the machine's hook lock around them: two at
+// once would share the staging copies.
 type HookDir struct {
 	// Root names the Spec root the folder is inside ("" for the main root); Path is the
 	// folder, anywhere inside that root's folder.
 	Root string
 	Path string
 	// Staging is where the new and old copies wait while the folder is replaced: a folder
-	// on the same filesystem that the agent does not scan for plugins. "" is beside Path,
-	// named with a leading dot.
+	// inside the same root, outside Path, that the agent does not scan for plugins (not
+	// beside Path in plugins/). Required.
 	Staging string
 	// Merge returns the folder's files with hopsesh's installed, from what is there now
 	// (empty when there is no folder).
@@ -153,21 +154,31 @@ type HookDir struct {
 	Runs func(existing map[string][]byte) (program string, ok bool)
 }
 
-// In reports whether the folder is inside its root's folder of in.
+// In reports whether the folder is inside its root's folder of in, and its Staging is in
+// that root too and not inside the folder.
 func (d *HookDir) In(in Install, pa Path) bool {
 	dir := in.Main()
 	if d.Root != "" {
 		dir = in.Root(d.Root)
 	}
-	if dir == "" || d.Path == "" {
+	if dir == "" || d.Path == "" || d.Staging == "" {
 		return false
 	}
 	rel, ok := pa.Rel(dir, d.Path)
-	return ok && rel != "."
+	if !ok || rel == "." {
+		return false
+	}
+	if _, ok := pa.Rel(dir, d.Staging); !ok {
+		return false
+	}
+	_, inside := pa.Rel(d.Path, d.Staging)
+	return !inside
 }
 
 // HookDirFS is the filesystem a HookDir is read and replaced through, with that
-// machine's paths. WriteFile creates parent folders; Rename moves a folder.
+// machine's paths. WriteFile creates parent folders; Rename moves a folder. ReadDir
+// describes a symbolic link as a link (Lstat), never as what it points to, so a link is
+// refused rather than copied.
 type HookDirFS interface {
 	ReadDir(p string) ([]fs.FileInfo, error)
 	ReadFile(p string, limit int64) ([]byte, error)
@@ -225,6 +236,9 @@ func ReadHookDir(fsys HookDirFS, pa Path, d *HookDir) (map[string][]byte, error)
 // InstallHookDir puts hopsesh's files in the folder (Merge) and reports whether it changed
 // anything.
 func InstallHookDir(fsys HookDirFS, pa Path, d *HookDir) (bool, error) {
+	if err := recoverHookDir(fsys, pa, d); err != nil {
+		return false, err
+	}
 	old, err := ReadHookDir(fsys, pa, d)
 	if err != nil {
 		return false, err
@@ -242,6 +256,9 @@ func InstallHookDir(fsys HookDirFS, pa Path, d *HookDir) (bool, error) {
 // RemoveHookDir takes hopsesh's files out (Remove, or the whole folder) and reports
 // whether it changed anything.
 func RemoveHookDir(fsys HookDirFS, pa Path, d *HookDir) (bool, error) {
+	if err := recoverHookDir(fsys, pa, d); err != nil {
+		return false, err
+	}
 	old, err := ReadHookDir(fsys, pa, d)
 	if err != nil || len(old) == 0 {
 		return false, err
@@ -258,16 +275,44 @@ func RemoveHookDir(fsys HookDirFS, pa Path, d *HookDir) (bool, error) {
 	return true, replaceHookDir(fsys, pa, d, true, files)
 }
 
-// replaceHookDir writes files into a new copy in Staging, moves the folder there, moves
-// the new copy in, then deletes the old one. With no files the folder only moves out.
-// A failure puts the old folder back.
-func replaceHookDir(fsys HookDirFS, pa Path, d *HookDir, exists bool, files map[string][]byte) error {
-	staging := d.Staging
-	if staging == "" {
-		staging = pa.Dir(d.Path)
+// hookDirStaging is where the new and the old copy of the folder wait.
+func hookDirStaging(pa Path, d *HookDir) (next, prev string, err error) {
+	if d.Path == "" || d.Staging == "" || !pa.IsAbs(d.Path) || !pa.IsAbs(d.Staging) {
+		return "", "", fmt.Errorf("the hook folder %q needs an absolute path and staging folder", d.Path)
+	}
+	if _, inside := pa.Rel(d.Path, d.Staging); inside {
+		return "", "", fmt.Errorf("the staging folder %s is inside the hook folder", d.Staging)
 	}
 	base := "." + pa.Base(d.Path) + ".hopsesh"
-	next, prev := pa.Join(staging, base+"-new"), pa.Join(staging, base+"-old")
+	return pa.Join(d.Staging, base+"-new"), pa.Join(d.Staging, base+"-old"), nil
+}
+
+// recoverHookDir finishes a replace that stopped between its two renames: the folder is
+// gone and its old copy waits in Staging, so the old copy goes back.
+func recoverHookDir(fsys HookDirFS, pa Path, d *HookDir) error {
+	_, prev, err := hookDirStaging(pa, d)
+	if err != nil {
+		return err
+	}
+	if _, err := fsys.ReadDir(d.Path); !errors.Is(err, fs.ErrNotExist) {
+		return nil // the folder is there (or unreadable, which reading it reports)
+	}
+	if _, err := fsys.ReadDir(prev); err != nil {
+		return nil // no old copy
+	}
+	return fsys.Rename(prev, d.Path)
+}
+
+// replaceHookDir writes files into a new copy in Staging, moves the folder there, moves
+// the new copy in, then deletes the old one. With no files the folder only moves out.
+// A failure puts the old folder back; a crash between the renames is undone by the next
+// install or removal (recoverHookDir).
+func replaceHookDir(fsys HookDirFS, pa Path, d *HookDir, exists bool, files map[string][]byte) error {
+	next, prev, err := hookDirStaging(pa, d)
+	if err != nil {
+		return err
+	}
+	staging := d.Staging
 	for _, p := range []string{next, prev} {
 		if err := fsys.RemoveAll(p); err != nil {
 			return err
