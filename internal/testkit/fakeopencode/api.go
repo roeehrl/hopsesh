@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +66,7 @@ func (r *run) api(args []string) int {
 	case len(path) >= 3 && path[0] == "api" && path[1] == "session":
 		sid := path[2]
 		if !strings.HasPrefix(sid, "ses") {
-			return r.invalid("Invalid session id: " + sid)
+			return r.invalidKind("Expected a string starting with \"ses\"\n  at [\"sessionID\"]", "Params")
 		}
 		rest := strings.Join(path[3:], "/")
 		switch {
@@ -80,12 +81,18 @@ func (r *run) api(args []string) int {
 		case method == "DELETE" && rest == "":
 			return r.empty(sid, remove(db, sid))
 		case method == "POST" && rest == "move":
-			dir := body.text("directory")
-			if dir == "" {
-				return r.invalid("directory is required")
+			d := body.get("directory")
+			if d == nil {
+				return r.invalidKind("Missing key\n  at [\"directory\"]", "Payload")
+			} else if d.kind != 's' {
+				return r.invalidKind("Expected string, got "+string(d.compact())+"\n  at [\"directory\"]", "Payload")
 			}
-			return r.empty(sid, move(db, sid, dir, now))
+			return r.empty(sid, move(db, sid, d.s, r.paths().home, r.env, now))
 		case method == "POST" && rest == "fork":
+			before := body.get("before")
+			if before != nil && (before.kind != 's' || !strings.HasPrefix(before.s, "msg_")) {
+				return r.invalidKind("Expected a string starting with \"msg_\"\n  at [\"before\"]", "Payload")
+			}
 			id, err := fork(db, sid, body.text("before"), now)
 			if err != nil {
 				return r.storeError(sid, err)
@@ -146,15 +153,30 @@ func (r *run) status(code int, body *value) int {
 	return 1
 }
 
-func (r *run) invalid(msg string) int {
+func (r *run) invalid(msg string) int { return r.invalidKind(msg, "") }
+
+// invalidKind is a 400 InvalidRequestError; kind says what failed to decode (Params,
+// Query, Payload) or why (empty_session).
+func (r *run) invalidKind(msg, kind string) int {
 	v := obj()
 	v.set("_tag", str("InvalidRequestError"))
+	v.set("message", str(msg))
+	if kind != "" {
+		v.set("kind", str(kind))
+	}
+	return r.status(400, v)
+}
+
+func (r *run) invalidCursor(msg string) int {
+	v := obj()
+	v.set("_tag", str("InvalidCursorError"))
 	v.set("message", str(msg))
 	return r.status(400, v)
 }
 
 func (r *run) storeError(sid string, err error) int {
 	var br *badRequest
+	var nm *errMessageNotFound
 	switch {
 	case errors.Is(err, errNotFound):
 		v := obj()
@@ -162,8 +184,17 @@ func (r *run) storeError(sid string, err error) int {
 		v.set("sessionID", str(sid))
 		v.set("message", str("Session not found: "+sid))
 		return r.status(404, v)
+	case errors.As(err, &nm):
+		v := obj()
+		v.set("_tag", str("MessageNotFoundError"))
+		v.set("sessionID", str(nm.sid))
+		v.set("messageID", str(nm.mid))
+		v.set("message", str("Message not found: "+nm.mid))
+		return r.status(404, v)
+	case errors.Is(err, errForkEmpty):
+		return r.invalidKind("Cannot fork empty session: "+sid, "empty_session")
 	case errors.As(err, &br):
-		return r.invalid(br.msg)
+		return r.invalidKind(br.msg, br.kind)
 	}
 	v := obj()
 	v.set("_tag", str("UnknownError"))
@@ -183,7 +214,7 @@ func (r *run) infoBody() *value {
 	}
 	v.set("urls", &value{kind: 'a', vals: []*value{str(u)}})
 	p := obj()
-	p.set("tmp", str(strings.TrimRight(os.TempDir(), "/\\")+string(os.PathSeparator)+"opencode"))
+	p.set("tmp", str(filepath.Join(tempDir(), "opencode")))
 	v.set("paths", p)
 	c := obj()
 	c.set("persistentPty", lit("true"))
@@ -191,12 +222,22 @@ func (r *run) infoBody() *value {
 	return v
 }
 
-// The sessions with a turn running: $FAKE_OPENCODE_ACTIVE, and the ids in the state
-// folder's fake-active file (which an interrupt takes them out of).
+// The sessions with a turn running in the background service: $FAKE_OPENCODE_ACTIVE,
+// and the ids in the state folder's fake-active file, until an interrupt ends them. A
+// private server (--standalone) runs none. Their rows claim the turn (time_suspended,
+// time_busy), as the service's do while it runs one; see markTurns.
 
 func (r *run) activeFile() string { return r.paths().state + string(os.PathSeparator) + "fake-active" }
 
 func (r *run) active() []string {
+	if r.standalone {
+		return nil // a private server runs no turns
+	}
+	return r.turns()
+}
+
+// turns are the sessions the background service runs a turn of.
+func (r *run) turns() []string {
 	var out []string
 	seen := map[string]bool{}
 	add := func(s string) {
@@ -241,23 +282,29 @@ func (r *run) setInactive(sid string) {
 
 // sessionPage is GET /api/session (Session.list): sessions by last update, newest first
 // unless ?order=asc, ?limit at a time (50 by default), each page with opaque cursors to
-// the pages before and after it.
+// the pages before and after it. A cursor carries the filters it was made with.
 func (r *run) sessionPage(db *sql.DB, q url.Values) int {
 	filter := obj()
-	for _, k := range []string{"order", "search", "parentID", "archived", "directory"} {
-		if v := q.Get(k); v != "" {
+	for _, k := range []string{"order", "search", "parentID", "archived", "directory", "project", "subpath"} {
+		if v := q.Get(k); v != "" && (k != "subpath" || q.Get("project") != "") {
 			filter.set(k, str(v))
 		}
 	}
+	if o := filter.text("order"); o != "" && o != "asc" && o != "desc" {
+		return r.invalidKind(`Expected "asc" | "desc", got "`+o+`"`+"\n  at [\"order\"]", "Query")
+	}
+	if a := filter.text("archived"); a != "" && a != "true" && a != "false" {
+		return r.invalidKind(`Expected "true" | "false", got "`+a+`"`+"\n  at [\"archived\"]", "Query")
+	}
 	var anchor *value
 	if c := q.Get("cursor"); c != "" {
-		b, err := base64.RawURLEncoding.DecodeString(c)
+		b, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(c, "="))
 		var dec *value
 		if err == nil {
 			dec, err = parseJSON(b)
 		}
 		if err != nil || !dec.isObj() || !dec.get("anchor").isObj() {
-			return r.invalid("Invalid cursor")
+			return r.invalidCursor("Invalid cursor")
 		}
 		anchor = dec.get("anchor")
 		dec.del("anchor")
@@ -266,8 +313,11 @@ func (r *run) sessionPage(db *sql.DB, q url.Values) int {
 	limit := 50
 	if l := q.Get("limit"); l != "" {
 		n, err := strconv.Atoi(l)
-		if err != nil || n <= 0 {
-			return r.invalid("Invalid limit")
+		if err != nil {
+			return r.invalidKind(`Expected a finite number, got "`+l+`"`+"\n  at [\"limit\"]", "Query")
+		}
+		if n <= 0 {
+			return r.invalidKind("Expected a value greater than 0\n  at [\"limit\"]", "Query")
 		}
 		limit = n
 	}
@@ -286,6 +336,12 @@ func (r *run) sessionPage(db *sql.DB, q url.Values) int {
 	var args []any
 	if v := filter.text("directory"); v != "" {
 		where, args = append(where, "directory = ?"), append(args, v)
+	}
+	if v := filter.text("project"); v != "" {
+		where, args = append(where, "project_id = ?"), append(args, v)
+		if sp := filter.get("subpath"); sp != nil {
+			where, args = append(where, "path = ?"), append(args, sp.s)
+		}
 	}
 	if v := filter.text("search"); v != "" {
 		where, args = append(where, "title LIKE ?"), append(args, "%"+v+"%")
@@ -341,7 +397,6 @@ func (r *run) sessionPage(db *sql.DB, q url.Values) int {
 	for _, s := range list {
 		out.vals = append(out.vals, s.info())
 	}
-	cursor := obj()
 	mark := func(s row, d string) *value {
 		c := filter.clone()
 		a := obj()
@@ -351,76 +406,115 @@ func (r *run) sessionPage(db *sql.DB, q url.Values) int {
 		c.set("anchor", a)
 		return str(base64.RawURLEncoding.EncodeToString(c.compact()))
 	}
-	if len(list) > 0 {
-		cursor.set("previous", mark(list[0], "previous"))
-		cursor.set("next", mark(list[len(list)-1], "next"))
-	}
 	v := obj()
 	v.set("data", out)
-	v.set("cursor", cursor)
+	if len(list) > 0 {
+		v.set("cursor", cursors(mark(list[0], "previous"), mark(list[len(list)-1], "next")))
+	} else {
+		v.set("cursor", cursors(nil, nil))
+	}
 	return r.ok(v)
 }
 
-// messagePage is GET /api/session/{id}/message: a session's messages as OpenCode reads
-// them (parts merged, unsettled ones too), newest first unless ?order=asc, paged by
-// cursor.
-func (r *run) messagePage(db *sql.DB, sid string, q url.Values) int {
-	if _, err := getRow(db, sid); err != nil {
-		return r.storeError(sid, err)
+// cursors is a page's cursor member: null where there is no page that way.
+func cursors(previous, next *value) *value {
+	c := obj()
+	for _, x := range []struct {
+		k string
+		v *value
+	}{{"previous", previous}, {"next", next}} {
+		if x.v == nil {
+			x.v = lit("null")
+		}
+		c.set(x.k, x.v)
 	}
-	msgs, err := messages(db, sid)
-	if err != nil {
-		return r.storeError(sid, err)
+	return c
+}
+
+// messagePage is GET /api/session/{id}/message (packages/server/src/handlers/message.ts):
+// a session's messages as OpenCode reads them (parts merged, unsettled ones too), newest
+// first unless ?order=asc, ?limit at a time (50 by default), ?type only, paged by cursor.
+// A cursor keeps its order and cannot be given one; a cursor naming a message the
+// session does not have reads as an empty page.
+func (r *run) messagePage(db *sql.DB, sid string, q url.Values) int {
+	if q.Get("cursor") != "" && q.Get("order") != "" {
+		return r.invalidCursor("Cursor cannot be combined with order")
 	}
 	order, direction, from := q.Get("order"), "next", ""
 	if c := q.Get("cursor"); c != "" {
-		b, err := base64.RawURLEncoding.DecodeString(c)
+		b, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(c, "="))
 		var dec *value
 		if err == nil {
 			dec, err = parseJSON(b)
 		}
-		if err != nil || !dec.isObj() {
-			return r.invalid("Invalid cursor")
+		if err != nil || !dec.isObj() || !strings.HasPrefix(dec.text("id"), "msg_") ||
+			(dec.text("order") != "asc" && dec.text("order") != "desc") ||
+			(dec.text("direction") != "previous" && dec.text("direction") != "next") {
+			return r.invalidCursor("Invalid cursor")
 		}
 		from, order, direction = dec.text("id"), dec.text("order"), dec.text("direction")
 	}
 	if order == "" {
 		order = "desc"
 	}
-	if order == "desc" {
+	if order != "asc" && order != "desc" {
+		return r.invalidKind(`Expected "asc" | "desc", got "`+order+`"`+"\n  at [\"order\"]", "Query")
+	}
+	limit := 50
+	if l := q.Get("limit"); l != "" {
+		n, err := strconv.Atoi(l)
+		if err != nil || n <= 0 {
+			return r.invalidKind("Expected a value greater than 0\n  at [\"limit\"]", "Query")
+		}
+		limit = n
+	}
+	if _, err := getRow(db, sid); err != nil {
+		return r.storeError(sid, err)
+	}
+	all, err := messages(db, sid)
+	if err != nil {
+		return r.storeError(sid, err)
+	}
+	// Positions in all stand for seq.
+	at := -1
+	if from != "" {
+		for i, m := range all {
+			if m.text("id") == from {
+				at = i
+			}
+		}
+	}
+	eff := order
+	if direction == "previous" {
+		eff = map[string]string{"asc": "desc", "desc": "asc"}[order]
+	}
+	var msgs []*value
+	if from == "" || at >= 0 {
+		for i := range all {
+			j := i
+			if eff == "desc" {
+				j = len(all) - 1 - i
+			}
+			m := all[j]
+			switch {
+			case at >= 0 && eff == "asc" && j <= at, at >= 0 && eff == "desc" && j >= at:
+				continue
+			case q.Get("type") != "" && m.text("type") != q.Get("type"):
+				continue
+			}
+			msgs = append(msgs, m)
+			if len(msgs) == limit {
+				break
+			}
+		}
+	}
+	if direction == "previous" {
 		for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 			msgs[i], msgs[j] = msgs[j], msgs[i]
 		}
 	}
-	if from != "" {
-		i := indexOf(msgs, from)
-		if i < 0 {
-			return r.invalid("Invalid cursor")
-		}
-		if direction == "previous" {
-			msgs = msgs[:i]
-		} else {
-			msgs = msgs[i+1:]
-		}
-	}
-	limit := len(msgs)
-	if l := q.Get("limit"); l != "" {
-		n, err := strconv.Atoi(l)
-		if err != nil || n <= 0 {
-			return r.invalid("Invalid limit")
-		}
-		limit = n
-	}
-	if len(msgs) > limit {
-		if direction == "previous" {
-			msgs = msgs[len(msgs)-limit:]
-		} else {
-			msgs = msgs[:limit]
-		}
-	}
 	out := arr()
 	out.vals = msgs
-	cursor := obj()
 	mark := func(id, d string) *value {
 		c := obj()
 		c.set("id", str(id))
@@ -428,13 +522,13 @@ func (r *run) messagePage(db *sql.DB, sid string, q url.Values) int {
 		c.set("direction", str(d))
 		return str(base64.RawURLEncoding.EncodeToString(c.compact()))
 	}
-	if len(msgs) > 0 {
-		cursor.set("previous", mark(msgs[0].text("id"), "previous"))
-		cursor.set("next", mark(msgs[len(msgs)-1].text("id"), "next"))
-	}
 	v := obj()
 	v.set("data", out)
-	v.set("cursor", cursor)
+	if len(msgs) > 0 {
+		v.set("cursor", cursors(mark(msgs[0].text("id"), "previous"), mark(msgs[len(msgs)-1].text("id"), "next")))
+	} else {
+		v.set("cursor", cursors(nil, nil))
+	}
 	return r.ok(v)
 }
 

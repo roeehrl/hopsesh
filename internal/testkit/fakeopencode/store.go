@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -23,8 +24,9 @@ var (
 	errNoFolder = errors.New("no such folder")
 )
 
-// badRequest is an input OpenCode's server refuses (HTTP 400), with its reason.
-type badRequest struct{ msg string }
+// badRequest is an input OpenCode's server refuses (HTTP 400), with its reason and what
+// failed to decode (Payload, Query, Params; "" when it is not a decoding error).
+type badRequest struct{ msg, kind string }
 
 func (e *badRequest) Error() string   { return e.msg }
 func (e *badRequest) Is(t error) bool { return t == errBadRequest }
@@ -135,12 +137,8 @@ func (r row) info() *value {
 	if r.title.Valid {
 		v.set("title", str(r.title.String))
 	}
-	loc := obj()
-	loc.set("directory", str(r.directory))
-	if r.workspaceID.Valid {
-		loc.set("workspaceID", str(r.workspaceID.String))
-	}
-	v.set("location", loc)
+	// OpenCode 2.3.0 prints location last, though its schema declares it before subpath
+	// (seen with subpath, metadata and permissions; revert is assumed to follow suit).
 	if r.path.Valid && r.path.String != "" {
 		v.set("subpath", str(r.path.String))
 	}
@@ -153,6 +151,12 @@ func (r row) info() *value {
 	if rv := jsonColumn(r.revert); rv != nil {
 		v.set("revert", rv)
 	}
+	loc := obj()
+	loc.set("directory", str(r.directory))
+	if r.workspaceID.Valid {
+		loc.set("workspaceID", str(r.workspaceID.String))
+	}
+	v.set("location", loc)
 	return v
 }
 
@@ -272,17 +276,18 @@ func Import(file string, transfer []byte, dir string, now time.Time) (string, er
 	if err != nil {
 		return "", err
 	}
-	return importDoc(db, doc, dir, now, Version)
+	return importDoc(db, doc, dir, now, Version, nil)
 }
 
 // importDoc is SessionTransfer.import (packages/core/src/session/transfer.ts): the id is
 // kept, the project, folder, slug and version come from here, settled messages are
 // numbered from 1, and it all happens in one transaction.
-func importDoc(db *sql.DB, doc *value, dir string, now time.Time, version string) (string, error) {
-	info, msgs, err := checkTransfer(doc)
+func importDoc(db *sql.DB, doc *value, dir string, now time.Time, version string, getenv lookup) (string, error) {
+	doc, _, err := decodeTransfer(doc)
 	if err != nil {
 		return "", err
 	}
+	info, msgs := doc.get("info"), doc.get("messages").vals
 	sid := info.text("id")
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return "", errNoFolder
@@ -303,7 +308,7 @@ func importDoc(db *sql.DB, doc *value, dir string, now time.Time, version string
 			return "", err
 		}
 	}
-	p := resolveProject(dir)
+	p := resolveProject(dir, getenv)
 	ms := now.UnixMilli()
 	if err := upsertProject(tx, p, ms); err != nil {
 		return "", err
@@ -390,78 +395,19 @@ func insertMessage(tx *sql.Tx, sid string, seq int, m *value) error {
 	return err
 }
 
+// subpath is path.relative(project folder, folder) as OpenCode computes it: the project
+// folder has its links resolved, the session's folder does not, so a folder reached
+// through a link (macOS's /var for /private/var too) can give "../…".
 func subpath(worktree, dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return ""
-	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = real
 	}
 	rel, err := filepath.Rel(filepath.FromSlash(worktree), abs)
 	if err != nil || rel == "." {
 		return ""
 	}
 	return filepath.ToSlash(rel)
-}
-
-// checkTransfer checks a transfer as OpenCode's schema does what hopsesh relies on: the
-// info's required members and each message's id, type and creation time.
-func checkTransfer(doc *value) (*value, []*value, error) {
-	bad := func(f string, a ...any) error { return &badRequest{fmt.Sprintf(f, a...)} }
-	info := doc.get("info")
-	if !info.isObj() {
-		return nil, nil, bad("info is missing")
-	}
-	if !strings.HasPrefix(info.text("id"), "ses") {
-		return nil, nil, bad("info.id is not a session id")
-	}
-	if info.get("projectID") == nil || info.get("projectID").kind != 's' {
-		return nil, nil, bad("info.projectID is missing")
-	}
-	if _, ok := info.number("cost"); !ok {
-		return nil, nil, bad("info.cost is missing")
-	}
-	tok := info.get("tokens")
-	for _, k := range []string{"input", "output", "reasoning"} {
-		if _, ok := tok.number(k); !ok {
-			return nil, nil, bad("info.tokens.%s is missing", k)
-		}
-	}
-	for _, k := range []string{"read", "write"} {
-		if _, ok := tok.get("cache").number(k); !ok {
-			return nil, nil, bad("info.tokens.cache.%s is missing", k)
-		}
-	}
-	for _, k := range []string{"created", "updated"} {
-		if _, ok := info.get("time").int(k); !ok {
-			return nil, nil, bad("info.time.%s is missing", k)
-		}
-	}
-	if info.get("location").text("directory") == "" {
-		return nil, nil, bad("info.location.directory is missing")
-	}
-	if m := info.get("model"); m != nil && (m.text("id") == "" || m.text("providerID") == "") {
-		return nil, nil, bad("info.model is not a model")
-	}
-	list := doc.get("messages")
-	if list == nil || list.kind != 'a' {
-		return nil, nil, bad("messages is missing")
-	}
-	for i, m := range list.vals {
-		switch {
-		case !m.isObj():
-			return nil, nil, bad("messages[%d] is not an object", i)
-		case !strings.HasPrefix(m.text("id"), "msg_"):
-			return nil, nil, bad("messages[%d].id is not a message id", i)
-		case !known(m.text("type")):
-			return nil, nil, bad("messages[%d].type %q is not a message type", i, m.text("type"))
-		}
-		if _, ok := m.get("time").int("created"); !ok {
-			return nil, nil, bad("messages[%d].time.created is missing", i)
-		}
-	}
-	return info, list.vals, nil
 }
 
 // descendants are a session's child sessions, theirs, and so on.
@@ -515,19 +461,35 @@ func remove(db *sql.DB, sid string) error {
 	return tx.Commit()
 }
 
-// update sets a session's title or metadata (PATCH /api/session/{id}).
+// update is PATCH /api/session/{id}: a title (an empty one asks a model for a title,
+// which the stand-in has not), metadata, permissions, and archiving. Other members are
+// ignored, as OpenCode's schema drops them.
 func update(db *sql.DB, sid string, body *value, now time.Time) error {
 	if _, err := getRow(db, sid); err != nil {
 		return err
 	}
+	ms := now.UnixMilli()
+	var perms *value
+	if p := body.get("permissions"); p != nil {
+		var err error
+		if perms, err = decodePermissions(p); err != nil {
+			return err
+		}
+	}
+	if a := body.get("archived"); a != nil && (a.kind != 'l' || (a.s != "true" && a.s != "false")) {
+		return &badRequest{"Expected boolean, got " + string(a.compact()) + "\n  at [\"archived\"]", "Payload"}
+	}
 	if t := body.get("title"); t != nil {
 		var title any
-		if t.kind == 's' {
+		switch {
+		case t.kind == 's' && t.s == "":
+			return errNoTitleModel
+		case t.kind == 's':
 			title = t.s
-		} else if t.s != "null" {
-			return &badRequest{"title is not a string"}
+		case t.s != "null":
+			return &badRequest{"Expected string, got " + string(t.compact()) + "\n  at [\"title\"]", "Payload"}
 		}
-		if _, err := db.Exec("UPDATE session_v2 SET title = ?, time_updated = ? WHERE id = ?", title, now.UnixMilli(), sid); err != nil {
+		if _, err := db.Exec("UPDATE session_v2 SET title = ?, time_updated = ? WHERE id = ?", title, ms, sid); err != nil {
 			return err
 		}
 	}
@@ -536,7 +498,24 @@ func update(db *sql.DB, sid string, body *value, now time.Time) error {
 		if m.isObj() {
 			meta = string(m.compact())
 		}
-		if _, err := db.Exec("UPDATE session_v2 SET metadata = ?, time_updated = ? WHERE id = ?", meta, now.UnixMilli(), sid); err != nil {
+		if _, err := db.Exec("UPDATE session_v2 SET metadata = ?, time_updated = ? WHERE id = ?", meta, ms, sid); err != nil {
+			return err
+		}
+	}
+	if perms != nil {
+		if _, err := db.Exec("UPDATE session_v2 SET permission = ?, time_updated = ? WHERE id = ?", string(perms.compact()), ms, sid); err != nil {
+			return err
+		}
+	}
+	if a := body.get("archived"); a != nil {
+		// Archiving an archived session (or restoring one that is not) changes nothing.
+		q := "UPDATE session_v2 SET time_archived = ?, time_updated = ? WHERE id = ? AND time_archived IS NULL"
+		args := []any{ms, ms, sid}
+		if a.s == "false" {
+			q = "UPDATE session_v2 SET time_archived = NULL, time_updated = ? WHERE id = ? AND time_archived IS NOT NULL"
+			args = []any{ms, sid}
+		}
+		if _, err := db.Exec(q, args...); err != nil {
 			return err
 		}
 	}
@@ -552,13 +531,11 @@ func appendMessage(tx *sql.Tx, sid string, m *value) error {
 	return insertMessage(tx, sid, seq+1, m)
 }
 
-// move changes a session's folder (POST /api/session/{id}/move). OpenCode queues the
-// move and applies it at the next step boundary; the stand-in applies it at once, with
-// the location-switched message OpenCode writes then.
-func move(db *sql.DB, sid, dir string, now time.Time) error {
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		return &badRequest{"Directory does not exist: " + dir}
-	}
+// move changes a session's folder (POST /api/session/{id}/move): a relative folder is
+// taken from the session's, "~" from the home folder. OpenCode queues the move and applies
+// it at the next step boundary; the stand-in applies it at once, with the
+// location-switched message OpenCode writes then.
+func move(db *sql.DB, sid, dir, home string, getenv lookup, now time.Time) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -568,7 +545,23 @@ func move(db *sql.DB, sid, dir string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	p := resolveProject(dir)
+	dir = strings.TrimSpace(dir)
+	switch {
+	case dir == "~":
+		dir = home
+	case strings.HasPrefix(dir, "~/"):
+		dir = filepath.Join(home, dir[2:])
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(filepath.FromSlash(r.directory), dir)
+	}
+	dir = filepath.Clean(dir)
+	if fi, err := os.Stat(dir); err != nil {
+		return &badRequest{msg: "Directory does not exist: " + dir}
+	} else if !fi.IsDir() {
+		return &badRequest{msg: "Not a directory: " + dir}
+	}
+	p := resolveProject(dir, getenv)
 	ms := now.UnixMilli()
 	if err := upsertProject(tx, p, ms); err != nil {
 		return err
@@ -601,9 +594,38 @@ func move(db *sql.DB, sid, dir string, now time.Time) error {
 	return tx.Commit()
 }
 
-// fork copies a session (POST /api/session/{id}/fork): its messages before the message
-// `before`, else all of them, under new ids (<a new message id>_<n>), titled
-// "<title> (fork #<n>)".
+// forkTitle is a fork's title (packages/core/src/session/projector.ts): "<title> (fork
+// #1)", a fork of a fork counting on, and none for an untitled session.
+var forkSuffix = regexp.MustCompile(`^(.+) \(fork #(\d+)\)$`)
+
+func forkTitle(t sql.NullString) any {
+	if !t.Valid {
+		return nil
+	}
+	if m := forkSuffix.FindStringSubmatch(t.String); m != nil {
+		n, _ := strconv.Atoi(m[2])
+		return m[1] + " (fork #" + strconv.Itoa(n+1) + ")"
+	}
+	return t.String + " (fork #1)"
+}
+
+// errMessageNotFound is a fork's `before` that is not one of the session's messages.
+type errMessageNotFound struct{ sid, mid string }
+
+func (e *errMessageNotFound) Error() string { return "Message not found: " + e.mid }
+
+// errForkEmpty is a fork of a session without messages.
+var errForkEmpty = errors.New("cannot fork an empty session")
+
+// errNoTitleModel is a PATCH with an empty title, which OpenCode answers by asking a
+// model for one.
+var errNoTitleModel = errors.New("the OpenCode stand-in has no model to generate a title with")
+
+// fork copies a session (POST /api/session/{id}/fork), as Session.fork and the projector
+// do: the boundary is the message `before`, else the last message of any kind; the copy
+// holds the settled messages up to it (before it, for `before`), each with the parent's
+// seq and the id <one new message id>_<seq>, their part rows, and the parent's folder,
+// agent, model, metadata and permissions.
 func fork(db *sql.DB, sid, before string, now time.Time) (string, error) {
 	tx, err := db.Begin()
 	if err != nil {
@@ -614,70 +636,102 @@ func fork(db *sql.DB, sid, before string, now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	msgs, err := messages(tx, sid)
-	if err != nil {
-		return "", err
+	var bound struct {
+		id  string
+		seq int64
 	}
-	var settledMsgs []*value
-	for _, m := range msgs {
-		if settled(m) {
-			settledMsgs = append(settledMsgs, m)
-		}
+	q, args := "SELECT id, seq FROM session_message WHERE session_id = ? ORDER BY seq DESC LIMIT 1", []any{sid}
+	if before != "" {
+		q, args = "SELECT id, seq FROM session_message WHERE session_id = ? AND id = ?", []any{sid, before}
+	}
+	switch err := tx.QueryRow(q, args...).Scan(&bound.id, &bound.seq); {
+	case errors.Is(err, sql.ErrNoRows) && before != "":
+		return "", &errMessageNotFound{sid, before}
+	case errors.Is(err, sql.ErrNoRows):
+		return "", errForkEmpty
+	case err != nil:
+		return "", err
 	}
 	boundary := obj()
-	switch {
-	case before != "":
-		i := indexOf(settledMsgs, before)
-		if i < 0 {
-			return "", &badRequest{"Message not found: " + before}
-		}
-		settledMsgs = settledMsgs[:i]
+	if before != "" {
 		boundary.set("type", str("before"))
-		boundary.set("messageID", str(before))
-	case len(settledMsgs) > 0:
+	} else {
 		boundary.set("type", str("through"))
-		boundary.set("messageID", str(settledMsgs[len(settledMsgs)-1].text("id")))
-	default:
-		return "", &badRequest{"Session has no messages to fork"}
 	}
-	var n int
-	if err := tx.QueryRow("SELECT count(*) FROM session_v2 WHERE fork_session_id = ?", sid).Scan(&n); err != nil {
-		return "", err
-	}
-	title := r.title.String
-	if title == "" {
-		title = "Untitled"
+	boundary.set("messageID", str(bound.id))
+	last := bound.seq
+	if before != "" {
+		last--
 	}
 	id := newID("ses_", true, now)
 	ms := now.UnixMilli()
 	_, err = tx.Exec(`INSERT INTO session_v2 (id, project_id, workspace_id, fork_session_id, fork_boundary, slug, directory, path, title,
-		version, agent, model, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, r.projectID, r.workspaceID, sid, string(boundary.compact()), slug(), r.directory, r.path, title+" (fork #"+strconv.Itoa(n+1)+")",
-		r.version, r.agent, r.model, ms, ms)
+		version, agent, model, metadata, permission, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, r.projectID, r.workspaceID, sid, string(boundary.compact()), slug(), r.directory, r.path, forkTitle(r.title),
+		r.version, r.agent, r.model, r.metadata, r.permission, ms, ms)
 	if err != nil {
 		return "", err
 	}
 	base := newID("msg_", false, now)
-	for i, m := range settledMsgs {
-		c := m.clone()
-		c.set("id", str(base+"_"+strconv.Itoa(i+1)))
-		if err := insertMessage(tx, id, i+1, c); err != nil {
+	forked := func(seq int64) string { return base + "_" + strconv.FormatInt(seq, 10) }
+	rows, err := tx.Query(`SELECT id, type, seq, time_created, time_updated, data FROM session_message WHERE session_id = ? AND seq <= ?
+		AND (type != 'assistant' OR json_extract(data, '$.time.completed') IS NOT NULL)
+		AND (type != 'shell' OR json_extract(data, '$.status') != 'running')
+		AND (type != 'compaction' OR json_extract(data, '$.status') != 'running') ORDER BY seq`, sid, last)
+	if err != nil {
+		return "", err
+	}
+	type stored struct {
+		id, typ, data    string
+		seq, at, updated int64
+	}
+	var copied []stored
+	for rows.Next() {
+		var s stored
+		if err := rows.Scan(&s.id, &s.typ, &s.seq, &s.at, &s.updated, &s.data); err != nil {
+			rows.Close()
+			return "", err
+		}
+		copied = append(copied, s)
+	}
+	rows.Close()
+	seqOf := map[string]int64{}
+	for _, s := range copied {
+		seqOf[s.id] = s.seq
+	}
+	for _, s := range copied {
+		data := s.data
+		// A summary names the first message it kept, which the fork copies under a new id.
+		if s.typ == "compaction" {
+			if v, err := parseJSON([]byte(data)); err == nil {
+				if kept, ok := seqOf[v.get("metadata").text("keepID")]; ok {
+					v.get("metadata").set("keepID", str(forked(kept)))
+					data = string(v.compact())
+				}
+			}
+		}
+		if _, err := tx.Exec("INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			forked(s.seq), id, s.typ, s.seq, s.at, s.updated, data); err != nil {
+			return "", err
+		}
+		if s.typ == "assistant" {
+			if _, err := tx.Exec(`INSERT INTO session_part (message_id, session_id, ordinal, type, call_id, time_created, time_updated, data)
+				SELECT ?, ?, ordinal, type, call_id, time_created, time_updated, data FROM session_part WHERE session_id = ? AND message_id = ?`,
+				forked(s.seq), id, sid, s.id); err != nil {
+				return "", err
+			}
+		}
+	}
+	var top sql.NullInt64
+	if err := tx.QueryRow("SELECT max(seq) FROM session_message WHERE session_id = ? AND seq <= ?", sid, last).Scan(&top); err != nil {
+		return "", err
+	}
+	if top.Valid {
+		if _, err := tx.Exec("INSERT INTO event_sequence (aggregate_id, seq) VALUES (?, ?) ON CONFLICT(aggregate_id) DO UPDATE SET seq = max(seq, excluded.seq)", id, top.Int64); err != nil {
 			return "", err
 		}
 	}
-	if _, err := tx.Exec("INSERT INTO event_sequence (aggregate_id, seq) VALUES (?, ?)", id, len(settledMsgs)+1); err != nil {
-		return "", err
-	}
 	return id, tx.Commit()
-}
-
-func indexOf(msgs []*value, id string) int {
-	for i, m := range msgs {
-		if m.text("id") == id {
-			return i
-		}
-	}
-	return -1
 }
 
 // interrupt ends a running turn: the stand-in's turns are the sessions it lists as

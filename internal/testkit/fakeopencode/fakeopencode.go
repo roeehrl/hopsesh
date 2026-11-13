@@ -12,12 +12,15 @@
 // $FAKE_AGENT_LOG ("opencode: started the background service"), so a test can check that
 // hopsesh never starts it.
 //
+// An import decodes the transfer with OpenCode's schemas (decode.go): a wrong shape is a
+// Bad Request, and members the schemas do not declare are dropped.
+//
 // Every call is appended to $FAKE_AGENT_LOG as "opencode <args>". Other variables:
 // $FAKE_OPENCODE_VERSION (the program's version, default 2.3.0),
 // $FAKE_OPENCODE_SERVICE_VERSION (the running service's, default the program's),
-// $FAKE_OPENCODE_ACTIVE (session ids with a turn running, comma-separated, besides those
-// in its state folder), and $FAKE_OPENCODE_AUTH (what `auth list --format json` prints,
-// default []).
+// $FAKE_OPENCODE_ACTIVE (session ids with a turn running in the background service,
+// comma-separated; their rows claim the turn, and a private server lists none), and
+// $FAKE_OPENCODE_AUTH (what `auth list --format json` prints, default []).
 package fakeopencode
 
 import (
@@ -115,7 +118,7 @@ func Main(p Proc) int {
 			return r.authList()
 		}
 	case "run", "mini":
-		return r.tui(args)
+		return r.runPrompt()
 	default:
 		if !strings.HasPrefix(args[0], "-") && len(args) == 1 {
 			return r.tui(args) // opencode <dir>
@@ -193,8 +196,25 @@ func (r *run) binVersion() string {
 }
 
 // tui plays opening a session in the terminal: OpenCode's TUI needs a model, so the
-// stand-in only says what it would open.
+// stand-in only says what it would open. The TUI talks to the background service: it
+// starts it, or replaces a running one of another version (as 2.3.0 does), and the
+// stand-in logs either.
 func (r *run) tui(args []string) int {
+	if running := r.serviceURL() != ""; running {
+		if v := r.getenv("FAKE_OPENCODE_SERVICE_VERSION"); v != "" && v != r.binVersion() {
+			r.log("opencode: replaced the background service " + v + " with " + r.binVersion())
+		}
+	} else {
+		r.server()
+	}
+	if r.resume != "" {
+		fmt.Fprintf(r.Stdout, "opencode (stand-in): would open %s\n", r.resume)
+	}
+	return 0
+}
+
+// runPrompt plays `opencode run` and `mini`, which need a model: it says so and exits 0.
+func (r *run) runPrompt() int {
 	if r.resume != "" {
 		fmt.Fprintf(r.Stdout, "opencode (stand-in): would open %s\n", r.resume)
 	}
@@ -223,8 +243,9 @@ func (r *run) paths() paths {
 	}
 	p := paths{home: home, data: root("XDG_DATA_HOME", ".local", "share"), cache: root("XDG_CACHE_HOME", ".cache"),
 		config: root("XDG_CONFIG_HOME", ".config"), state: root("XDG_STATE_HOME", ".local", "state")}
-	// OPENCODE_CONFIG_DIR replaces the config folder when it is set, even empty (`??`).
-	if v, ok := r.env("OPENCODE_CONFIG_DIR"); ok {
+	// OPENCODE_CONFIG_DIR replaces the config folder when it is not empty (the CLI and
+	// server test it for truth: packages/cli/src/index.ts, server-process.ts).
+	if v := r.getenv("OPENCODE_CONFIG_DIR"); v != "" {
 		p.config = v
 	}
 	// OPENCODE_DB names the database, relative to the data folder, when it is set, even
@@ -242,7 +263,7 @@ func (r *run) paths() paths {
 
 func (r *run) debugPaths(args []string) int {
 	p := r.paths()
-	tmp := filepath.Join(os.TempDir(), "opencode")
+	tmp := filepath.Join(tempDir(), "opencode")
 	rows := [][2]string{{"home", p.home}, {"data", p.data}, {"cache", p.cache}, {"config", p.config}, {"state", p.state},
 		{"tmp", tmp}, {"bin", filepath.Join(p.cache, "bin")}, {"log", filepath.Join(p.data, "log")},
 		{"repos", filepath.Join(p.data, "repos")}, {"db", p.db}}
@@ -331,4 +352,14 @@ func (r *run) workdir() string {
 	}
 	d, _ := os.Getwd()
 	return d
+}
+
+// tempDir is the temporary folder with its links resolved, as OpenCode reports it
+// (macOS's /var/folders is /private/var/folders).
+func tempDir() string {
+	t := strings.TrimRight(os.TempDir(), "/\\")
+	if real, err := filepath.EvalSymlinks(t); err == nil {
+		return real
+	}
+	return t
 }

@@ -1,8 +1,8 @@
 package fakeopencode
 
 // OpenCode 2.3.0's message schemas (packages/schema/src/session-message.ts), as the order
-// in which it prints their members. Members the stand-in does not know stay after the
-// known ones, as they were (OpenCode itself drops them).
+// in which it prints their members. An import drops the members they do not declare
+// (decode.go); rows written some other way keep theirs, after the known ones.
 
 // messageKeys are each message type's members. Base is id, metadata, time; a type that
 // declares time again keeps it in Base's place.
@@ -25,12 +25,6 @@ var compactionKeys = map[string][]string{
 	"running":   {"type", "id", "metadata", "time", "status", "reason", "summary"},
 	"completed": {"type", "id", "metadata", "time", "status", "reason", "model", "native", "summary", "cost", "tokens"},
 	"failed":    {"type", "id", "metadata", "time", "status", "reason", "error", "cost", "tokens"},
-}
-
-// known reports whether OpenCode 2.3.0 has messages of type t.
-func known(t string) bool {
-	_, ok := messageKeys[t]
-	return ok || t == "compaction"
 }
 
 // orderMessage puts a message's members, and theirs, in the schema's order.

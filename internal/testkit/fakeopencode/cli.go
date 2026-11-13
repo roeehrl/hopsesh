@@ -82,7 +82,7 @@ func (r *run) importFile(db *sql.DB, args []string) int {
 	} else if !filepath.IsAbs(dir) {
 		dir = filepath.Join(r.workdir(), dir)
 	}
-	sid, err := importDoc(db, doc, dir, r.now(), r.serverVersion())
+	sid, err := importDoc(db, doc, dir, r.now(), r.serverVersion(), r.env)
 	switch {
 	case errors.Is(err, errExists):
 		fmt.Fprintln(r.Stderr, "Session already exists")
@@ -105,7 +105,7 @@ func (r *run) importFile(db *sql.DB, args []string) int {
 // list plays `session list`: the top-level sessions of the working folder's project,
 // newest first, as a table (id, title, time) or JSON.
 func (r *run) list(db *sql.DB) int {
-	p := resolveProject(r.workdir())
+	p := resolveProject(r.workdir(), r.env)
 	limit := r.maxCount
 	if limit <= 0 {
 		limit = 100

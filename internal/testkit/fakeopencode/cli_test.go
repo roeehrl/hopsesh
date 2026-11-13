@@ -85,8 +85,8 @@ func TestVersion(t *testing.T) {
 	}
 }
 
-// The folders follow OpenCode's rules: an empty XDG variable is as unset, an empty
-// OPENCODE_DB is set (the data folder itself, which no database opens).
+// The folders follow OpenCode's rules: an empty XDG variable or OPENCODE_CONFIG_DIR is as
+// unset, an empty OPENCODE_DB is set (the data folder itself, which no database opens).
 func TestPaths(t *testing.T) {
 	m := newMachine(t)
 	m.env["XDG_DATA_HOME"] = ""
@@ -104,6 +104,11 @@ func TestPaths(t *testing.T) {
 	m.env["OPENCODE_DB"] = ""
 	if r := m.run("session", "list", "--standalone"); r.code == 0 || !strings.Contains(r.stderr, "is a folder") {
 		t.Errorf("an empty OPENCODE_DB: %+v", r)
+	}
+	// OPENCODE_CONFIG_DIR counts only when it is not empty.
+	m.env["OPENCODE_CONFIG_DIR"] = ""
+	if got, want := strings.TrimSpace(m.must("debug", "paths", "config")), filepath.Join(m.home, ".config", "opencode"); got != want {
+		t.Errorf("config %s with an empty OPENCODE_CONFIG_DIR, want %s", got, want)
 	}
 }
 
@@ -253,20 +258,29 @@ func TestAPI(t *testing.T) {
 	if !strings.Contains(exp, `"type": "location-switched"`) || !strings.Contains(exp, `"directory": "`+other+`"`) {
 		t.Errorf("after the move: %s", exp)
 	}
-	// Interrupt ends only a running turn.
+	// Interrupt ends only a running turn, which only the background service runs; the
+	// row claims the turn while it runs.
 	if got := m.must("api", "--standalone", "POST", "/api/session/"+sid+"/interrupt"); got != "{\"interrupted\":false}\n" {
 		t.Errorf("an idle session: %s", got)
 	}
 	m.env["FAKE_OPENCODE_ACTIVE"] = sid
-	if got := m.must("api", "--standalone", "GET", "/api/session/active"); got != `{"data":{"`+sid+`":{"type":"running"}}}`+"\n" {
+	if got := m.must("api", "--standalone", "GET", "/api/session/active"); got != "{\"data\":{}}\n" {
+		t.Errorf("a private server's active turns: %s", got)
+	}
+	if got := m.must("api", "--standalone", "GET", "/api/session/"+sid); !strings.Contains(got, `"busy":`) {
+		t.Errorf("a running session's row claims no turn: %s", got)
+	}
+	m.env["FAKE_OPENCODE_SERVICE"] = "running"
+	if got := m.must("api", "GET", "/api/session/active"); got != `{"data":{"`+sid+`":{"type":"running"}}}`+"\n" {
 		t.Errorf("active: %s", got)
 	}
-	if got := m.must("api", "--standalone", "POST", "/api/session/"+sid+"/interrupt"); got != "{\"interrupted\":true}\n" {
+	if got := m.must("api", "POST", "/api/session/"+sid+"/interrupt"); got != "{\"interrupted\":true}\n" {
 		t.Errorf("a running session: %s", got)
 	}
-	if got := m.must("api", "--standalone", "GET", "/api/session/active"); got != "{\"data\":{}}\n" {
+	if got := m.must("api", "GET", "/api/session/active"); got != "{\"data\":{}}\n" {
 		t.Errorf("active after the interrupt: %s", got)
 	}
+	delete(m.env, "FAKE_OPENCODE_SERVICE")
 	if r := m.run("api", "--standalone", "DELETE", "/api/session/"+sid); r.code != 0 || r.stdout != "" {
 		t.Errorf("delete: %+v", r)
 	}

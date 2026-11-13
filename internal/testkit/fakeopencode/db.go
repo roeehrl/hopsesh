@@ -34,7 +34,29 @@ func (r *run) open() (*sql.DB, error) {
 	if err := os.MkdirAll(p.data, 0o700); err != nil {
 		return nil, err
 	}
-	return Open(p.db)
+	db, err := Open(p.db)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.markTurns(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+// markTurns makes the rows of the sessions with a turn running say so, as the service's
+// rows do while it runs one: the execution claim (time_suspended) and a time_busy after
+// the last idle.
+func (r *run) markTurns(db *sql.DB) error {
+	ms := r.now().UnixMilli()
+	for _, id := range r.turns() {
+		if _, err := db.Exec(`UPDATE session_v2 SET time_suspended = coalesce(time_suspended, ?),
+			time_busy = CASE WHEN time_busy IS NULL OR time_busy <= coalesce(time_idle, 0) THEN ? ELSE time_busy END WHERE id = ?`, ms, ms, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Open opens (or makes) an OpenCode 2.3.0 database at file.
@@ -117,13 +139,40 @@ func slug() string {
 }
 
 // project is the project OpenCode files a folder under (packages/core/src/project.ts):
-// in a git repository, the hash of its origin's host and path, else its first root
-// commit, else "global"; outside one, the hash of the folder.
+// in a git repository, the hash of its origin's host and path, else the id cached in
+// <git common folder>/opencode, else its first root commit, else "global"; outside one,
+// the hash of the folder.
 type project struct {
 	id, worktree, vcs string
 }
 
-func resolveProject(dir string) project {
+// lookup reads an environment variable (nil: the process's).
+type lookup func(string) (string, bool)
+
+// gitEnv is the environment git runs with: the process's, with what the stand-in's
+// environment says of the variables git reads.
+func gitEnv(getenv lookup) []string {
+	if getenv == nil {
+		return nil
+	}
+	env := os.Environ()
+	for _, k := range []string{"HOME", "USERPROFILE", "PATH", "XDG_CONFIG_HOME", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
+		"GIT_CEILING_DIRECTORIES", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"} {
+		kept := env[:0]
+		for _, e := range env {
+			if !strings.HasPrefix(e, k+"=") {
+				kept = append(kept, e)
+			}
+		}
+		env = kept
+		if v, ok := getenv(k); ok {
+			env = append(env, k+"="+v)
+		}
+	}
+	return env
+}
+
+func resolveProject(dir string, getenv lookup) project {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
@@ -131,8 +180,10 @@ func resolveProject(dir string) project {
 	if real, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = real
 	}
+	env := gitEnv(getenv)
 	git := func(args ...string) string {
 		cmd := exec.Command("git", append([]string{"-C", abs}, args...)...)
+		cmd.Env = env
 		out, err := cmd.Output()
 		if err != nil {
 			return ""
@@ -147,6 +198,15 @@ func resolveProject(dir string) project {
 	if n := remotePath(git("remote", "get-url", "origin")); n != "" {
 		p.id = hash("git-remote:" + n)
 		return p
+	}
+	// An id OpenCode cached in the repository's common git folder comes next.
+	if common := git("rev-parse", "--path-format=absolute", "--git-common-dir"); common != "" {
+		if b, err := os.ReadFile(filepath.Join(common, "opencode")); err == nil {
+			if id := strings.TrimSpace(string(b)); id != "" {
+				p.id = id
+				return p
+			}
+		}
 	}
 	if roots := strings.Fields(git("rev-list", "--max-parents=0", "HEAD")); len(roots) > 0 {
 		sort.Strings(roots)
