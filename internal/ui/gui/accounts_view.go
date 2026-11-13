@@ -160,7 +160,8 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 	}
 	v := newPeople()
 	mods := accountModules(core)
-	for _, mod := range mods {
+	// Plans are named for every agent: a disabled one's accounts still read "Claude Max".
+	for _, mod := range core.Reg.All() {
 		v.plans[mod.Spec().ID] = mod.Spec().Plans
 	}
 	// Accounts with an email: whoever any tool on any machine is signed in as.

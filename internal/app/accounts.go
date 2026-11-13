@@ -645,10 +645,10 @@ func accountProbeVisibility(m *host.Machine, account agent.Account, err error) e
 	return err
 }
 
-// accountAgents names the enabled agents that have account folders ("Claude Code and Codex").
+// accountAgents names the agents that have account folders ("Claude Code and Codex").
 func (a *App) accountAgents() string {
 	var names []string
-	for _, m := range a.Modules() {
+	for _, m := range a.Reg.All() {
 		if m.Spec().Accounts != nil {
 			names = append(names, m.Spec().Name)
 		}

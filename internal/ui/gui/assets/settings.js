@@ -437,7 +437,7 @@ screen("settings", async (which, pick) => {
 });
 
 // agentNames name the agents on machines, for sentences.
-const agentNames = () => localAgents().map((a) => a.name);
+const agentNames = () => localAgents(true).map((a) => a.name);
 const agentName = (id) => agentInfo(id)?.name || id;
 
 // hookName is the agent's name, with the account only when the agent has several here.

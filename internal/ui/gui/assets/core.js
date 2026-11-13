@@ -350,8 +350,9 @@ export const agentInfo = (id) => (state.info?.agents || []).find((a) => a.id ===
 export const agentShort = (id, fallback) => agentInfo(id)?.short || fallback || id;
 // agentHas reports whether an agent's module has a capability ("read", "write").
 export const agentHas = (id, cap) => !!agentInfo(id)?.capabilities?.includes(cap);
-// localAgents are the enabled agents that keep sessions on machines, in display order.
-export const localAgents = () => (state.info?.agents || []).filter((a) => a.local && a.enabled !== false);
+// localAgents are the enabled agents that keep sessions on machines, in display order;
+// with all, the disabled ones too (for sentences about every agent hopsesh knows).
+export const localAgents = (all = false) => (state.info?.agents || []).filter((a) => a.local && (all || a.enabled !== false));
 // appPlace is the place an agent's desktop app is ("claude-app"); isAppPlace tells one.
 export const appPlace = (id) => id + "-app";
 export const isAppPlace = (kind) => typeof kind === "string" && kind.length > 4 && kind.endsWith("-app");

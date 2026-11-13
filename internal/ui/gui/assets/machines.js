@@ -180,7 +180,7 @@ function setupDialog(m) {
   const plan = h("li", { class: "muted", role: "status" }, `Checking which hopsesh ${m.name} has…`);
   api("PlanUpdate", m.name).then((p) => {
     const items = p.steps.map((s) => h("li", { "data-step": s.do }, s.text, s.command ? [": ", h("span", { class: "mono" }, s.command)] : null));
-    if (p.ends) items.push(h("li", { class: "warn" }, `Restarts hopsesh in the login session there, which ends the ${p.ends === 1 ? "terminal" : p.ends + " terminals"} it runs there. ${words(localAgents().map((a) => a.name))} keep each conversation up to its last finished turn.`));
+    if (p.ends) items.push(h("li", { class: "warn" }, `Restarts hopsesh in the login session there, which ends the ${p.ends === 1 ? "terminal" : p.ends + " terminals"} it runs there. ${words(localAgents(true).map((a) => a.name))} keep each conversation up to its last finished turn.`));
     plan.replaceWith(...(items.length ? items : [h("li", {}, `Every hopsesh on ${m.name} is ${p.version} or newer already.`)]));
   }).catch(() => fill(plan, `Copies this hopsesh (${state.info?.version || "this version"}) to `, h("span", { class: "mono" }, "~/.hopsesh/bin"), ` on ${m.name} over SSH, or updates the ones there.`));
   const start = async () => {
@@ -672,7 +672,7 @@ function machineDetail(r, d, extras = {}) {
 const remote = new Map(); // machine ("" here) → { data, err, busy }
 function remoteSection(machine, where) {
   // The agents whose remote control hopsesh can turn on ("Claude Code").
-  const rc = words(localAgents().filter((a) => a.capabilities?.includes("remote-control")).map((a) => a.name), " or ");
+  const rc = words(localAgents(true).filter((a) => a.capabilities?.includes("remote-control")).map((a) => a.name), " or ") || "agent";
   const r = remote.get(machine);
   if (!r) {
     remote.set(machine, { busy: true });

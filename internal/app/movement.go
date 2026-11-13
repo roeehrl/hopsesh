@@ -310,7 +310,8 @@ func (a *App) publishMovement(inv *Inventory, e *Entry) {
 }
 
 func (a *App) agentName(id agent.ID) string {
-	if m, ok := a.Module(id); ok {
+	// Any compiled-in agent, enabled or not: a disabled one is still named.
+	if m, ok := a.Reg.Get(id); ok {
 		return m.Spec().Name
 	}
 	return string(id)
