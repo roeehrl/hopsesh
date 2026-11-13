@@ -54,8 +54,11 @@ func (c *confined) Exec() Exec        { return confinedExec{c} }
 // SQL is the Host's reader limited to the Spec's tables, or nil when the Host has none or
 // the Spec names no tables.
 func (c *confined) SQL() SQL {
+	if len(c.spec.SQLTables) == 0 {
+		return nil // asked before the Host, which may have to probe its machine
+	}
 	inner, ok := HostSQL(c.h)
-	if !ok || len(c.spec.SQLTables) == 0 {
+	if !ok {
 		return nil
 	}
 	if l, ok := inner.(SQLTableLimiter); ok {

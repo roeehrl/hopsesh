@@ -59,6 +59,10 @@ type Machine struct {
 	fs   FS
 	rfs  *transport.RemoteFS
 	snap *memFS // a snapshot another machine's hopsesh sent (NewSnapshot)
+
+	sqlMu   sync.Mutex
+	sqlTier string     // the remote SQL tier, once probed (sql_remote.go)
+	sqlExec agent.Exec // stands in for SSH in tests of the remote SQL tiers
 }
 
 // FS returns the machine's filesystem (opening SFTP on first use for a remote machine).
@@ -210,6 +214,10 @@ func (h *moduleHost) Exec() agent.Exec   { return profileExec{h.m.Exec(), h.inst
 func (h *moduleHost) Path() agent.Path   { return h.m.Path() }
 func (h *moduleHost) Locks() agent.Locks { return h.m.Locks() }
 func (h *moduleHost) Procs() agent.Procs { return h.m.Procs() }
+
+// SQL makes the module's host an agent.SQLHost: the machine's database reader, which
+// agent.Confine limits to the module's tables. A snapshot has none.
+func (h *moduleHost) SQL() agent.SQL { return h.m.SQL() }
 func (h *moduleHost) Log() *slog.Logger {
 	if h.m.Log != nil {
 		return h.m.Log
@@ -317,3 +325,10 @@ func (m *Machine) RemoteFS() (*transport.RemoteFS, bool) {
 	defer m.mu.Unlock()
 	return m.rfs, m.rfs != nil
 }
+
+// FilesOnly is h without its database reader: a module reads a session from its files
+// (the Reader's file mode), as a receiver without the agent's database does. The core uses
+// it for files it staged.
+func FilesOnly(h agent.Host) agent.Host { return filesOnly{h} }
+
+type filesOnly struct{ agent.Host }
