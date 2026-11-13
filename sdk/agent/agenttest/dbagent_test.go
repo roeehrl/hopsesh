@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -119,6 +120,27 @@ func (m *dbAgent) records(ctx context.Context, h agent.Host, in agent.Install, i
 	return info, msgs, nil
 }
 
+func recordsOf(h agent.Host, file string) (record, []record, error) {
+	b, err := h.FS().ReadFile(file, 1<<20)
+	if err != nil {
+		return record{}, nil, err
+	}
+	var info record
+	var msgs []record
+	for i, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var r record
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			return record{}, nil, err
+		}
+		if i == 0 {
+			info = r
+		} else {
+			msgs = append(msgs, r)
+		}
+	}
+	return info, msgs, nil
+}
+
 func jsonl(info record, msgs []record) []byte {
 	var b bytes.Buffer
 	for _, r := range append([]record{info}, msgs...) {
@@ -152,16 +174,36 @@ func (*dbAgent) Resume(_ agent.Install, key agent.SessionKey, p agent.Placement,
 	return agent.Command{Argv: []string{"dbagent", "-s", string(key.Session)}, Dir: p.CWD}
 }
 
-// AfterInstall is the install: the agent imports the staged file.
+// AfterInstall is the install: the agent imports the staged file, and only its own
+// report that it did counts.
 func (*dbAgent) AfterInstall(ctx context.Context, h agent.Host, in agent.Install, key agent.SessionKey, _ agent.Placement) error {
-	_, err := h.Exec().Run(ctx, []string{"dbagent", "import", h.Path().Join(in.Main(), anchorRel(key.Session))}, agent.RunOptions{})
-	return err
+	return importFile(ctx, h, h.Path().Join(in.Main(), anchorRel(key.Session)))
+}
+
+func importFile(ctx context.Context, h agent.Host, file string) error {
+	res, err := h.Exec().Run(ctx, []string{"dbagent", "import", file}, agent.RunOptions{})
+	if err != nil {
+		return err
+	}
+	if res.Code != 0 || !strings.HasPrefix(string(res.Stdout), "Imported session: ") {
+		return fmt.Errorf("dbagent import %s: exit %d: %s", file, res.Code, strings.TrimSpace(string(res.Stderr)))
+	}
+	return nil
 }
 
 func (*dbAgent) InstallsViaVendor() bool { return true }
 
+// Read reads the database, or, on a host without it (a peer's snapshot), the session's
+// file at its anchor: the JSON lines Materialize makes.
 func (m *dbAgent) Read(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, from ir.Cursor) (ir.Segment, error) {
-	info, msgs, err := m.records(ctx, h, in, s.Key.Session)
+	var info record
+	var msgs []record
+	var err error
+	if _, ok := agent.HostSQL(h); ok {
+		info, msgs, err = m.records(ctx, h, in, s.Key.Session)
+	} else {
+		info, msgs, err = recordsOf(h, s.Path)
+	}
 	if err != nil {
 		return ir.Segment{}, err
 	}
@@ -232,7 +274,7 @@ func (m *dbAgent) SessionStamp(ctx context.Context, h agent.Host, in agent.Insta
 	if len(r.Rows) == 0 {
 		return "", agent.ErrNotFound
 	}
-	return agent.SessionStamp(fmt.Sprintf("%d@%d", r.Rows[0].Int("n"), r.Rows[0].Int("updated"))), nil
+	return agent.SessionStamp(fmt.Sprintf("v1:%d@%d", r.Rows[0].Int("n"), r.Rows[0].Int("updated"))), nil
 }
 
 func (m *dbAgent) Backup(ctx context.Context, h agent.Host, in agent.Install, id agent.SessionID) (string, agent.SessionStamp, error) {
@@ -249,6 +291,9 @@ func (m *dbAgent) Backup(ctx context.Context, h agent.Host, in agent.Install, id
 }
 
 func (m *dbAgent) Delete(ctx context.Context, h agent.Host, in agent.Install, id agent.SessionID, expect agent.SessionStamp) error {
+	if expect == "" {
+		return fmt.Errorf("%w: a delete names the stamp it deletes", agent.ErrDenied)
+	}
 	st, err := m.SessionStamp(ctx, h, in, id)
 	if err != nil {
 		return err
@@ -256,12 +301,31 @@ func (m *dbAgent) Delete(ctx context.Context, h agent.Host, in agent.Install, id
 	if st != expect {
 		return fmt.Errorf("%w: %s was used since", agent.ErrDiverged, id)
 	}
-	_, err = h.Exec().Run(ctx, []string{"dbagent", "delete", string(id)}, agent.RunOptions{})
+	res, err := h.Exec().Run(ctx, []string{"dbagent", "delete", string(id)}, agent.RunOptions{})
+	if err == nil && res.Code != 0 {
+		err = fmt.Errorf("dbagent delete %s: exit %d", id, res.Code)
+	}
 	return err
 }
 
+// Restore imports the backup unless the session is there already: with the backup's
+// content that is done, with other content it is newer work (ErrDiverged).
 func (m *dbAgent) Restore(ctx context.Context, h agent.Host, in agent.Install, id agent.SessionID, backup string) (agent.SessionStamp, error) {
-	if _, err := h.Exec().Run(ctx, []string{"dbagent", "import", backup}, agent.RunOptions{}); err != nil {
+	info, msgs, err := m.records(ctx, h, in, id)
+	switch {
+	case err == nil:
+		want, err := h.FS().ReadFile(backup, 1<<20)
+		if err != nil {
+			return "", err
+		}
+		if !bytes.Equal(jsonl(info, msgs), want) {
+			return "", fmt.Errorf("%w: %s changed since its backup", agent.ErrDiverged, id)
+		}
+	case errors.Is(err, agent.ErrNotFound):
+		if err := importFile(ctx, h, backup); err != nil {
+			return "", err
+		}
+	default:
 		return "", err
 	}
 	return m.SessionStamp(ctx, h, in, id)
@@ -344,6 +408,20 @@ func TestDatabaseAgentStore(t *testing.T) {
 	l, _ := m.List(ctx, h, in)
 	if len(l.Sessions) != 1 || l.Sessions[0].Size != 2 {
 		t.Fatalf("restored: %+v", l.Sessions)
+	}
+	// Continued since its backup: a restore must not report success over the newer work.
+	if err := fh.ExecSQL(dbOf(in, h), "INSERT INTO message VALUES ('msg_3', 'ses_a', 3, 'user', 'And now?')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Restore(ctx, h, in, "ses_a", backup); !errors.Is(err, agent.ErrDiverged) {
+		t.Fatalf("a restore over newer work: %v", err)
+	}
+	// An import the agent does not confirm is a failed install.
+	fh.Programs["dbagent"] = func([]string, agent.RunOptions) agent.Result {
+		return agent.Result{Code: 0, Stdout: []byte("nothing to do\n")}
+	}
+	if err := m.AfterInstall(ctx, h, in, agent.SessionKey{Agent: "dbagent", Session: "ses_x"}, agent.Placement{}); err == nil {
+		t.Fatal("an import without its report must fail")
 	}
 	for _, read := range fh.SQLReads() {
 		if read != "session" && read != "message" {

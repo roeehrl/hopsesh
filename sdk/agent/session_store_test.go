@@ -31,7 +31,7 @@ func (stamperMod) SessionStamp(_ context.Context, _ Host, _ Install, id SessionI
 	if id == "gone" {
 		return "", ErrNotFound
 	}
-	return "stamp-" + SessionStamp(id), nil
+	return "t1:" + SessionStamp(id), nil
 }
 
 type minterMod struct{ baseMod }
@@ -55,7 +55,7 @@ func TestSessionStoreHelpers(t *testing.T) {
 		t.Fatalf("a file module has no stamp: %q %v %v", st, ok, err)
 	}
 	st, ok, err := StampOf(ctx, virtualMod{}, nil, Install{}, s)
-	if !ok || err != nil || st != SummaryStamp(s) || st != "4@100000000005" {
+	if !ok || err != nil || st != SummaryStamp(s) || st != "summary1:4@100000000005" || st.Format() != "summary1" {
 		t.Fatalf("a virtual module's stamp comes from its summary: %q", st)
 	}
 	more := s
@@ -63,7 +63,10 @@ func TestSessionStoreHelpers(t *testing.T) {
 	if SummaryStamp(more) == st {
 		t.Fatal("a new message must change the stamp")
 	}
-	if st, ok, err := StampOf(ctx, stamperMod{}, nil, Install{}, s); !ok || err != nil || st != "stamp-ses_1" {
+	if SessionStamp("4@1").Format() != "" || SessionStamp(":x").Format() != "" || SessionStamp("v2:a:b").Format() != "v2" {
+		t.Fatal("Format")
+	}
+	if st, ok, err := StampOf(ctx, stamperMod{}, nil, Install{}, s); !ok || err != nil || st != "t1:ses_1" {
 		t.Fatalf("a module's own stamp comes first: %q", st)
 	}
 	s.Key.Session = "gone"

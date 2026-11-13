@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -357,8 +358,19 @@ func IsVirtual(m Module) bool {
 }
 
 // SessionStamp is a module's opaque mark of a session's state: two equal stamps mean
-// nothing was added or changed in between. "" is no stamp.
+// nothing was added or changed in between. "" is no stamp. A stamp starts with its form
+// and a colon ("v1:…"), and a module that changes how it stamps changes that prefix, so
+// a stamp journaled before can be told apart from a session that changed since (the core
+// then asks instead of refusing an undo for good).
 type SessionStamp string
+
+// Format is the stamp's form, the text before its first colon ("" when it has none).
+func (s SessionStamp) Format() string {
+	if i := strings.IndexByte(string(s), ':'); i > 0 {
+		return string(s[:i])
+	}
+	return ""
+}
 
 // SessionStamper gives a session's stamp without listing every session, for caches and
 // for guards that refuse to undo over later work. A missing session is ErrNotFound.
@@ -369,12 +381,13 @@ type SessionStamper interface {
 // SummaryStamp is the stamp of a listed virtual session: its record count and last
 // activity.
 func SummaryStamp(s Summary) SessionStamp {
-	return SessionStamp(fmt.Sprintf("%d@%d", s.Size, s.LastActivity.UTC().UnixNano()))
+	return SessionStamp(fmt.Sprintf("summary1:%d@%d", s.Size, s.LastActivity.UTC().UnixNano()))
 }
 
 // StampOf is a session's stamp from its module: SessionStamper's, else SummaryStamp for a
 // virtual module. ok is false when the module has neither, and the core compares the main
-// file's size and time instead.
+// file's size and time instead. For SummaryStamp, s must be fresh (from a listing or a
+// summary made now), never one from the listing cache, or a guard compares old with old.
 func StampOf(ctx context.Context, m Module, h Host, in Install, s Summary) (stamp SessionStamp, ok bool, err error) {
 	if st, is := m.(SessionStamper); is {
 		stamp, err = st.SessionStamp(ctx, h, in, s.Key.Session)
@@ -391,17 +404,19 @@ func StampOf(ctx context.Context, m Module, h Host, in Install, s Summary) (stam
 // vendor-session operation and undoes it with these methods.
 type SessionStore interface {
 	SessionStamper
-	// Backup saves the session as the agent exports it to a file under the install's
-	// roots (through h.FS, journaled) and returns that file and the stamp it was taken
-	// at.
+	// Backup saves the session as the agent exports it, with its child sessions (Delete
+	// removes them too), to a file under the install's roots (through h.FS, journaled) and
+	// returns that file and the stamp it was taken at.
 	Backup(ctx context.Context, h Host, in Install, id SessionID) (backup string, stamp SessionStamp, err error)
 	// Delete removes the session (and its child sessions) only while its stamp is still
 	// expect; otherwise ErrDiverged, and nothing is deleted. A session already gone is
-	// ErrNotFound.
+	// ErrNotFound. An empty expect is always refused (ErrDenied): a delete names the
+	// state it deletes.
 	Delete(ctx context.Context, h Host, in Install, id SessionID, expect SessionStamp) error
 	// Restore imports a Backup again, keeping the session's id, and returns the new stamp.
 	// It is idempotent: a session already there with the backup's content is left as it
-	// is.
+	// is. A session there with other content (continued since) is ErrDiverged and left
+	// as it is, so an undo never reports success over newer work.
 	Restore(ctx context.Context, h Host, in Install, id SessionID, backup string) (SessionStamp, error)
 }
 
