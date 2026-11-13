@@ -1,0 +1,278 @@
+# hopsesh moves an OpenCode session to another folder of this machine the way OpenCode's
+# own /cd does: through OpenCode's running background service, which adds a
+# location-switched message; hopsesh never writes OpenCode's database. Undo moves it back
+# while the session is as the change left it, and refuses once it was used since.
+env FAKE_OPENCODE_SERVICE=running
+git-repo repo https://github.com/example/demo.git
+exec opencode session import parent.json --directory $WORK/repo
+stdout '^Imported session: ses_e29a40000ffeHandMadeImport$'
+exec opencode session import child.json --directory $WORK/repo
+stdout '^Imported session: ses_e29a3ffffffeHandMadeChild0$'
+mkdir elsewhere
+
+exec hopsesh cd opencode/ses_e29a40000ffeHandMadeImport $WORK/elsewhere --other-repo --yes
+stdout 'location-switched'
+grep '^opencode api POST /api/session/ses_e29a40000ffeHandMadeImport/move -d \{"directory":".*elsewhere"\}' $WORK/agents.log
+! grep '^opencode api --standalone POST' $WORK/agents.log
+exec opencode session export ses_e29a40000ffeHandMadeImport
+stdout '"type": "location-switched"'
+stdout '"directory": ".*elsewhere"'
+exec hopsesh ls --host local --agent opencode --json
+stdout '"cwd": ".*elsewhere"'
+
+# Undo moves it back the same way.
+exec hopsesh undo --yes
+exec hopsesh ls --host local --agent opencode --json
+stdout '"cwd": ".*repo"'
+grep -count=2 '^opencode api POST /api/session/ses_e29a40000ffeHandMadeImport/move' $WORK/agents.log
+
+# Moved again and used since (renamed in OpenCode): undo refuses and leaves it there.
+exec hopsesh cd opencode/ses_e29a40000ffeHandMadeImport $WORK/elsewhere --other-repo --yes
+exec opencode api PATCH /api/session/ses_e29a40000ffeHandMadeImport -d '{"title":"Read main.go elsewhere"}'
+! exec hopsesh undo --yes
+stderr 'continued after this|changed since'
+exec hopsesh ls --host local --agent opencode --json
+stdout '"cwd": ".*elsewhere"'
+
+# Nothing ran on a private server, deleted or imported a session, or started the service
+# (it ran all along).
+! grep '^opencode (api|session) .*--standalone' $WORK/agents.log
+! grep '^opencode session (delete|import) .*ses_e29a40000ffeHandMadeImport' $WORK/agents.log
+! grep 'started the background service' $WORK/agents.log
+
+-- parent.json --
+{
+  "info": {
+    "id": "ses_e29a40000ffeHandMadeImport",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1794598000000,
+      "updated": 1794597704901
+    },
+    "title": "imported by hand",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65b0000001HandMadeMsg001",
+      "time": {
+        "created": 1794598001000
+      },
+      "text": "Check the repo and read main.go.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65b0000002HandMadeMsg002",
+      "time": {
+        "created": 1794598002000,
+        "completed": 1794598003000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "I will look at the repo first.",
+          "time": {
+            "created": 1794598002001,
+            "completed": 1794598002002
+          }
+        },
+        {
+          "type": "text",
+          "text": "Looking at the repo."
+        },
+        {
+          "type": "tool",
+          "id": "call_hand0001",
+          "name": "shell",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "git status --short"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": " M main.go\n"
+              }
+            ],
+            "metadata": {
+              "status": "completed",
+              "truncated": false,
+              "exit": 0
+            }
+          },
+          "time": {
+            "created": 1794598002100,
+            "ran": 1794598002101,
+            "completed": 1794598002200
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_hand0002",
+          "name": "read",
+          "executed": false,
+          "state": {
+            "status": "error",
+            "input": {
+              "path": "missing.go"
+            },
+            "error": {
+              "type": "unknown",
+              "message": "File not found: missing.go"
+            }
+          },
+          "time": {
+            "created": 1794598002300,
+            "ran": 1794598002301,
+            "completed": 1794598002400
+          }
+        }
+      ],
+      "finish": "tool-calls",
+      "cost": 0,
+      "tokens": {
+        "input": 10,
+        "output": 5,
+        "reasoning": 2,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65b0000003HandMadeMsg003",
+      "time": {
+        "created": 1794598004000,
+        "completed": 1794598005000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "main.go is modified and missing.go does not exist."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 12,
+        "output": 9,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65b0000004HandMadeMsg004",
+      "time": {
+        "created": 1794598005001
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}
+-- child.json --
+{
+  "info": {
+    "id": "ses_e29a3ffffffeHandMadeChild0",
+    "parentID": "ses_e29a40000ffeHandMadeImport",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1794598006000,
+      "updated": 1794597705166
+    },
+    "title": "imported child",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65b0000005HandMadeMsg005",
+      "time": {
+        "created": 1794598006100
+      },
+      "text": "Reply pong.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65b0000006HandMadeMsg006",
+      "time": {
+        "created": 1794598006200,
+        "completed": 1794598006300
+      },
+      "type": "assistant",
+      "agent": "general",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "pong"
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 3,
+        "output": 1,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65b0000007HandMadeMsg007",
+      "time": {
+        "created": 1794598006301
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}
