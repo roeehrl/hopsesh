@@ -158,9 +158,7 @@ func main() {
 			log.Fatal(err)
 		}
 		env := testkit.Env(h)
-		for k, v := range env {
-			os.Setenv(k, v)
-		}
+		testkit.Apply(env)
 		if *world == "empty" {
 			err = os.MkdirAll(h, 0o700)
 		} else {
@@ -195,9 +193,7 @@ func main() {
 		if err := os.RemoveAll(h); err != nil {
 			return err
 		}
-		for k, v := range testkit.Env(h) {
-			os.Setenv(k, v)
-		}
+		testkit.Apply(testkit.Env(h))
 		if err := testkit.DemoHome(h); err != nil {
 			return err
 		}

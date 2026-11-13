@@ -20,9 +20,7 @@ import (
 func catalogApp(t *testing.T) *App {
 	t.Helper()
 	home := t.TempDir()
-	for k, v := range testkit.Env(home) {
-		t.Setenv(k, v)
-	}
+	testkit.Setenv(t, testkit.Env(home))
 	if err := testkit.DemoHome(home); err != nil {
 		t.Fatal(err)
 	}

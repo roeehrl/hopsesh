@@ -72,9 +72,7 @@ func newHandoffWorld(t *testing.T) *handoffWorld {
 		"CLAUDE_CODE_CHILD_SESSION": "1", "ANTHROPIC_API_KEY": "sk-ant-not-a-real-key", "CCR_FORCE_BUNDLE": ""} {
 		env[k] = v
 	}
-	for k, v := range env {
-		t.Setenv(k, v)
-	}
+	testkit.Setenv(t, env)
 	var err error
 	if w.origin, err = fakecloud.NewOrigin(root, "https://github.com/example/demo.git"); err != nil {
 		t.Fatal(err)

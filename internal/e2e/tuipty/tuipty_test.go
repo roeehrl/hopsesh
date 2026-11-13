@@ -45,10 +45,7 @@ func TestTUIInAPseudoTerminal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin)
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLUMNS=120", "LINES=40")
-	for k, v := range testkit.Env(home) {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
+	cmd.Env = testkit.Environ(append(os.Environ(), "TERM=xterm-256color", "COLUMNS=120", "LINES=40"), testkit.Env(home))
 	if err := pty.Start(cmd); err != nil {
 		t.Fatal(err)
 	}
