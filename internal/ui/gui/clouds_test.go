@@ -104,9 +104,19 @@ func TestCloudInTheWindow(t *testing.T) {
 	if m := a.Machines(); len(m.Clouds) != 6 || !m.Clouds[0].Allowed || m.Clouds[1].Allowed {
 		t.Fatalf("machines: %+v", m.Clouds)
 	} else {
+		// A cloud-only module keeps no folders on a machine.
+		var cloudOnly []string
+		for _, mod := range a.snapshot().Modules() {
+			if len(mod.Spec().Roots) == 0 {
+				cloudOnly = append(cloudOnly, mod.Spec().Name)
+			}
+		}
+		if len(cloudOnly) == 0 {
+			t.Fatal("no cloud-only module is registered")
+		}
 		for _, n := range m.Here.Agents {
-			for _, cloudOnly := range []string{"GitHub Copilot", "Jules", "Devin", "Amp"} {
-				if strings.HasPrefix(n, cloudOnly) {
+			for _, name := range cloudOnly {
+				if strings.HasPrefix(n, name) {
 					t.Errorf("a cloud-only module is listed as an agent here: %q", n)
 				}
 			}
