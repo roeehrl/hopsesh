@@ -224,7 +224,7 @@ var agentWatch = map[agent.ID]target{
 			Grep:  `session|session_v2|session_message|session_part|migration|export|import|transfer|settled|part_rows|service|standalone|serve|mismatch|api/session|interrupt|active|auth|credential|account|XDG_DATA_HOME|XDG_CONFIG_HOME|XDG_STATE_HOME|OPENCODE_CONFIG_DIR|OPENCODE_DB|OPENCODE_PASSWORD|OPENCODE_SERVER_PASSWORD|port|cli\.json|desktop|opencode-cli|archiv|fork|subagent|parent|title|AGENTS\.md|plugin|instruction|permission|deprecat|remov|rename|breaking`,
 			Help: [][]string{{"opencode", "--help"}, {"opencode", "service", "status", "--help"}, {"opencode", "api", "--help"}, {"opencode", "auth", "list", "--help"},
 				{"opencode", "session", "export", "--help"}, {"opencode", "session", "import", "--help"}, {"opencode", "session", "list", "--help"}, {"opencode", "session", "delete", "--help"},
-				{"opencode", "auth", "login", "--help"}, {"opencode", "service", "set", "--help"}, {"opencode", "service", "get", "--help"}},
+				{"opencode", "auth", "login", "--standalone", "--help"}, {"opencode", "service", "set", "--help"}, {"opencode", "service", "get", "--help"}},
 			Relies: []string{"--session", "--prompt", "--standalone", "service status", "service set", "service get", "api", "auth list", "auth login", "--format", "session export", "--version"},
 			Code: &code{
 				Repo: "anomalyco/opencode",

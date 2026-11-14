@@ -21,7 +21,7 @@ func added() *agent.RuntimeProfile {
 // commands get the folder's variables, and never the server passwords of the shell.
 func TestAccountFolderRoots(t *testing.T) {
 	spec := New().Spec()
-	if spec.Accounts == nil || spec.Accounts.InheritsSignIn || !slices.Equal(spec.Accounts.Login, []string{"auth", "login"}) {
+	if spec.Accounts == nil || spec.Accounts.InheritsSignIn || !slices.Equal(spec.Accounts.Login, []string{"auth", "login", "--standalone"}) {
 		t.Fatalf("accounts: %+v", spec.Accounts)
 	}
 	for _, c := range []struct{ goos, root, data, config, state string }{

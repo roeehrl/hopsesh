@@ -50,7 +50,7 @@ var sqlDenied = []string{"credential", "account", "control_account", "account_st
 // database is pinned too, since an OPENCODE_DB of the shell would name the default
 // folder's. The default folder keeps the machine's variables. Each folder hopsesh makes
 // gets its own service port (PrepareAccount). Sign-ins are OpenCode's own (`opencode auth
-// login`), per provider; nothing is inherited from the default folder but a few display
+// login --standalone`), per provider; nothing is inherited from the default folder but a few display
 // settings of cli.json (opencode.json may hold provider keys, so it is never read).
 // Provider keys in the shell (OPENAI_API_KEY, …) reach every folder, as they reach
 // OpenCode itself; the server passwords do not.
@@ -62,7 +62,10 @@ var accounts = &agent.ProfileSpec{
 		{Env: "OPENCODE_DB", Sub: "data/opencode/opencode.db"},
 	},
 	Unset: []string{"OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD"},
-	Login: []string{"auth", "login"},
+	// A private server, so signing in never starts the folder's background service (the
+	// default folder's is the desktop app's). OpenCode keeps sign-ins in the folder's
+	// database, where a running service reads them.
+	Login: []string{"auth", "login", "--standalone"},
 	Inherit: map[string][]string{"{config}/cli.json": {"theme.name", "theme.mode", "mouse", "animations", "leader.timeout",
 		"scroll.speed", "scroll.acceleration", "cursor.style", "cursor.blinking"}},
 }
