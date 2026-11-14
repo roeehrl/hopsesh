@@ -20,8 +20,8 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// The test binary is the stand-in claude (or gh, jules, devin, amp) when it runs under
-// that name.
+// The test binary is the stand-in claude, codex or opencode (or gh, jules, devin, amp) when
+// it runs under that name.
 func TestMain(m *testing.M) {
 	os.Setenv("HOPSESH_APP_RUNTIMES", "off") // never the real Codex app's bundled codex
 	name := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
@@ -32,6 +32,8 @@ func TestMain(m *testing.M) {
 		os.Exit(fakeagent.Claude())
 	case "codex":
 		os.Exit(fakeagent.Codex())
+	case "opencode":
+		os.Exit(fakeagent.OpenCode())
 	}
 	if code, ok := fakeagent.Vendor(name); ok {
 		os.Exit(code)

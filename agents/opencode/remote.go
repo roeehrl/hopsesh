@@ -66,7 +66,7 @@ func (m *Module) listAPI(ctx context.Context, h agent.Host, in agent.Install) (a
 	for _, s := range all {
 		rows = append(rows, listed{session: s})
 	}
-	return m.summaries(ctx, h, in, rows, "api")
+	return m.summaries(ctx, h, in, rows, "api", customTitles(ctx, h, in))
 }
 
 // transcript is a session and its settled messages: from the database, else from

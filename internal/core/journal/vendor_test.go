@@ -25,6 +25,11 @@ type fakeSessions struct {
 	restores int
 	// failRestore makes every Restore fail (the import fails, the database is locked).
 	failRestore error
+	// partialRestore makes the next Restore put the session back and then fail (a child's
+	// import failed); restamp gives a session put back a new stamp, as an import does.
+	partialRestore error
+	restamp        bool
+	imported       map[agent.SessionID]int
 }
 
 func newFakeSessions() *fakeSessions {
@@ -32,7 +37,11 @@ func newFakeSessions() *fakeSessions {
 }
 
 func (f *fakeSessions) stamp(id agent.SessionID) agent.SessionStamp {
-	return agent.SessionStamp(fmt.Sprintf("%s:%d", f.form, len(f.sessions[id])))
+	st := fmt.Sprintf("%s:%d", f.form, len(f.sessions[id]))
+	if n := f.imported[id]; n > 0 {
+		st += fmt.Sprintf("@%d", n)
+	}
+	return agent.SessionStamp(st)
 }
 
 func (f *fakeSessions) Stamp(_ context.Context, _ string, key agent.SessionKey) (agent.SessionStamp, error) {
@@ -67,6 +76,16 @@ func (f *fakeSessions) Restore(_ context.Context, _ string, key agent.SessionKey
 		return f.stamp(key.Session), nil
 	}
 	f.sessions[key.Session] = want
+	if f.restamp {
+		if f.imported == nil {
+			f.imported = map[agent.SessionID]int{}
+		}
+		f.imported[key.Session]++
+	}
+	if err := f.partialRestore; err != nil {
+		f.partialRestore = nil
+		return "", err
+	}
 	return f.stamp(key.Session), nil
 }
 
@@ -193,7 +212,9 @@ func TestUndoVendorSessionReplaced(t *testing.T) {
 	}
 
 	// There with other work (made again since, or never deleted and then used): undo
-	// refuses rather than report success over it; forced, it leaves it and its backup.
+	// refuses rather than report success over it; forced, it leaves it and its backup (the
+	// restore it asks for, which tells other work from a restore that did not finish,
+	// refuses it).
 	f2 := newFakeSessions()
 	f2.backups[backup] = "old"
 	f2.sessions["ses_1"] = "someone else's"
@@ -204,7 +225,7 @@ func TestUndoVendorSessionReplaced(t *testing.T) {
 		t.Fatalf("restore over other work: %v", err)
 	}
 	must(t, j2.Undo(ctx, vendorReach(f2), true))
-	if f2.sessions["ses_1"] != "someone else's" || f2.restores != 0 || len(j2.Left) != 1 || !strings.Contains(j2.Left[0], backup) {
+	if f2.sessions["ses_1"] != "someone else's" || f2.restores != 1 || len(j2.Left) != 1 || !strings.Contains(j2.Left[0], backup) {
 		t.Fatalf("a forced undo over other work: %q, %d restores, left %v", f2.sessions["ses_1"], f2.restores, j2.Left)
 	}
 	if _, err := os.Stat(backup); err != nil {
@@ -251,6 +272,113 @@ func TestUndoKeepsBackupWhenRestoreFails(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A backup kept in several files (the session's, and its children's beside it, named
+// after it) is kept whole while the session is not put back, and goes whole once it is.
+func TestUndoKeepsChildBackupsWhenRestoreFails(t *testing.T) {
+	ctx := context.Background()
+	f := newFakeSessions()
+	dir := t.TempDir()
+	backup := filepath.Join(dir, "backup", "ses_1-1.json")
+	child := filepath.Join(dir, "backup", "ses_1-1.children", "001-ses_kid.json")
+	other := filepath.Join(dir, "backup", "ses_1-10.json") // another backup's
+	f.sessions["ses_1"] = "old"
+	j, _ := New(t.TempDir(), KindMove, "replace")
+	must(t, j.WriteFile(host.LocalFS(), "here", backup, []byte("old"), 0o600))
+	must(t, j.WriteFile(host.LocalFS(), "here", child, []byte("kid"), 0o600))
+	must(t, j.WriteFile(host.LocalFS(), "here", other, []byte("x"), 0o600))
+	f.backups[backup] = "old"
+	must(t, j.DeletedSession("here", vendorKey, backup, "v1:3"))
+	delete(f.sessions, "ses_1")
+	must(t, j.SealWith(ctx, vendorReach(f)))
+	f.failRestore = errors.New("the folder is gone")
+	if err := j.Undo(ctx, vendorReach(f), false); err == nil {
+		t.Fatal("a failed restore undid")
+	}
+	for _, p := range []string{backup, child} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("%s: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatal("a file named like the backup but not part of it was kept")
+	}
+	f.failRestore = nil
+	must(t, j.Undo(ctx, vendorReach(f), false))
+	for _, p := range []string{backup, child} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s outlived the session put back", p)
+		}
+	}
+}
+
+// A restore that stopped halfway (the session is back, a child is not) is finished by the
+// next undo, unforced, though the import gave the session a new stamp: the restore tells
+// it from other work. When the operation had made a session at the same id, which the
+// first undo deleted, the next undo does not take the one put back for it.
+func TestUndoFinishesPartialRestore(t *testing.T) {
+	ctx := context.Background()
+	for _, replaced := range []bool{false, true} {
+		t.Run(map[bool]string{false: "set aside", true: "replaced"}[replaced], func(t *testing.T) {
+			f := newFakeSessions()
+			f.restamp = true
+			backup := filepath.Join(t.TempDir(), "backup", "ses_1-1.json")
+			f.sessions["ses_1"] = "old"
+			j, _ := New(t.TempDir(), KindMove, "replace")
+			must(t, j.WriteFile(host.LocalFS(), "here", backup, []byte("old"), 0o600))
+			f.backups[backup] = "old"
+			must(t, j.DeletedSession("here", vendorKey, backup, "v1:3"))
+			delete(f.sessions, "ses_1")
+			if replaced {
+				must(t, j.RecordCreatedSession("here", vendorKey))
+				f.sessions["ses_1"] = "newer"
+			}
+			must(t, j.SealWith(ctx, vendorReach(f)))
+			f.partialRestore = errors.New("a child's folder is gone")
+			if err := j.Undo(ctx, vendorReach(f), false); err == nil || j.Undone {
+				t.Fatalf("a partial restore: %v", err)
+			}
+			if _, err := os.Stat(backup); err != nil {
+				t.Fatal("the backup of a restore that did not finish was deleted")
+			}
+			restores := f.restores
+			must(t, j.Undo(ctx, vendorReach(f), false))
+			if f.sessions["ses_1"] != "old" || f.restores != restores+1 || !j.Undone || len(f.deletes) != map[bool]int{false: 0, true: 1}[replaced] {
+				t.Fatalf("the retry: %q, %d restores, %d deletes", f.sessions["ses_1"], f.restores, len(f.deletes))
+			}
+			if _, err := os.Stat(backup); !os.IsNotExist(err) {
+				t.Fatal("the backup outlived the session put back")
+			}
+		})
+	}
+	// The session the operation made at the id is still there (its delete failed): the
+	// one set aside is not put back over it, and its backup stays.
+	f := newFakeSessions()
+	backup := filepath.Join(t.TempDir(), "ses_1.json")
+	f.sessions["ses_1"] = "old"
+	j, _ := New(t.TempDir(), KindMove, "replace")
+	must(t, j.WriteFile(host.LocalFS(), "here", backup, []byte("old"), 0o600))
+	f.backups[backup] = "old"
+	must(t, j.DeletedSession("here", vendorKey, backup, "v1:3"))
+	must(t, j.RecordCreatedSession("here", vendorKey))
+	f.sessions["ses_1"] = "old" // the same content, as a re-sync of an unchanged copy makes
+	must(t, j.SealWith(ctx, vendorReach(f)))
+	sessions := &refusingDeletes{f}
+	err := j.Undo(ctx, Reach{FS: vendorReach(f).FS, Sessions: sessions}, true)
+	if err == nil || !strings.Contains(err.Error(), "once the session this made at its id is deleted") || f.restores != 0 {
+		t.Fatalf("restore over the operation's own session: %v, %d restores", err, f.restores)
+	}
+	if _, err := os.Stat(backup); err != nil {
+		t.Fatal("the backup was deleted")
+	}
+}
+
+// refusingDeletes is fakeSessions whose agent refuses every delete.
+type refusingDeletes struct{ *fakeSessions }
+
+func (refusingDeletes) Delete(context.Context, string, agent.SessionKey, agent.SessionStamp) error {
+	return errors.New("the database is locked")
 }
 
 // A session set aside whose delete never happened (the agent refused it, or the move was

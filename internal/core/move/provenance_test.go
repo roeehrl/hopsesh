@@ -21,3 +21,27 @@ func TestMissingNodesKeepsOnlyUnreceivedFragments(t *testing.T) {
 		t.Fatal("already received summary was imported twice")
 	}
 }
+
+// A copy whose agent gave its records new ids maps to the source node for node, only while
+// every node has the source's content in the source's order.
+func TestRenamedProjection(t *testing.T) {
+	node := func(anchor, text string) ir.Node {
+		return ir.Node{Kind: ir.KindMessage, Actor: ir.User, Text: text, Native: &ir.Native{Format: "x", Anchor: anchor}}
+	}
+	src := ir.Segment{Nodes: []ir.Node{node("msg_a", "one"), node("msg_b", "two")}}
+	ir.Chain(src.Nodes, "")
+	copied := ir.Segment{Nodes: []ir.Node{node("msg_a2", "one"), node("msg_b2", "two")}}
+	ir.Chain(copied.Nodes, "")
+	ps, err := nativeProjection(src, copied)
+	if err != nil || len(ps) != 2 || ps[1].Anchor != "msg_b2" {
+		t.Fatalf("%+v %v", ps, err)
+	}
+	changed := ir.Segment{Nodes: []ir.Node{node("msg_a2", "one"), node("msg_b2", "other")}}
+	ir.Chain(changed.Nodes, "")
+	if _, err := nativeProjection(src, changed); err == nil {
+		t.Fatal("a copy with other content was mapped")
+	}
+	if _, err := nativeProjection(src, ir.Segment{Nodes: copied.Nodes[:1]}); err == nil {
+		t.Fatal("a shorter copy was mapped")
+	}
+}

@@ -115,8 +115,16 @@ func TestRename(t *testing.T) {
 		t.Errorf("rename ran %q, want %q", cmds[len(cmds)-1], want)
 	}
 	l, _ = m.List(ctx, h, in)
-	if got := summaryFor(t, l, sesFiles); got.Title != "Fix the greeting" || got.TitleSource != "generated" {
+	// hopsesh recorded the title it gave: custom while the session keeps it.
+	if got := summaryFor(t, l, sesFiles); got.Title != "Fix the greeting" || got.TitleSource != "custom" {
 		t.Errorf("after the rename: %q (%s)", got.Title, got.TitleSource)
+	}
+	if err := fh.ExecSQL(dbPath, "UPDATE session_v2 SET title = 'Renamed in OpenCode', time_updated = time_updated + 1 WHERE id = ?", sesFiles); err != nil {
+		t.Fatal(err)
+	}
+	l, _ = m.List(ctx, h, in)
+	if got := summaryFor(t, l, sesFiles); got.TitleSource != "generated" {
+		t.Errorf("renamed since in OpenCode: %q (%s)", got.Title, got.TitleSource)
 	}
 	if err := m.Rename(ctx, h, in, s, " "); err == nil {
 		t.Error("an empty title was accepted")

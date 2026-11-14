@@ -260,9 +260,18 @@ func TestPatchListAndPages(t *testing.T) {
 	if r := m.run("api", "--standalone", "GET", "/api/session/abc"); r.code != 1 || !strings.Contains(r.stdout, `"kind":"Params"`) {
 		t.Errorf("a bad session id: %+v", r)
 	}
-	// A relative folder is the session's, a link is not resolved in the subpath.
+	// A private server takes a move and exits before making it: the session stays where
+	// it was, marked busy with no idle.
+	before := m.must("api", "--standalone", "GET", "/api/session/"+sid)
 	m.must("api", "--standalone", "POST", "/api/session/"+sid+"/move", "-d", `{"directory":".."}`)
-	if got := m.must("api", "--standalone", "GET", "/api/session/"+sid); !strings.Contains(got, `"subpath":"sub","permissions"`) {
+	if got := m.must("api", "--standalone", "GET", "/api/session/"+sid); !strings.Contains(got, `"subpath":"sub/deeper"`) || !strings.Contains(got, `"busy":`) || strings.Contains(before, `"busy":`) {
+		t.Errorf("a move on a private server: %s", got)
+	}
+	// The background service makes it. A relative folder is the session's, a link is not
+	// resolved in the subpath.
+	m.env["FAKE_OPENCODE_SERVICE"] = "running"
+	m.must("api", "POST", "/api/session/"+sid+"/move", "-d", `{"directory":".."}`)
+	if got := m.must("api", "GET", "/api/session/"+sid); !strings.Contains(got, `"subpath":"sub","permissions"`) {
 		t.Errorf("after a relative move: %s", got)
 	}
 	link := filepath.Join(m.home, "link")
@@ -270,8 +279,8 @@ func TestPatchListAndPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(map[string]string{"directory": link})
-	m.must("api", "--standalone", "POST", "/api/session/"+sid+"/move", "-d", string(b))
-	if want, _ := filepath.Rel(m.dir, link); !strings.Contains(m.must("api", "--standalone", "GET", "/api/session/"+sid), `"subpath":"`+filepath.ToSlash(want)+`"`) {
+	m.must("api", "POST", "/api/session/"+sid+"/move", "-d", string(b))
+	if want, _ := filepath.Rel(m.dir, link); !strings.Contains(m.must("api", "GET", "/api/session/"+sid), `"subpath":"`+filepath.ToSlash(want)+`"`) {
 		t.Errorf("a folder through a link: want subpath %s", want)
 	}
 }

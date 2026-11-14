@@ -885,6 +885,9 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		}
 		switch k {
 		case "enter":
+			if len(m.plan.Resume.Argv) == 0 {
+				return m, tea.Quit // the target refused its resume command (a warning says why)
+			}
 			m.exit = &Exit{Desktop: m.opts.App, RunDir: m.plan.Resume.Dir, RunArgv: m.plan.Resume.Argv, Prompt: m.result.PromptFile,
 				Env: m.plan.Resume.Env, Unset: m.plan.Resume.Unset, Key: m.plan.Placement.Key, Title: m.plan.Title, Agent: m.plan.Agent}
 			return m, tea.Quit

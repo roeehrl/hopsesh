@@ -22,9 +22,10 @@ var (
 
 func TestConformance(t *testing.T) {
 	agenttest.Run(t, New(), func(t *testing.T) *agenttest.FakeHost {
-		fh, _ := newMachine(t, setup{synthetic: true, secrets: true})
-		// No opencode runs: without a database the reader reads the file hopsesh placed.
-		delete(fh.Programs, binName)
+		// The stand-in OpenCode plays the commands that change sessions (the store's
+		// cycle: its import refuses the synthetic session's message of a newer type, as
+		// OpenCode 2.3.0 does, so the captured sessions only).
+		fh, _ := newMachine(t, setup{secrets: true})
 		return fh
 	})
 }
@@ -517,13 +518,6 @@ func TestGrandchildren(t *testing.T) {
 	}
 	if sess, _, err := decodeJSONL("grandchild", data); err != nil || sess.ID != grand || sess.ParentID != sesChild {
 		t.Fatalf("grandchild file: %s parent %s, %v", sess.ID, sess.ParentID, err)
-	}
-}
-
-// Until the module installs through OpenCode's import, no move places a session.
-func TestVerifyRefusesMoves(t *testing.T) {
-	if err := New().Verify(ctx, nil, agent.MovePlan{}, nil, agent.Placement{}); !errors.Is(err, agent.ErrUnsupported) {
-		t.Fatalf("Verify: %v", err)
 	}
 }
 

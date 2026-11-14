@@ -2,8 +2,10 @@ package opencode
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/roeehrl/hopsesh/internal/testkit/fakeopencode"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
 )
@@ -59,6 +62,48 @@ type fakeOpenCode struct {
 	calls    [][]string
 	envs     [][]string
 	interupt func(sid string) bool
+	tmp      string // the stand-in's home folder on this machine
+}
+
+// standIn plays a command with the stand-in OpenCode (internal/testkit/fakeopencode) over
+// the fake machine's database and files: the commands that change sessions, and exports of
+// sessions with no fixture export.
+func (f *fakeOpenCode) standIn(args []string) agent.Result {
+	file, ok := f.fh.SQLFile(dbPath)
+	if !ok {
+		return agent.Result{Code: 1, Stderr: []byte("Error: no database")}
+	}
+	env := map[string]string{"HOME": f.tmp, "OPENCODE_DB": file}
+	if f.status != "stopped" {
+		env["FAKE_OPENCODE_SERVICE"] = f.status
+		env["FAKE_OPENCODE_SERVICE_VERSION"] = f.version
+	}
+	var out, errb bytes.Buffer
+	code := fakeopencode.Main(fakeopencode.Proc{Args: args, Dir: home, Stdout: &out, Stderr: &errb,
+		Getenv: func(k string) (string, bool) { v, ok := env[k]; return v, ok },
+		ReadFile: func(p string) ([]byte, error) {
+			if b, ok := f.fh.Get(p); ok {
+				return b, nil
+			}
+			return nil, fs.ErrNotExist
+		},
+		Stat: func(p string) (os.FileInfo, error) { return f.fh.FS().Stat(p) }})
+	return agent.Result{Code: code, Stdout: out.Bytes(), Stderr: errb.Bytes()}
+}
+
+// changes reports the commands the stand-in plays.
+func changes(words []string) bool {
+	switch {
+	case len(words) >= 2 && words[0] == "session" && (words[1] == "import" || words[1] == "delete"):
+		return true
+	case len(words) >= 3 && words[0] == "api" && words[1] == "DELETE":
+		return true
+	case len(words) >= 3 && words[0] == "api" && words[1] == "POST" && (strings.HasSuffix(words[2], "/move") || strings.HasSuffix(words[2], "/fork")):
+		return true
+	case len(words) >= 3 && words[0] == "api" && words[1] == "GET" && strings.Contains(words[2], "/message"):
+		return true
+	}
+	return false
 }
 
 func (f *fakeOpenCode) run(argv []string, o agent.RunOptions) agent.Result {
@@ -75,10 +120,16 @@ func (f *fakeOpenCode) run(argv []string, o agent.RunOptions) agent.Result {
 	words := slices.DeleteFunc(append([]string(nil), args...), func(s string) bool { return s == "--standalone" })
 	ok := func(s string) agent.Result { return agent.Result{Stdout: []byte(s)} }
 	fail := func(code int, s string) agent.Result { return agent.Result{Code: code, Stderr: []byte(s)} }
+	if changes(words) {
+		return f.standIn(args)
+	}
 	switch {
 	case len(words) == 2 && words[0] == "service" && words[1] == "status":
 		return ok(f.status + "\n")
 	case len(words) >= 2 && words[0] == "session" && words[1] == "export":
+		if _, db := f.fh.SQLFile(dbPath); db {
+			return f.standIn(args) // its export of a captured session is the capture's
+		}
 		file, found := f.exports[words[2]]
 		if !found {
 			return fail(1, "Session not found: "+words[2])
@@ -201,8 +252,11 @@ func newMachine(t testing.TB, s setup) (*agenttest.FakeHost, *fakeOpenCode) {
 	t.Helper()
 	fh := agenttest.NewFakeHost(home)
 	fh.AddBinary(binName, "opencode v2.3.0")
-	f := &fakeOpenCode{fh: fh, status: "stopped", version: "2.3.0", auth: "[]\n", exports: exportIndex(t)}
+	f := &fakeOpenCode{fh: fh, status: "stopped", version: "2.3.0", auth: "[]\n", exports: exportIndex(t), tmp: t.TempDir()}
 	fh.Programs[binName] = f.run
+	for _, d := range []string{"demo", "other", "plugdir", "elsewhere", "demo/sub"} {
+		fh.Put(home+"/git/"+d+"/.keep", nil, timeZero)
+	}
 	if s.noDB {
 		fh.Put(dataDir+"/log/opencode.log", []byte("x"), timeZero)
 		return fh, f

@@ -13,6 +13,7 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -45,6 +46,12 @@ var (
 	_ agent.SanitizedProjection  = (*Module)(nil)
 	_ agent.SessionWatchProvider = (*Module)(nil)
 	_ agent.HostResumer          = (*Module)(nil)
+	_ agent.VendorInstaller      = (*Module)(nil)
+	_ agent.SessionStore         = (*Module)(nil)
+	_ agent.DirChanger           = (*Module)(nil)
+	_ agent.DirChangeHelp        = (*Module)(nil)
+	_ agent.NativeForkVerifier   = (*Module)(nil)
+	_ agent.NativeForkOrphans    = (*Module)(nil)
 )
 
 // VirtualSessions marks OpenCode's sessions as rows of a database, each one's size a count
@@ -109,7 +116,7 @@ func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agen
 	if err == nil {
 		var rows []listed
 		if rows, err = r.list(ctx); err == nil {
-			return m.summaries(ctx, h, in, rows, r.db)
+			return m.summaries(ctx, h, in, rows, r.db, customTitles(ctx, h, in))
 		}
 	}
 	switch {
@@ -122,11 +129,11 @@ func (m *Module) List(ctx context.Context, h agent.Host, in agent.Install) (agen
 }
 
 // listingSalt versions the summaries the listing cache keeps.
-const listingSalt = "opencode-summary-1"
+const listingSalt = "opencode-summary-2"
 
 // summaries turns session rows into the listing: the root sessions, with their
 // descendants counted as subagents.
-func (m *Module) summaries(ctx context.Context, h agent.Host, in agent.Install, rows []listed, cacheKey string) (agent.Listing, error) {
+func (m *Module) summaries(ctx context.Context, h agent.Host, in agent.Install, rows []listed, cacheKey string, titles map[string]string) (agent.Listing, error) {
 	children := map[string][]string{}
 	for _, r := range rows {
 		if r.ParentID != "" {
@@ -139,12 +146,16 @@ func (m *Module) summaries(ctx context.Context, h agent.Host, in agent.Install, 
 			continue
 		}
 		subagents := len(family(children, r.ID))
-		sig := fmt.Sprintf("%s|%d|%d|%d|%d|%s", r.ID, r.Updated, r.Settled, r.Parts, subagents, in.ProfileID())
+		custom := r.HasTitle && titles[r.ID] == r.Title
+		sig := fmt.Sprintf("%s|%d|%d|%d|%d|%s|%t", r.ID, r.Updated, r.Settled, r.Parts, subagents, in.ProfileID(), custom)
 		if cacheKey == "api" {
 			sig = "" // an API listing has no counts to key on
 		}
 		sum, err := agent.ListingSummaryKey(ctx, h, cacheKey+"#"+r.ID, sig, listingSalt, func() (*agent.Summary, error) {
 			s := summaryOf(h, in, r, subagents)
+			if custom && s.TitleSource == "generated" {
+				s.TitleSource = "custom"
+			}
 			return &s, nil
 		})
 		if err != nil {
@@ -169,11 +180,34 @@ func (m *Module) Bundle(ctx context.Context, h agent.Host, in agent.Install, s a
 	if err != nil {
 		return agent.Bundle{}, err
 	}
-	b := agent.Bundle{Files: []agent.BundleFile{main}}
+	b := agent.Bundle{Files: []agent.BundleFile{main}, Warnings: m.moveWarnings(ctx, h, in, s)}
 	for _, c := range kids {
 		b.Files = append(b.Files, agent.BundleFile{Root: rootData, Rel: childRel(s.Key.Session, c), Role: agent.RoleSide, Rewrite: agent.RewriteJSONL, Virtual: true, Size: estimate(1)})
 	}
 	return b, nil
+}
+
+// claudeAgent is the provider of OpenCode's "Claude Agent" sessions.
+const claudeAgent = "claude-agent"
+
+// moveWarnings are what a move's preview says about an OpenCode session: a window that has
+// it open while it is idle cannot be seen, and a session of the Claude Agent provider
+// stays an OpenCode session.
+func (m *Module) moveWarnings(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary) []string {
+	where := h.Facts().Machine
+	if where == "" {
+		where = "the machine it is on"
+	}
+	out := []string{fmt.Sprintf("hopsesh cannot see an OpenCode window (a terminal or the desktop app) that has this session open while it is idle on %s; close it there, so it does not continue the copy left behind", where)}
+	if r, ok, err := openSQL(ctx, h, in); ok && err == nil {
+		if row, err := r.session(ctx, s.Key.Session); err == nil {
+			var model modelRef
+			if json.Unmarshal(row.Model, &model) == nil && model.ProviderID == claudeAgent {
+				out = append(out, "this session runs on OpenCode's Claude Agent provider: it moves as an OpenCode session (not a Claude Code one), and OpenCode here needs that provider set up to continue it")
+			}
+		}
+	}
+	return out
 }
 
 // placedBundle is a bundle from the files at the session's anchor and its children's
@@ -226,15 +260,6 @@ func (m *Module) PlanMove(_, _ agent.Install, s agent.Summary, b agent.Bundle, p
 		mp.Files = append(mp.Files, agent.PlacedFile{From: f, ToRoot: rootData, ToRel: to})
 	}
 	return mp, nil
-}
-
-// errNoInstall: OpenCode installs a session itself (session import), which this module
-// does not do yet, so it does not let a move place one.
-var errNoInstall = fmt.Errorf("%w: hopsesh cannot install OpenCode sessions yet; continue the session in another agent instead", agent.ErrUnsupported)
-
-// Verify refuses every staged move until the module installs through OpenCode's import.
-func (*Module) Verify(context.Context, agent.Host, agent.MovePlan, map[string]string, agent.Placement) error {
-	return errNoInstall
 }
 
 // Resume is `opencode -s <id> [--prompt …]` in the session's folder. It never forks (no

@@ -227,6 +227,17 @@ func joinParts(msgRows, partRows agent.Rows) ([]message, error) {
 	return out, nil
 }
 
+func (r sqlReader) session(ctx context.Context, sid agent.SessionID) (session, error) {
+	rows, err := r.sq.Query(ctx, r.db, r.schema.sessionQuery(), string(sid))
+	if err != nil {
+		return session{}, err
+	}
+	if len(rows.Rows) == 0 {
+		return session{}, fmt.Errorf("%w: %s", agent.ErrNotFound, sid)
+	}
+	return sessionFromRow(rows.Rows[0]), nil
+}
+
 func (r sqlReader) stamp(ctx context.Context, sid agent.SessionID) (agent.SessionStamp, error) {
 	rows, err := r.sq.Query(ctx, r.db, stampQuery, string(sid))
 	if err != nil {
