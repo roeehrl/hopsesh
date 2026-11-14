@@ -83,7 +83,8 @@ func TestWindowContinuesInAnotherAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := findEntry(t, scan, "claude/"+sid)
-	if !e.HereNewest || len(e.ContinueIn) != 1 || e.ContinueIn[0].ID != "codex" {
+	// Every other agent that writes sessions: Codex, and OpenCode (a writer since PR 5).
+	if !e.HereNewest || len(e.ContinueIn) != 2 || e.ContinueIn[0].ID != "codex" || e.ContinueIn[1].ID != "opencode" {
 		t.Fatalf("entry: %+v", e)
 	}
 	opts := OptsDTO{Fidelity: "history"}

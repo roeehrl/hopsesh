@@ -59,6 +59,20 @@ func (p *placedSession) transfer() ([]byte, error) {
 	}{p.info, msgs})
 }
 
+// stage writes the transfer OpenCode's import reads, in {data}/hopsesh/opencode/tmp, and
+// returns its path. The file is named after its content: a recovery writes the same file
+// again, and another operation's import of the session never rewrites this one's (the
+// journal would take that for this file being used since).
+func (p *placedSession) stage(h agent.Host, in agent.Install) (string, error) {
+	b, err := p.transfer()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	tmp := h.Path().Join(in.Root(rootData), "hopsesh", string(id), "tmp", p.id+"-"+hex.EncodeToString(sum[:6])+".json")
+	return tmp, h.FS().WriteFile(tmp, b, 0o600)
+}
+
 // parsePlaced reads a session's JSON lines for its import.
 func parsePlaced(path string, data []byte) (*placedSession, error) {
 	s, msgs, err := decodeJSONL(path, data)
@@ -322,19 +336,7 @@ func (m *Module) AfterInstall(ctx context.Context, h agent.Host, in agent.Instal
 		if s != root {
 			dir = childDir(h, s, root, cwd)
 		}
-		write := func() (string, error) {
-			b, err := s.transfer()
-			if err != nil {
-				return "", err
-			}
-			// Named after its content: a recovery writes the same file again, and another
-			// operation's import of the session never rewrites this one's (the journal
-			// would take that for this file being used since).
-			sum := sha256.Sum256(b)
-			tmp := h.Path().Join(in.Root(rootData), "hopsesh", string(id), "tmp", s.id+"-"+hex.EncodeToString(sum[:6])+".json")
-			return tmp, h.FS().WriteFile(tmp, b, 0o600)
-		}
-		err := m.importSession(ctx, h, in, svc, agent.SessionID(s.id), s.ids(), dir, write)
+		err := m.importSession(ctx, h, in, svc, agent.SessionID(s.id), s.ids(), dir, func() (string, error) { return s.stage(h, in) })
 		if err != nil && s != root && errors.Is(err, agent.ErrDiverged) {
 			// The copy's root may be this run's import: only its own divergence means
 			// this run made nothing (the core then leaves the session to undo alone).
