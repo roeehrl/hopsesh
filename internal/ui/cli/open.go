@@ -107,21 +107,9 @@ func openSession(cmd *cobra.Command, refArg string) error {
 		return errors.New(msg)
 	}
 	restart, _ := cmd.Flags().GetBool("restart-service")
-	c, err := r.app.Resume(inv, e, agent.ResumeOptions{App: inApp, RestartService: restart})
-	if errors.Is(err, agent.ErrRestartsService) && !restart {
-		// Decision D2: ask, never restart a service other windows share unasked. --yes
-		// does not answer this one.
-		if !r.interactive() || r.jsonOut {
-			return fmt.Errorf("%w\nTo restart it and open the session, run again with --restart-service", err)
-		}
-		r.printf("%v\n", err)
-		r.printf("Restart it and open %q? [y/N] ", e.Session.Title)
-		line, _ := bufio.NewReader(r.in).ReadString('\n')
-		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
-			return errors.New("nothing was opened")
-		}
-		c, err = r.app.Resume(inv, e, agent.ResumeOptions{App: inApp, RestartService: true})
-	}
+	c, err := r.resumeAsking(e.Session.Title, restart, func(restart bool) (agent.Command, error) {
+		return r.app.Resume(inv, e, agent.ResumeOptions{App: inApp, RestartService: restart})
+	})
 	if err != nil {
 		return err
 	}
@@ -270,4 +258,25 @@ Python API, install its Claude Code integration, or write profiles.`,
 	f.Bool("json", false, "output JSON")
 	cmd.AddCommand(terminalAttachCmd(), terminalRunCmd())
 	return cmd
+}
+
+// resumeAsking resumes (resume) a session titled title; when that would restart the
+// agent's background service, which other windows share (decision D2), it asks first on
+// a terminal and resumes again once the person agrees. restart: they agreed already
+// (--restart-service). --yes does not answer this one; elsewhere it says how to agree.
+func (r *run) resumeAsking(title string, restart bool, resume func(restart bool) (agent.Command, error)) (agent.Command, error) {
+	c, err := resume(restart)
+	if !errors.Is(err, agent.ErrRestartsService) || restart {
+		return c, err
+	}
+	if !r.interactive() || r.jsonOut {
+		return c, fmt.Errorf("%w\nTo restart it and open the session, run again with --restart-service", err)
+	}
+	r.printf("%v\n", err)
+	r.printf("Restart it and open %q? [y/N] ", title)
+	line, _ := bufio.NewReader(r.in).ReadString('\n')
+	if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+		return c, errors.New("nothing was opened")
+	}
+	return resume(true)
 }

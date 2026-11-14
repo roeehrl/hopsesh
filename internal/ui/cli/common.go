@@ -15,11 +15,11 @@ import (
 	"golang.org/x/term"
 
 	"github.com/roeehrl/hopsesh/internal/app"
-	"github.com/roeehrl/hopsesh/internal/ui/skill"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/registry"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
+	"github.com/roeehrl/hopsesh/internal/ui/skill"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -66,8 +66,11 @@ func (r *run) emitJSON(v any) error {
 // interactive reports whether questions can be asked.
 func (r *run) interactive() bool {
 	f, ok := r.in.(*os.File)
-	return ok && term.IsTerminal(int(f.Fd()))
+	return ok && isTerminal(int(f.Fd()))
 }
+
+// isTerminal reports whether a file descriptor is a terminal (tests stand one in).
+var isTerminal = term.IsTerminal
 
 // confirm asks a yes/no question; --yes answers yes, a non-interactive run answers no.
 func (r *run) confirm(q string) bool {
