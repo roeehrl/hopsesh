@@ -156,6 +156,7 @@ function folderCard(f) {
     h('span', { class: 'folder-path mono muted', title: f.path }, pathText(f.path)),
     h('span', { class: 'folder-tools' }, f.tools),
     f.command ? h('span', { class: 'muted folder-line' }, 'Run it yourself with ', h('span', { class: 'mono' }, f.command)) : null,
+    f.port ? h('span', { class: 'muted folder-line' }, `Its ${f.agentName} service listens on port `, h('span', { class: 'mono' }, String(f.port))) : null,
     f.error ? h('span', { class: 'err folder-line' }, f.error) : null,
     counts(f),
     h('div', { class: 'account-actions' },

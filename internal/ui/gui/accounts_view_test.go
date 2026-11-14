@@ -125,7 +125,7 @@ func TestAccountsViewOpenCodeFolders(t *testing.T) {
 	if d.Name != "default" || !d.SignedIn || d.Tools != "Terminal and OpenCode share one sign-in (signed in)" {
 		t.Fatalf("default folder: %+v", d)
 	}
-	if w.Name != "Work" || w.SignedIn || w.Default || w.Tools != "Terminal only (not signed in)" {
+	if w.Name != "Work" || w.SignedIn || w.Default || w.Tools != "Terminal only (not signed in)" || w.Port != 49375 || d.Port != 0 {
 		t.Fatalf("Work folder: %+v", w)
 	}
 }
