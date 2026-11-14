@@ -11,6 +11,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/term"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
 )
 
@@ -344,5 +345,40 @@ func TestFakecloudProgram(t *testing.T) {
 	b, _ := os.ReadFile(w.log)
 	if !strings.Contains(string(b), "fakecloud work --same-branch "+s.ID) {
 		t.Fatalf("the call is logged: %s", b)
+	}
+}
+
+// The stand-in opencode runs in this process like the others, on a database under the
+// home its variables name, and refuses to run without one.
+func TestProgramsOpenCode(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "git", "demo")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oc := Programs(t.TempDir(), map[string]string{"HOME": home})["opencode"]
+	if r := oc([]string{"opencode", "--version"}, agent.RunOptions{}); strings.TrimSpace(string(r.Stdout)) != OpenCodeVersionLine {
+		t.Fatalf("--version: %q", r.Stdout)
+	}
+	exp, err := os.ReadFile(filepath.Join("..", "..", "..", "agents", "opencode", "testdata", "2.3.0", "export-01.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(home, "export.json")
+	if err := os.WriteFile(file, exp, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := oc([]string{"opencode", "session", "import", file, "--directory", dir, "--standalone"}, agent.RunOptions{Dir: dir})
+	if r.Code != 0 || !strings.Contains(string(r.Stdout), "Imported session: ses_e29aa1ec8ffes7x6RCUekHyBbf") {
+		t.Fatalf("import: %d %s %s", r.Code, r.Stdout, r.Stderr)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".local", "share", "opencode", "opencode.db")); err != nil {
+		t.Fatalf("the database is not in the home given: %v", err)
+	}
+	if r := oc([]string{"opencode", "session", "export", "ses_e29aa1ec8ffes7x6RCUekHyBbf", "--standalone"}, agent.RunOptions{Dir: dir}); r.Code != 0 || !bytes.Contains(r.Stdout, []byte(`"messages"`)) {
+		t.Fatalf("export: %d %s", r.Code, r.Stderr)
+	}
+	if r := Programs(t.TempDir(), nil)["opencode"]([]string{"opencode", "--version"}, agent.RunOptions{}); r.Code == 0 {
+		t.Fatal("without a home of its own the stand-in must refuse to run")
 	}
 }
