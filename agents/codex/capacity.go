@@ -92,6 +92,9 @@ func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Ins
 	if len(recs) > 0 {
 		var mt meta
 		_ = json.Unmarshal(recs[0].Payload, &mt)
+		if recs, err = withInherited(ctx, h, in, mt, recs); err != nil {
+			return c, err
+		}
 		if _, err = paginatedNext(mt, recs); err != nil {
 			return c, err
 		}

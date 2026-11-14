@@ -83,6 +83,9 @@ func (m *Module) Read(ctx context.Context, h agent.Host, in agent.Install, s age
 	if err := json.Unmarshal(recs[0].Payload, &mt); err != nil {
 		return ir.Segment{}, &agent.FormatError{Path: s.Path, Line: 1, Err: err}
 	}
+	if recs, err = withInherited(ctx, h, in, mt, recs); err != nil {
+		return ir.Segment{}, err
+	}
 	if _, err := paginatedNext(mt, recs); err != nil {
 		return ir.Segment{}, err
 	}
