@@ -126,11 +126,12 @@ func (r sqlReader) catalogWindow(ctx context.Context, model modelRef) (string, i
 	return cached.Digest, mm.Limit.Context, nil
 }
 
-// clampInt is n as an int, held within int's range (a count from SQL is an int64).
+// clampInt is n as an int, held within the range of a 32-bit int (a count from SQL is an
+// int64; no context window comes near the bound).
 func clampInt(n int64) int {
 	switch {
-	case n > int64(math.MaxInt):
-		return math.MaxInt
+	case n > math.MaxInt32:
+		return math.MaxInt32
 	case n < 0:
 		return 0
 	}
