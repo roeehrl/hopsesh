@@ -394,12 +394,15 @@ export async function asking(agentName, call, allow, what = "open") {
 // agent's background service there.
 export const onMachine = (e, method = "ContinueOnMachine") =>
   asking(e.agentName, () => api(method, e.machine, e.key), () => api("AllowServiceRestart", e.machine, e.key));
-export const askRestart = (agentName, msg, what) => ask({
-  title: `Restart ${agentName || "the agent"}'s background service?`,
-  body: [h("p", { style: "margin:0 0 8px" }, rich(msg.slice(RESTART.length))),
-    h("p", { style: "margin:0" }, `If you go on, ${agentName || "the agent"} stops its running service and starts it again with the version hopsesh opens it with. Its windows reconnect; a turn it is running now stops.`)],
-  ok: `Restart it and ${what}`, danger: true,
-});
+export const askRestart = (agentName, msg, what) => {
+  const name = agentName || "the agent", why = msg.slice(RESTART.length).trim();
+  return ask({
+    title: `Restart ${name}'s background service?`,
+    body: [h("p", { style: "margin:0 0 8px" }, rich(/[.!?]$/.test(why) ? why : why + ".")),
+      h("p", { style: "margin:0" }, `If you go on, ${name} stops its running service and starts it again with that other version. Its windows reconnect; a turn it is running now stops.`)],
+    ok: `Restart it and ${what}`, danger: true,
+  });
+};
 
 export function ask({ title, body, ok, danger = false }) {
   return new Promise((resolve) => {

@@ -267,7 +267,7 @@ type PlaceDTO struct {
 	Count   int    `json:"count"`
 	Waiting bool   `json:"waiting,omitempty"`
 	// In is the agent whose desktop app runs it, for an unknown place inside another
-	// agent's app (a terminal panel of OpenCode desktop): "Running in OpenCode".
+	// agent's app (a terminal panel of OpenCode desktop): "Running in OpenCode desktop".
 	In string `json:"in,omitempty"`
 }
 
@@ -449,6 +449,9 @@ func (a *App) RevealEntry(machine, key string) error {
 	}
 	if !local || e.Session.Path == "" {
 		return errors.New("only a session on this machine can be revealed")
+	}
+	if m, ok := a.snapshot().Module(e.Agent); ok && agent.IsVirtual(m) {
+		return fmt.Errorf("%s keeps its sessions in a database, not in a file to show", m.Spec().Name)
 	}
 	p := filepath.FromSlash(e.Session.Path)
 	if revealHook != nil {

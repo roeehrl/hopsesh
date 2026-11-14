@@ -374,7 +374,7 @@ function details(e) {
   return section("details", "Details", false, null, h("dl", { class: "kv wide" },
     kv("Session ID", h("span", { class: "id-line" }, h("span", { class: "mono", style: "font-size:11.5px" }, id),
       h("button", { class: "btn small", "aria-label": "Copy session ID", onclick: async () => { await api("CopyText", id); toast("Copied the session ID"); } }, "Copy"))),
-    kv("File", e.path ? path(e.path, 11) : null),
+    kv("File", e.path && !agentInfo(e.agent)?.virtual ? path(e.path, 11) : null),
     kv("Size", sizeOf(e) || null),
     kv("Agent", [e.agentName, e.agentVersion ? " " + e.agentVersion : ""].join("")),
     kv("Machine", e.cloud ? cloudTitle(e.machine) : e.machine === here() ? `${e.machine} (${sys.here})` : e.machine),

@@ -29,7 +29,7 @@ func TestCachedGuardDoesNotDeclareCurrentHooksMissingOrEffective(t *testing.T) {
 	e.Cached = false
 	set(nil)
 	// Not checked yet and no check running: unknown, saying so, never "checking".
-	if g := guardFor(core, e, nil); g.Checking || g.Effective || g.State != guardUnknown || g.Action != actionSettings || g.Problem == "" {
+	if g := guardFor(core, e, nil); g.Checking || g.Effective || g.State != guardUnknown || g.Action != actionMachines || g.Problem == "" {
 		t.Fatalf("unchecked hooks: %+v", g)
 	}
 	health.mu.Lock()
@@ -95,7 +95,7 @@ func TestHookProblemsUncheckedPlugin(t *testing.T) {
 		t.Fatalf("problems: %+v", got)
 	}
 	hooks[0].Installed = false
-	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || got[0].Message != "The protection plugin is not installed, so originals are not protected." || got[0].Fix != "Install the plugin in Settings › General." {
+	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || got[0].Message != "The protection plugin is not installed, so originals are not protected." || got[0].Fix != "Install the plugin in Settings › Machines." {
 		t.Fatalf("problems: %+v", got)
 	}
 }

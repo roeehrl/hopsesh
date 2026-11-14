@@ -741,7 +741,10 @@ screen("done", (d, p, o) => {
         d.inApp ? null : h("button", { class: "btn big", onclick: other }, resultPlace === "terminal" ? "Resume in hopsesh Terminal" : `Resume in ${sys.terminal}`),
         h("button", { class: "btn big", onclick: copy }, "Copy the command")),
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.command), d.machine ? h("button", { class: "btn", onclick: copy }, "Copy") : null),
-      d.restartsService ? h("span", { class: "warn", style: "font-size:12px" }, `Opening it now restarts ${d.agent}'s background service (see below); hopsesh asks before it does.`) : null,
+      // Only hopsesh's own open asks; the command, run there by hand, doesn't.
+      d.restartsService ? h("span", { class: "warn", style: "font-size:12px" }, d.machine && !(d.remoteLogin && d.remoteKey)
+        ? `Running this command on ${d.machine} now restarts ${d.agent}'s background service there (see below), without asking.`
+        : `Opening it now restarts ${d.agent}'s background service (see below); hopsesh asks before it does.`) : null,
       h("span", { class: "muted", style: "font-size:12px" }, d.noWork ? "Opens the existing session; no new conversation or briefing was written." : d.kind === "continue" ? "Hopsesh prepared the history and briefing. Import notices are written by Hopsesh, not by the destination agent."
         : `Its first message tells ${d.agent} where the session came from and asks it to check the repository and files before going on.`))),
     h("section", { class: "card" }, h("div", { class: "dlg-body" }, h("span", { class: "sec-h" }, "What happened"), happened(d, p),

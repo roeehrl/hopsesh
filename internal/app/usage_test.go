@@ -31,7 +31,7 @@ func TestUsageMessages(t *testing.T) {
 	bytes := Entry{Machine: "a", Location: agent.MachineLocation("a"), Agent: "claude", AgentName: "Claude Code", Session: agent.Summary{Size: 2048}}
 	inv := &Inventory{Entries: []Entry{msgs, bytes}}
 	for _, u := range inv.Usage("a") {
-		if u.Agent == "opencode" && (u.Bytes != 0 || u.Sessions != 1) {
+		if u.Agent == "opencode" && (u.Bytes != 0 || u.Sessions != 1 || u.Messages != 24) {
 			t.Fatalf("OpenCode usage counted its messages as bytes: %+v", u)
 		}
 	}

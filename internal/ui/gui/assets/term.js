@@ -165,6 +165,9 @@ function consequence(t, update) {
   if (t.kind === "signin") return "the sign-in stops";
   if (t.kind === "shell") return "the shell and what runs in it end";
   const back = !reopens(t) ? "" : update ? ", and hopsesh resumes it after the update" : ", and hopsesh offers to resume it next time";
+  // An agent whose turns run in its background service (OpenCode): the tab only shows it.
+  const svc = (state.info?.agents || []).find((a) => a.name === t.agent)?.serviceTurns;
+  if (working(t) && svc) return `its turn in progress goes on in ${t.agent}'s background service; only this tab closes` + back;
   if (working(t)) return "its turn in progress stops: the conversation is kept up to its last finished turn" + back;
   if (t.attention) return "it waits for you; the conversation is kept as it is" + back;
   return "between turns; the conversation is kept as it is" + back;

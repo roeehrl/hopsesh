@@ -227,7 +227,7 @@ func hookProblems(hooks []app.MovementHookStatus, mode string, approves func(age
 		case !h.Enabled:
 			p.State, p.Message = "settings", h.Reason
 		case !h.Installed:
-			p.State, p.Message, p.Fix = "not-installed", "The protection "+noun+" is not installed, so originals are not protected.", "Install the "+noun+" in Settings › General."
+			p.State, p.Message, p.Fix = "not-installed", "The protection "+noun+" is not installed, so originals are not protected.", "Install the "+noun+" in Settings › Machines."
 		case h.Trust != nil && h.Trust.State == agent.HookUnknown && !approves(h.Agent):
 			continue
 		case h.Trust != nil && h.Trust.State != agent.HookTrusted:
@@ -311,7 +311,7 @@ func localGuard(g *GuardDTO, e app.Entry) {
 			return
 		}
 		g.Problem = "The protection hooks on this machine haven't been checked yet, so hopsesh can't tell whether this copy is protected."
-		g.Fix, g.Action = "Check them in Settings › General.", actionSettings
+		g.Fix, g.Action = "Check them in Settings › Machines.", actionMachines
 		return
 	}
 	g.CheckedAt = d.Checked
@@ -320,7 +320,7 @@ func localGuard(g *GuardDTO, e app.Entry) {
 			g.Problem, g.Fix = p.Message, p.Fix
 			switch p.State {
 			case agent.HookUnknown, "failed":
-				g.Fix, g.Action = nonEmptyStr(p.Fix, "Check again in Settings › General."), actionSettings
+				g.Fix, g.Action = nonEmptyStr(p.Fix, "Check again in Settings › Machines."), actionMachines
 				return
 			case "not-installed":
 				g.Action = actionSetUp
@@ -345,7 +345,7 @@ func localGuard(g *GuardDTO, e app.Entry) {
 		plugin = plugin || h.Agent == e.Agent && h.Plugin
 	}
 	g.State = guardUnprotected
-	g.Problem, g.Fix, g.Action = "No protection "+hookNoun(plugin)+" covers this account, so the original is not protected.", "Install the hooks in Settings › General.", actionSetUp
+	g.Problem, g.Fix, g.Action = "No protection "+hookNoun(plugin)+" covers this account, so the original is not protected.", "Install the hooks in Settings › Machines.", actionSetUp
 }
 
 // remoteGuard is the protection of a copy left on machine m, from st, what hopsesh last

@@ -2,6 +2,7 @@ package gui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,7 +41,7 @@ func TestContinuedIntoOpenCodeAsksToOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := findEntry(t, scan, "claude/"+sid)
-	if _, err := a.Plan(e.Machine, e.Key, "opencode", OptsDTO{}); err != nil {
+	if _, err := a.Plan(e.Machine, e.Key, "opencode", OptsDTO{Go: true}); err != nil {
 		t.Fatal(err)
 	}
 	d, err := a.Apply()
@@ -65,6 +66,10 @@ func TestContinuedIntoOpenCodeAsksToOpen(t *testing.T) {
 	if !ok || !strings.HasPrefix(x.spec.Argv[0], bin) {
 		t.Fatalf("the tab runs another opencode than the stand-in: %+v", x)
 	}
+	// The plan's own start: its first prompt, not a bare resume.
+	if i := slices.Index(x.spec.Argv, "--prompt"); i < 0 || i+1 >= len(x.spec.Argv) || x.spec.Argv[i+1] != "Continue." {
+		t.Fatalf("the agreed open lost the plan's prompt: %q", x.spec.Argv)
+	}
 	tb := waitTab(t, a, func(d TermTab) bool { return d.ID == r.Tab && d.State == pty.Exited })
 	if !strings.HasPrefix(tb.Command, "opencode ") {
 		t.Fatalf("the tab: %+v", tb)
@@ -86,6 +91,8 @@ func TestTabProgramNames(t *testing.T) {
 		"/usr/bin/claude": "claude",
 		"/bin/zsh":        "zsh",
 		"claude-work":     "claude-work", // an account folder's command keeps its name
+		"OPENCODE.EXE":    "opencode",    // Windows ignores case
+		"tool.Exe":        "tool",
 	} {
 		if got := a.programName(argv0); got != want {
 			t.Errorf("%s: %q, want %q", argv0, got, want)
@@ -93,6 +100,9 @@ func TestTabProgramNames(t *testing.T) {
 	}
 	if m, _ := a.programOf("/bin/zsh"); m != nil {
 		t.Errorf("zsh is %s's", m.Spec().ID)
+	}
+	if m, _ := a.programOf("OpenCode-CLI.EXE"); m == nil || len(a.terminalEnv("OPENCODE.EXE")) != len(m.Spec().TerminalEnv) {
+		t.Errorf("an upper-case program is not OpenCode's: %v", m)
 	}
 	if got := displayCommand(append([]string{a.programName("/x/opencode-cli")}, "-s", "ses_1")); got != "opencode -s ses_1" {
 		t.Errorf("the command: %q", got)

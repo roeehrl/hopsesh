@@ -104,7 +104,10 @@ func (a *App) terminalEnv(argv0 string) []string {
 // opencode-cli). Another program is its file name (module nil), an account folder's
 // command (claude-work) included.
 func (a *App) programOf(argv0 string) (agent.Module, string) {
-	base := strings.TrimSuffix(filepath.Base(argv0), ".exe")
+	base := filepath.Base(argv0)
+	if ext := filepath.Ext(base); strings.EqualFold(ext, ".exe") {
+		base = strings.TrimSuffix(base, ext) // OPENCODE.EXE too: Windows ignores case
+	}
 	for _, m := range a.snapshot().Modules() {
 		for _, b := range m.Spec().Binaries {
 			if strings.EqualFold(b.Name, base) || strings.EqualFold(b.Name+"-cli", base) {

@@ -111,6 +111,8 @@ func (*Module) Spec() agent.Spec {
 		}},
 		// One desktop process serves every session, through the same background service.
 		Desktop: &agent.Desktop{Tool: "OpenCode desktop", Product: "OpenCode desktop", Shared: true},
+		// hopsesh's tabs attach to that service too (decision D3).
+		ServiceTurns: true,
 		Kinds: []agent.SessionKind{
 			{ID: kindArchived, Name: "Archived sessions", Note: "Sessions archived in OpenCode, which its own lists leave out."},
 		},

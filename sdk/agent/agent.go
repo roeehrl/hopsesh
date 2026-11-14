@@ -120,6 +120,9 @@ type Spec struct {
 	// unless the user turns them on for this agent: conversations that are not coding
 	// sessions to move (the Codex app's voice and Work threads).
 	Kinds []SessionKind
+	// ServiceTurns: the agent's terminal program attaches to its background service, which
+	// runs the turns (OpenCode): a terminal that ends leaves a turn running there.
+	ServiceTurns bool
 	// TerminalEnv are variables ("NAME=value") the agent's programs get in hopsesh's own
 	// terminal tabs, on top of the user's: settings that suit that terminal
 	// (CLAUDE_CODE_FORCE_SYNC_OUTPUT=1). Never a credential; not used in other terminals.

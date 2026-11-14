@@ -109,6 +109,8 @@ function general() {
   ];
 }
 
+const experimental = (name) => `hopsesh's ${name} support is new: some of what it does is checked only against the versions it was tested with`;
+
 function agents() {
   return s.agents.map((a) => {
     const caps = a.capabilities || [];
@@ -117,11 +119,13 @@ function agents() {
       h("div", { class: "set-row" },
         agentBadge(a.id, a.name),
         title(a.name, a.version ? `${a.version}${a.runtime === "app" ? " (built into the desktop app)" : ""} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
-        a.stability === "experimental" ? h("span", { class: "chip st-warn", title: `hopsesh's ${a.name} support is new: some of what it does is checked only against the versions it was tested with` }, "experimental") : null,
+        a.stability === "experimental" ? h("span", { class: "chip st-warn", title: experimental(a.name) }, "experimental") : null,
         h("button", { class: "switch", role: "switch", "aria-checked": a.enabled ? "true" : "false", "aria-label": `${a.name} on`,
           onclick: () => set(!a.enabled, a.remoteControl, a.import, a.enabled ? `${a.name} is off` : `${a.name} is on`) })),
       h("div", { style: "display:flex;gap:5px;flex-wrap:wrap" }, caps.filter((c) => !c.startsWith("cloud-")).map((c) => CAPS[c] || c).sort().map((c) => h("span", { class: "cap" }, c))),
       (a.clouds || []).map((c) => cloudRow(a, c)),
+      // The chip's meaning as text too: a tooltip reaches neither the keyboard nor touch.
+      a.stability === "experimental" ? h("span", { class: "muted", style: "font-size:12px" }, "Experimental: " + experimental(a.name) + ".") : null,
       a.tested?.length ? h("span", { class: "muted", style: "font-size:12px" }, "Tested with " + a.tested.join(", ")) : null,
       a.enabled && caps.includes("remote-control") ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.remoteControl, onchange: (e) => set(true, e.target.checked, a.import, "Saved") }),
         h("span", {}, h("b", {}, `Turn on Remote Control for sessions hopped into ${a.name}`), h("span", { class: "muted" }, "Reach them from your phone or other machines. Needs the agent's own subscription login."))) : null,
@@ -238,9 +242,11 @@ function skill() {
   if (sk.state && sk.state !== "absent" && sk.state !== "foreign") acts.push(h("button", { class: "btn", onclick: () => run(() => api("RemoveSkill", sk.state === "modified"), "Removed the hopsesh skill") }, "Remove"));
   acts.push(h("button", { class: "btn", onclick: preview }, "What it tells your agents"));
   const missing = rules.filter((r) => !r.present);
-  // An agent whose rules hopsesh's protection plugin applies (OpenCode's): without the
-  // plugin they are written but do nothing.
-  const unapplied = rules.filter((r) => r.present && (s.noticeHooks || []).some((x) => x.plugin && !x.installed && r.agent.startsWith(agentName(x.agent))));
+  // An agent folder whose rules hopsesh's protection plugin applies (OpenCode's): without
+  // the plugin there, or with one the agent doesn't load, they are written but do nothing.
+  const pluginOf = (r) => (s.noticeHooks || []).find((x) => x.plugin && x.agent === r.agentId && (r.profile ? x.profile === r.profile : !x.profileLabel));
+  const unapplied = rules.filter((r) => { const x = r.present && pluginOf(r); return x && (!x.installed || x.trust?.state === "missing"); });
+  const why = [...new Set(unapplied.map((r) => pluginOf(r).installed ? "isn't loaded" : "isn't installed"))].sort().join(" or ");
   return [card(
     h("div", { class: "set-row" }, title("The hopsesh skill", "Teaches each installed agent to find your sessions, hop one here, continue it in another agent or send it on. It shows you the plan and acts only after you say yes."),
       chip(SKILL_TEXT[sk.state] || [sk.state, ""])),
@@ -255,7 +261,7 @@ function skill() {
       : missing.length && (sk.state === "current" || sk.state === "modified") ? h("div", { class: "set-row" },
         h("span", { class: "muted", style: "font-size:12px" }, missing.map((r) => r.agent).join(" and ") + " ask you before every hopsesh command."),
         h("button", { class: "btn", onclick: () => install(sk.state === "modified", true, "Agents can now list and plan without asking; hops still ask") }, "Allow read-only commands")) : null,
-    unapplied.length ? h("span", { class: "warn", style: "font-size:12px" }, `${unapplied.map((r) => r.agent).join(" and ")} ${unapplied.length === 1 ? "applies" : "apply"} these rules through hopsesh's plugin, which isn't installed, so they have no effect there yet. Install the plugin under Protection hooks (Settings › Machines).`) : null,
+    unapplied.length ? h("span", { class: "warn", style: "font-size:12px" }, `${unapplied.map((r) => r.agent).join(" and ")} ${unapplied.length === 1 ? "applies" : "apply"} these rules through hopsesh's plugin, which ${why}, so they have no effect there yet. ${why.includes("loaded") ? "Protection hooks (Settings › Machines) says why." : "Install the plugin under Protection hooks (Settings › Machines)."}`) : null,
     h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, acts),
     h("span", { class: "muted mono", style: "font-size:11px" }, `runs ${s.skillBin}`))];
 }
@@ -481,8 +487,11 @@ function noticeSetup() {
     ...hooks.map(hook => h("div", {class:"set-row"},
       title(hookName(hook, hooks) + (hook.plugin ? " plugin" : ""), `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook) : ""}${hook.outdated ? " · out of date" : ""}${hook.reason ? " · " + hook.reason : ""}`),
       hook.trust && hook.trust.state !== "trusted" && hook.trust.fix ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.fix) : null,
-      hook.trust?.failures && hook.trust.detail ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.detail) : null,
+      (hook.trust?.failures || hook.trust?.state === "missing") && hook.trust.detail ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.detail) : null,
       hook.installed && hook.outdated ? h("button", {class:"btn primary",disabled:off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),"Plugin updated")}, "Update plugin") : null,
+      // Installed, but the agent doesn't run it (and its own settings don't leave it out):
+      // installing it again may fix it.
+      hook.installed && !hook.outdated && hook.trust?.state === "missing" && !hook.trust.excluded ? h("button", {class:"btn primary",disabled:off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),hook.plugin ? "Plugin installed again" : "Hook installed again")}, `Install ${noun(hook)} again`) : null,
       hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),hook.plugin ? "Plugin removed" : "Hook removed")}, "Remove " + noun(hook))
       : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),hook.plugin ? "Plugin installed" : "Hook installed")}, "Install " + noun(hook)))),
     h("div", {style:"display:flex;gap:8px;flex-wrap:wrap"},

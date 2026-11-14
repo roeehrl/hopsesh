@@ -42,7 +42,9 @@ export function placeName(p, e) {
     return a?.desktop?.shared ? `${liveOf(e || {}).app || name} desktop` : `${name} app`;
   }
   // A terminal inside another agent's desktop app (OpenCode desktop's terminal panel).
-  if (p.in) return agentInfo(p.in)?.appName || agentShort(p.in);
+  // Its product name ("OpenCode desktop"), so it doesn't read as the session continued in
+  // that agent.
+  if (p.in) { const a = agentInfo(p.in); return a?.desktop?.product || (a?.appName ? a.appName + " desktop" : agentShort(p.in)); }
   return e?.app ? `${e.app} app` : "Unknown window";
 }
 
@@ -388,7 +390,8 @@ function moveGroups(e, local, inTab) {
   if (agentInfo(e.agent)?.accounts) out.push({heading:"Account",items:[block({id:"account",label:local ? "Move to another account…" : `Move to an account on ${sys.here}…`,sub:local ? "Choose a profile and review the portable conversation" : `Bring this session from ${e.machine} into a profile on ${sys.here}`,run:()=>planFor(e,{target:e.agent})})]});
   if (local && agentHas(e.agent, "read") && agentHas(e.agent, "write")) out.push({heading:"Context recovery",items:[block({id:"bounded",label:"Create bounded continuation…",sub:"Keep the original and archive; prepare a smaller working context on this branch",run:()=>planFor(e,{target:e.agent,bounded:true,targetProfile:e.profile?.id||""})})]});
   const agents = (e.continueIn || []).map((t) => block({ id: "continue:" + t.id, label: `Continue with ${t.name}${local ? "" : " on " + sys.here}…`, icon: agentBadge(t.id, t.name), run: () => planFor(e, { target: t.id }),
-    chip: t.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null }));
+    chip: t.experimental ? h("span", { class: "chip st-warn mini" }, "experimental") : null,
+    sub: t.experimental ? `hopsesh's ${t.name} support is new: checked only against the versions it was tested with` : undefined }));
   if (agents.length) out.push({ heading: "Agent", items: agents });
   const clouds = (e.handoff || []).filter((t) => cloudOf(t.cloud)?.allowed).map((t) => block(handItem(t, () => planHandoff(e, t.cloud, t.bundle))));
   if (clouds.length) out.push({ heading: "Cloud", items: [...clouds, note("A cloud gets a briefing, not this conversation.")] });
@@ -403,7 +406,8 @@ function more(e, local) {
   if (!e.cloud) {
     if(local && [...tabs.values()].some(t=>t.kind==="shell" && t.state!=="exited")) out.push({id:"associate-shell",label:"Organize a shell with this conversation…",run:()=>associateShell(e)});
     out.push({ id: "shell", label: "Open a shell in its folder", disabled: !local, why: onlyHere, run: () => openShell(e) });
-    out.push({ id: "reveal", label: sys.mac ? "Reveal in Finder" : sys.win ? "Show in Explorer" : "Show in Files", disabled: !local, why: onlyHere,
+    // An agent that keeps sessions in a database (OpenCode) has no file to show.
+    if (!agentInfo(e.agent)?.virtual) out.push({ id: "reveal", label: sys.mac ? "Reveal in Finder" : sys.win ? "Show in Explorer" : "Show in Files", disabled: !local, why: onlyHere,
       run: () => api("RevealEntry", e.machine, e.key).catch(fail) });
     out.push({ id: "copy-command", label: "Copy resume command", disabled: !local, why: onlyHere, run: async () => {
       try { await api("CopyText", await api("ResumeCommand", e.machine, e.key)); toast("Copied the resume command"); } catch (err) { fail(err); }
