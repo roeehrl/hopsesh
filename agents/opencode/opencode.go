@@ -192,14 +192,16 @@ func (m *Module) Bundle(ctx context.Context, h agent.Host, in agent.Install, s a
 const claudeAgent = "claude-agent"
 
 // moveWarnings are what a move's preview says about an OpenCode session: a window that has
-// it open while it is idle cannot be seen, and a session of the Claude Agent provider
-// stays an OpenCode session.
+// it open while it is idle cannot be seen, what the copy leaves out, and a session of the
+// Claude Agent provider stays an OpenCode session.
 func (m *Module) moveWarnings(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary) []string {
 	where := h.Facts().Machine
 	if where == "" {
 		where = "the machine it is on"
 	}
-	out := []string{fmt.Sprintf("hopsesh cannot see an OpenCode window (a terminal or the desktop app) that has this session open while it is idle on %s; close it there, so it does not continue the copy left behind", where)}
+	out := []string{fmt.Sprintf("hopsesh cannot see an OpenCode window (a terminal or the desktop app) that has this session open while it is idle on %s; close it there, so it does not continue the copy left behind", where),
+		// OpenCode's import takes the conversation only (the plan's stated losses).
+		"the copy has the conversation only: OpenCode's import does not take the session's /undo snapshots, archived state, short name (slug), fork link, start and update times, instruction state or scheduled jobs"}
 	if r, ok, err := openSQL(ctx, h, in); ok && err == nil {
 		if row, err := r.session(ctx, s.Key.Session); err == nil {
 			var model modelRef
