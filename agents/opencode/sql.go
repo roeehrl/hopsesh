@@ -53,8 +53,6 @@ const tailQuery = `SELECT id, type, seq, data FROM session_message WHERE session
 const tailPartsQuery = `SELECT message_id, ordinal, type, data FROM session_part WHERE session_id = ? AND message_id IN ` +
 	`(SELECT id FROM session_message WHERE session_id = ? ORDER BY seq DESC LIMIT ?) ORDER BY message_id, ordinal`
 
-const countQuery = `SELECT count(*) AS n FROM session_message m WHERE m.session_id = ? AND ` + settledSQL
-
 const stampQuery = `SELECT s.time_updated, (SELECT count(*) FROM session_message m WHERE m.session_id = s.id AND ` + settledSQL + `) AS settled ` +
 	`FROM session_v2 s WHERE s.id = ?`
 
@@ -227,17 +225,6 @@ func joinParts(msgRows, partRows agent.Rows) ([]message, error) {
 		}
 	}
 	return out, nil
-}
-
-func (r sqlReader) session(ctx context.Context, sid agent.SessionID) (session, error) {
-	rows, err := r.sq.Query(ctx, r.db, r.schema.sessionQuery(), string(sid))
-	if err != nil {
-		return session{}, err
-	}
-	if len(rows.Rows) == 0 {
-		return session{}, fmt.Errorf("%w: %s", agent.ErrNotFound, sid)
-	}
-	return sessionFromRow(rows.Rows[0]), nil
 }
 
 func (r sqlReader) stamp(ctx context.Context, sid agent.SessionID) (agent.SessionStamp, error) {

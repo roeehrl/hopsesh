@@ -47,7 +47,8 @@ var (
 	_ agent.HostResumer          = (*Module)(nil)
 )
 
-// VirtualSessions: a session is rows of a database, its size a count of messages.
+// VirtualSessions marks OpenCode's sessions as rows of a database, each one's size a count
+// of messages.
 func (*Module) VirtualSessions() {}
 
 // Detect resolves the roots and, on a Mac, the desktop app. The "db" root names the
