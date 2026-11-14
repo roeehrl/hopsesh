@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -556,7 +557,11 @@ func move(db *sql.DB, sid, dir, home string, getenv lookup, now time.Time, stand
 	if !filepath.IsAbs(dir) && !strings.HasPrefix(dir, "/") {
 		dir = filepath.Join(filepath.FromSlash(r.directory), dir)
 	}
-	dir = filepath.Clean(dir)
+	if strings.HasPrefix(dir, "/") {
+		dir = path.Clean(dir) // a POSIX path, as a fake POSIX machine gives it on any OS
+	} else {
+		dir = filepath.Clean(dir)
+	}
 	if exists, d := isDir(dir); !exists {
 		return &badRequest{msg: "Directory does not exist: " + dir}
 	} else if !d {

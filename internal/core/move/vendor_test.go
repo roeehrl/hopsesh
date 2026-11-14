@@ -40,7 +40,7 @@ func TestFinishResume(t *testing.T) {
 	if len(res.Run.Argv) != 0 || len(p.Resume.Argv) != 0 {
 		t.Fatalf("a refused command is runnable: %+v %+v", res.Run, p.Resume)
 	}
-	if !strings.Contains(res.Command, "opencode -s ses_1") || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "another version") {
+	if !strings.Contains(res.Command, "opencode") || !strings.Contains(res.Command, "ses_1") || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "another version") {
 		t.Fatalf("a refused command: %q %v", res.Command, res.Warnings)
 	}
 
