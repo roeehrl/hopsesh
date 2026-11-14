@@ -7,6 +7,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
+	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
@@ -270,16 +271,29 @@ func setAsideSession(ctx context.Context, side Side, h agent.Host, j *journal.Jo
 
 // resumeNow is the command that resumes a session now on side's machine: the module's
 // HostResumer's, which checks the machine as it is now, else planned (made before the
-// session was there). A resumer that refuses leaves planned, with its reason as a warning.
-func resumeNow(ctx context.Context, side Side, h agent.Host, pl agent.Placement, o agent.ResumeOptions, planned agent.Command, res *Result) agent.Command {
-	hr, ok := side.Module.(agent.HostResumer)
-	if !ok || o.App {
-		return planned
+// session was there). A resumer that refuses leaves planned, with its reason as a warning,
+// and ok false: that command is for the user to read, not for hopsesh to run (OpenCode's
+// would restart a background service of another version).
+func resumeNow(ctx context.Context, side Side, h agent.Host, pl agent.Placement, o agent.ResumeOptions, planned agent.Command, res *Result) (c agent.Command, ok bool) {
+	hr, is := side.Module.(agent.HostResumer)
+	if !is || o.App {
+		return planned, true
 	}
 	c, err := hr.ResumeOn(ctx, h, side.Install, pl.Key, pl, o)
 	if err != nil {
 		res.Warnings = append(res.Warnings, "before you resume it: "+err.Error())
-		return planned
+		return planned, false
 	}
-	return c
+	return c, true
+}
+
+// finishResume sets the move's resume command once the session is there (resumeNow). A
+// command the target refused is shown (Result.Command) but not runnable: Result.Run and
+// the plan's Resume are empty, so no interface opens it.
+func finishResume(ctx context.Context, p *Plan, tgt Side, h agent.Host, res *Result) {
+	c, ok := resumeNow(ctx, tgt, h, p.Placement, p.resumeOpts, p.Resume, res)
+	res.Command, res.Run, p.Resume = launch.Shell(c, res.PromptFile, launch.DefaultShell()), c, c
+	if !ok {
+		res.Run, p.Resume = agent.Command{}, agent.Command{}
+	}
 }

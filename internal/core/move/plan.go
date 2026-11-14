@@ -606,6 +606,7 @@ func planWarnings(p *Plan, in Input, opt Options) {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("the session is still open on %s (%s); hopsesh copies it as it is now and asks the old session to stop (handoff)", p.Source.Location, nonEmpty(in.Live.Status, "live")))
 		}
 	}
+	p.Warnings = append(p.Warnings, p.bundle.Warnings...)
 	if p.Repo.Unpushed > 0 || p.Repo.Dirty > 0 {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("on %s the repository has %d unpushed commit(s) and %d uncommitted file(s) that a checkout here will not contain", p.Source.Location, p.Repo.Unpushed, p.Repo.Dirty))
 	}

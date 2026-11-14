@@ -15,7 +15,6 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/audit"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
-	"github.com/roeehrl/hopsesh/internal/core/launch"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/internal/core/rewrite"
@@ -248,8 +247,7 @@ func applyPlan(ctx context.Context, p *Plan, in Input, env Env) (*Result, error)
 	}
 	// The session is there now: a module whose command depends on the machine as it is
 	// (OpenCode's program must be of its running service's version) says it now.
-	p.Resume = resumeNow(ctx, tgt, tgtHost, p.Placement, p.resumeOpts, p.Resume, res)
-	res.Command, res.Run = launch.Shell(p.Resume, res.PromptFile, launch.DefaultShell()), p.Resume
+	finishResume(ctx, p, tgt, tgtHost, res)
 	if err := j.SealWith(ctx, reachOf(ctx, p, in)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
 	}
@@ -506,6 +504,12 @@ func install(ctx context.Context, p *Plan, in Input, env Env, j *journal.Journal
 	tgtHost, err := tgt.Machine.For(ctx, tgt.Module.Spec(), tgt.Install, j)
 	if err != nil {
 		return "", none, none, err
+	}
+	if ic, ok := tgt.Module.(agent.InstallChecker); ok && agent.InstallsViaVendor(tgt.Module) {
+		// Before anything here changes: the agent here would not import this copy.
+		if err := ic.CheckInstall(ctx, tgtHost, tgt.Install, p.Source.Version); err != nil {
+			return "", none, none, fmt.Errorf("%s here would not import the session: %w", tgt.Module.Spec().Name, err)
+		}
 	}
 	for _, c := range p.SetAside {
 		// A session the agent keeps in a database is backed up and deleted through its

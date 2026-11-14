@@ -282,6 +282,10 @@ func pull(cmd *cobra.Command, refArg string) error {
 			command.Env = append(host.Without(os.Environ(), c.Unset), c.Env...)
 			return command.Run()
 		}
+		if len(p.Resume.Argv) == 0 {
+			// The target refused its resume command (see the warning above).
+			return errors.New("hopsesh moved the session but does not open it here: see the warning above")
+		}
 		l := app.Launch{Kind: termapp.KindSession, Run: p.Resume, Key: p.Placement.Key,
 			Labels: termapp.Labels{Title: p.Title, Agent: p.Agent, Machine: app.LocalName()}}
 		if res.PromptFile != "" && len(l.Run.Argv) > 1 {

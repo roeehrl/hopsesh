@@ -97,6 +97,9 @@ type BundleFile struct {
 // Bundle is every file of one session.
 type Bundle struct {
 	Files []BundleFile `json:"files"`
+	// Warnings are what the module wants a move's preview to say about the session (what
+	// it cannot see or carry), as full sentences.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Main returns the bundle's main file.
@@ -458,6 +461,15 @@ func NewSessionID(m Module, in Install, now time.Time, fallback func() string) S
 type VendorInstaller interface {
 	PostInstaller
 	InstallsViaVendor() bool
+}
+
+// InstallChecker is a VendorInstaller that can tell, before anything changes on the target,
+// that its agent there will not import a session last written by version (the agent
+// version of the session moved, Summary.AgentVersion; "" when unknown). The core asks it
+// before it sets aside the copy a move replaces, so a refusal leaves the target as it was.
+// AfterInstall still checks the copy it imports.
+type InstallChecker interface {
+	CheckInstall(ctx context.Context, h Host, in Install, version string) error
 }
 
 // InstallsViaVendor reports whether a module's sessions are installed by the agent itself.
