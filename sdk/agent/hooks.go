@@ -95,6 +95,33 @@ func NoticeHookCommand(bin string, id ID, profile string, args ...string) (strin
 	return command, nil
 }
 
+// NoticeHookCall is one call of the notice hook, as the agent's hook sent it. Every field
+// is untrusted input; the core checks them after decoding.
+type NoticeHookCall struct {
+	Session string // the session's id
+	Path    string // its transcript file, when the agent names one ("" for a database)
+	Event   string // "SessionStart" or "UserPromptSubmit"
+	Source  string // SessionStart: startup, resume, clear or compact, when the agent says
+}
+
+// NoticeHookAnswer is hopsesh's answer to a call: a notice for the session, or with Block
+// the reason the session's original is blocked. Both empty: nothing to say.
+type NoticeHookAnswer struct {
+	Text  string
+	Block bool
+}
+
+// NoticeHookProtocol is for agents whose notice hook speaks other JSON than the command
+// hooks of Claude Code and Codex (an agent plugin that runs the notice hook itself).
+// Decode reads a call (false: not one to answer). Encode writes the answer, or nil for
+// none; it is called with an empty answer too, so a plugin can tell "nothing to say" from
+// a hook that failed (which writes nothing). Without it the core speaks the command-hook
+// JSON.
+type NoticeHookProtocol interface {
+	DecodeNoticeHook(raw []byte) (NoticeHookCall, bool)
+	EncodeNoticeHook(call NoticeHookCall, answer NoticeHookAnswer) []byte
+}
+
 // NoticeHookPowerShellScript uses single-quoted literals (doubled apostrophes),
 // explicitly passes UTF-8 stdin, and combines --profile= so Windows PowerShell
 // 5.1 cannot discard an empty native argument. Suppress progress before any

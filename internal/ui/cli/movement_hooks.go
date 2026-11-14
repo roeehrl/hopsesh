@@ -89,6 +89,23 @@ func takesNoticeHooks(id agent.ID) bool {
 }
 
 func runPreparedNoticeHook(ctx context.Context, in io.Reader, out io.Writer, id agent.ID, profile string, prepare movementNoticePrepare) error {
+	return runNoticeHookWith(ctx, in, out, noticeProtocol(id), id, profile, prepare)
+}
+
+// noticeProtocol is the JSON agent id's notice hook speaks: its module's own (an agent
+// plugin), else that of Claude Code's and Codex's command hooks.
+func noticeProtocol(id agent.ID) agent.NoticeHookProtocol {
+	if modules != nil {
+		if m, ok := modules.Get(id); ok {
+			if p, ok := m.(agent.NoticeHookProtocol); ok {
+				return p
+			}
+		}
+	}
+	return commandHookProtocol{}
+}
+
+func runNoticeHookWith(ctx context.Context, in io.Reader, out io.Writer, proto agent.NoticeHookProtocol, id agent.ID, profile string, prepare movementNoticePrepare) error {
 	if id == "" || len(profile) > 128 || strings.ContainsFunc(profile, unicode.IsControl) {
 		return nil
 	}
@@ -104,59 +121,34 @@ func runPreparedNoticeHook(ctx context.Context, in io.Reader, out io.Writer, id 
 		if err != nil || len(raw) > noticeHookInputLimit {
 			return
 		}
-		var payload struct {
-			SessionID      string `json:"session_id"`
-			TranscriptPath string `json:"transcript_path"`
-			Event          string `json:"hook_event_name"`
-			Source         string `json:"source"` // SessionStart: startup, resume, clear or compact
-		}
-		if json.Unmarshal(raw, &payload) != nil || payload.SessionID == "" || len(payload.SessionID) > 256 || strings.ContainsFunc(payload.SessionID, unicode.IsControl) || len(payload.TranscriptPath) > 4096 || strings.ContainsRune(payload.TranscriptPath, 0) || payload.Event != "SessionStart" && payload.Event != "UserPromptSubmit" {
+		call, ok := proto.DecodeNoticeHook(raw)
+		if !ok || call.Session == "" || len(call.Session) > 256 || strings.ContainsFunc(call.Session, unicode.IsControl) || len(call.Path) > 4096 || strings.ContainsRune(call.Path, 0) || call.Event != "SessionStart" && call.Event != "UserPromptSubmit" || len(call.Source) > 64 {
 			return
 		}
 		// Path is untrusted input, used solely by the app's bounded local resolver.
-		prepared, err := prepare(ctx, id, profile, payload.SessionID, payload.TranscriptPath, payload.Event, payload.Source)
-		notice := prepared.Text
-		if err != nil || notice == "" || ctx.Err() != nil {
-			return
+		prepared, err := prepare(ctx, id, profile, call.Session, call.Path, call.Event, call.Source)
+		if err != nil || ctx.Err() != nil {
+			return // fail open, saying nothing: a plugin counts that as a failure
 		}
-		notice = strings.Map(func(r rune) rune {
+		notice := strings.Map(func(r rune) rune {
 			if unicode.IsControl(r) || r == 0x2028 || r == 0x2029 || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069 {
 				return ' '
 			}
 			return r
-		}, notice)
+		}, prepared.Text)
 		if len(notice) > noticeHookTextLimit {
 			notice = notice[:noticeHookTextLimit]
 			for !utf8.ValidString(notice) {
 				notice = notice[:len(notice)-1]
 			}
 		}
-		var b []byte
-		switch {
-		case prepared.Block && payload.Event == "UserPromptSubmit":
-			// Claude Code and Codex both refuse the prompt and show the reason.
-			b, _ = json.Marshal(struct {
-				Decision string `json:"decision"`
-				Reason   string `json:"reason"`
-			}{"block", notice})
-		default:
-			b, _ = json.Marshal(struct {
-				SystemMessage      string `json:"systemMessage"`
-				HookSpecificOutput struct {
-					Event   string `json:"hookEventName"`
-					Context string `json:"additionalContext"`
-				} `json:"hookSpecificOutput"`
-			}{SystemMessage: notice, HookSpecificOutput: struct {
-				Event   string `json:"hookEventName"`
-				Context string `json:"additionalContext"`
-			}{payload.Event, notice}})
-		}
-		b = append(b, '\n')
-		if ctx.Err() != nil {
+		b := proto.EncodeNoticeHook(call, agent.NoticeHookAnswer{Text: notice, Block: prepared.Block && notice != ""})
+		if len(b) == 0 || ctx.Err() != nil {
 			return
 		}
+		b = append(b, '\n')
 		n, err := out.Write(b)
-		if err == nil && n == len(b) && ctx.Err() == nil && prepared.Written != nil {
+		if err == nil && n == len(b) && ctx.Err() == nil && notice != "" && prepared.Written != nil {
 			_ = prepared.Written(ctx)
 		}
 	}()
@@ -166,6 +158,48 @@ func runPreparedNoticeHook(ctx context.Context, in io.Reader, out io.Writer, id 
 	case <-done:
 		return nil
 	}
+}
+
+// commandHookProtocol is the JSON of Claude Code's and Codex's command hooks.
+type commandHookProtocol struct{}
+
+func (commandHookProtocol) DecodeNoticeHook(raw []byte) (agent.NoticeHookCall, bool) {
+	var payload struct {
+		SessionID      string `json:"session_id"`
+		TranscriptPath string `json:"transcript_path"`
+		Event          string `json:"hook_event_name"`
+		Source         string `json:"source"` // SessionStart: startup, resume, clear or compact
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return agent.NoticeHookCall{}, false
+	}
+	return agent.NoticeHookCall{Session: payload.SessionID, Path: payload.TranscriptPath, Event: payload.Event, Source: payload.Source}, true
+}
+
+func (commandHookProtocol) EncodeNoticeHook(call agent.NoticeHookCall, a agent.NoticeHookAnswer) []byte {
+	var b []byte
+	switch {
+	case a.Text == "":
+		return nil
+	case a.Block && call.Event == "UserPromptSubmit":
+		// Claude Code and Codex both refuse the prompt and show the reason.
+		b, _ = json.Marshal(struct {
+			Decision string `json:"decision"`
+			Reason   string `json:"reason"`
+		}{"block", a.Text})
+	default:
+		b, _ = json.Marshal(struct {
+			SystemMessage      string `json:"systemMessage"`
+			HookSpecificOutput struct {
+				Event   string `json:"hookEventName"`
+				Context string `json:"additionalContext"`
+			} `json:"hookSpecificOutput"`
+		}{SystemMessage: a.Text, HookSpecificOutput: struct {
+			Event   string `json:"hookEventName"`
+			Context string `json:"additionalContext"`
+		}{call.Event, a.Text}})
+	}
+	return b
 }
 
 func noticesCmd() *cobra.Command {
