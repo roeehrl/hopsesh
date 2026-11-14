@@ -68,11 +68,17 @@ func segment(sess session, msgs []message, from ir.Cursor) (ir.Segment, error) {
 		nodes []ir.Node
 		owner []int // the message each node came from
 	)
+	subagents := map[string]*ir.ToolResult{} // a child session's latest answer, by its id
 	for i, msg := range msgs {
-		if msg.Type == "assistant" && msg.Model.ID != "" {
+		if msg.Type == "assistant" && msg.Model.ID != "" && !writtenBy(msg) {
 			seg.Header.Model = msg.Model.String()
 		}
-		for _, n := range lift(msg) {
+		lifted := lift(msg)
+		noteSubagents(msg, subagents)
+		if n, ok := subagentAnswer(msg, subagents); ok {
+			lifted = []ir.Node{n}
+		}
+		for _, n := range lifted {
 			nodes = append(nodes, n)
 			owner = append(owner, i)
 		}
@@ -118,7 +124,8 @@ func segment(sess session, msgs []message, from ir.Cursor) (ir.Segment, error) {
 // lift is one message's nodes (§4 of the design): prompts, replies, reasoning, tool calls
 // with their results, compactions, the person's own shell commands, and notes for a
 // folder change or a skill. OpenCode's bookkeeping (system, synthetic, idle, agent and
-// model switches) is left out.
+// model switches) is left out; segment adds a subagent's answer (a synthetic message) to
+// its call's result.
 func lift(msg message) []ir.Node {
 	ts := millis(msg.Time.Created)
 	native := func(anchor string, payload json.RawMessage) *ir.Native {
@@ -186,6 +193,47 @@ func lift(msg message) []ir.Node {
 		out = append(out, ir.Node{Kind: ir.KindMessage, Actor: ir.User, Time: ts, Text: "[used the skill " + name + "]", Native: native(msg.ID, msg.Raw)})
 	}
 	return out
+}
+
+// noteSubagents records msg's subagent calls by the child session each started (or
+// continued): its answers arrive later, as synthetic messages naming that session.
+func noteSubagents(msg message, calls map[string]*ir.ToolResult) {
+	if msg.Type != "assistant" {
+		return
+	}
+	for _, it := range msg.items() {
+		if it.Type != "tool" || it.Name != "subagent" {
+			continue
+		}
+		var child string
+		_ = json.Unmarshal(it.State.Metadata["sessionID"], &child)
+		if _, res := toolNodes(it); child != "" && res != nil {
+			calls[child] = res
+		}
+	}
+}
+
+// subagentAnswer is a subagent's answer (a synthetic message from the subagent's session,
+// which OpenCode gives the model after the call returned) as the call's result: what the
+// call returned so far and the answer. It is a node of its own where the answer came, so
+// the nodes before it stay as they were read; a converter takes a call's last result.
+// Other synthetic messages are left out, as lift leaves them.
+func subagentAnswer(msg message, calls map[string]*ir.ToolResult) (ir.Node, bool) {
+	if msg.Type != "synthetic" || strings.TrimSpace(msg.Text) == "" {
+		return ir.Node{}, false
+	}
+	var source, child string
+	_ = json.Unmarshal(msg.Metadata["source"], &source)
+	_ = json.Unmarshal(msg.Metadata["childID"], &child)
+	call, ok := calls[child]
+	if source != "subagent" || !ok {
+		return ir.Node{}, false
+	}
+	res := *call
+	res.Output = strings.TrimSpace(strings.Join([]string{call.Output, msg.Text}, "\n\n"))
+	calls[child] = &res
+	return ir.Node{Kind: ir.KindToolResult, Actor: ir.User, Time: millis(msg.Time.Created), Result: &res,
+		Native: &ir.Native{Format: nativeFormat, Anchor: msg.ID, Payload: canonical(msg.Raw)}}, true
 }
 
 func hasFields(raw json.RawMessage) bool {

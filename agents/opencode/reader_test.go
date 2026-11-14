@@ -519,3 +519,59 @@ func TestCanonicalIsStable(t *testing.T) {
 		t.Fatalf("%s vs %s", a, b)
 	}
 }
+
+// A subagent's answer, which OpenCode gives the model as a synthetic message after the
+// call returned, is added to the call's result where it came: a result node of the call
+// with what the call returned and the answer. The nodes before it are those read before
+// the answer arrived, so a cursor taken then still reads on.
+func TestReaderFoldsSubagentAnswer(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	sess, msgs, err := m.transcript(ctx, h, in, sesSubagent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seg, err := segment(sess, msgs, ir.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var call ir.NodeID
+	var callID string
+	results := 0
+	for _, n := range seg.Nodes {
+		if n.Kind == ir.KindToolCall && n.Tool.Subagent != nil {
+			call, callID = n.ID, n.Tool.CallID
+		}
+		if n.Kind == ir.KindToolResult && n.Result.CallID == callID {
+			results++
+			if results == 2 && (!strings.Contains(n.Result.Output, "The subagent is working in the background") || !strings.HasSuffix(n.Result.Output, "pong\n</subagent>") ||
+				n.Native.Anchor != "msg_1d657cd0e001Ap3YjB25b3AHpN") {
+				t.Fatalf("the answer: %+v", n.Result)
+			}
+		}
+	}
+	if call == "" || results != 2 {
+		t.Fatalf("the subagent call %s has %d results", call, results)
+	}
+	// Read before the answer came (the messages up to it): the same nodes, and a cursor
+	// taken then reads the answer and what follows.
+	var answer int
+	for i, msg := range msgs {
+		if msg.Type == "synthetic" {
+			answer = i
+		}
+	}
+	early, err := segment(sess, msgs[:answer], ir.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range early.Nodes {
+		if seg.Nodes[i].ID != n.ID {
+			t.Fatalf("node %d changed when the answer came", i)
+		}
+	}
+	rest, err := segment(sess, msgs, early.Cursor)
+	if err != nil || len(rest.Nodes) != len(seg.Nodes)-len(early.Nodes) || rest.Nodes[0].Kind != ir.KindToolResult {
+		t.Fatalf("read on from before the answer: %d nodes, %v", len(rest.Nodes), err)
+	}
+}
