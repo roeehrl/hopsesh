@@ -106,12 +106,20 @@ func cloudBrief(nodes []ir.Node, r BriefRequest) BriefResult {
 	return res
 }
 
+// article is "an" before a name that starts with a vowel ("an OpenCode session"), else "a".
+func article(name string) string {
+	if name != "" && strings.ContainsRune("AEIOUaeiou", rune(name[0])) {
+		return "an"
+	}
+	return "a"
+}
+
 // cloudText is a cloud briefing: the frame, the code, what was not carried, the plan, the
 // user's latest requests, the last command, notes, rules and the next step.
 func cloudText(nodes []ir.Node, r BriefRequest, cut cloudCut) string {
 	bf := r.Briefing
 	var b strings.Builder
-	fmt.Fprintf(&b, "%sThis task continues a %s session", agent.NotePrefix, r.From)
+	fmt.Fprintf(&b, "%sThis task continues %s %s session", agent.NotePrefix, article(r.From), r.From)
 	var about []string
 	if bf.SourceID != "" {
 		about = append(about, shortID(bf.SourceID))

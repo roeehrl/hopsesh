@@ -107,3 +107,12 @@ func TestBriefCloudBudget(t *testing.T) {
 		t.Fatalf("the frame must stay:\n%s", b.Text[:200])
 	}
 }
+
+// A cloud briefing names the session it continues with the right article.
+func TestBriefArticle(t *testing.T) {
+	for name, want := range map[string]string{"OpenCode": "an", "Claude Code": "a", "Codex": "a", "": "a"} {
+		if got := article(name); got != want {
+			t.Errorf("%q: %q, want %q", name, got, want)
+		}
+	}
+}
