@@ -242,8 +242,10 @@ func checkStandalone(svc service, binary, newest string) error {
 // the desktop app or another window), so it must be of the running service's version.
 // The PATH opencode when it is; else the desktop app's bundled CLI, or a CLI the desktop
 // app staged, of that version (found by their version files and folder names: nothing is
-// run). With the service stopped, any opencode will do; when the probe failed, none.
-func resumeProgram(ctx context.Context, h agent.Host, in agent.Install, svc service) (string, error) {
+// run). With the service stopped, any opencode will do; when the probe failed, none. When
+// none is of the service's version and the person agreed to restart the service
+// (restart, decision D2), the PATH opencode.
+func resumeProgram(ctx context.Context, h agent.Host, in agent.Install, svc service, restart bool) (string, error) {
 	switch svc.State {
 	case serviceStopped:
 		return binName, nil
@@ -266,12 +268,16 @@ func resumeProgram(ctx context.Context, h agent.Host, in agent.Install, svc serv
 			return c.path, nil
 		}
 	}
+	if restart {
+		return binName, nil
+	}
 	return "", &restartError{Service: want, Have: in.Version}
 }
 
 // restartError is a resume that would restart OpenCode's background service: no
 // opencode of the service's version is on this machine (decision D2: hopsesh asks
-// instead of restarting it unasked).
+// instead of restarting it unasked). It is agent.ErrRestartsService, which the user
+// interfaces ask about before resuming with ResumeOptions.RestartService.
 type restartError struct {
 	Service string // the running service's version
 	Have    string // the PATH opencode's
@@ -283,8 +289,11 @@ func (e *restartError) Error() string {
 		have += " (" + e.Have + ")"
 	}
 	return fmt.Sprintf("OpenCode's background service runs %s, and %s is another version: opening the session with it would restart the service, "+
-		"which the desktop app shares, and stop any turn it is running. Install opencode %s, or quit OpenCode desktop and run `opencode service stop` yourself, then try again", e.Service, have, e.Service)
+		"which the desktop app shares, and stop any turn it is running. Install opencode %s, or quit OpenCode desktop and run `opencode service stop` yourself, then try again; "+
+		"or agree to restart it when hopsesh asks (hopsesh open --restart-service)", e.Service, have, e.Service)
 }
+
+func (e *restartError) Unwrap() error { return agent.ErrRestartsService }
 
 func sameVersion(a, b string) bool {
 	if c, ok := agent.CompareVersions(a, b); ok {

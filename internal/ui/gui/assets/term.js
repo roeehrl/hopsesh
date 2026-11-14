@@ -3,7 +3,7 @@
 // you", the entry points' routing (In this window / In my terminal), and the quit
 // confirmation that lists the programs still running.
 import {showWorkspace} from "./terminal-workspace.js";
-import { api, on, h, state, toast, fail, sys, dialog, count, icon, ago, localAgents, words } from "./core.js";
+import { api, on, h, state, toast, fail, sys, dialog, count, icon, ago, localAgents, words, ask, errText } from "./core.js";
 
 export const tabs = new Map(); // id → the tab (TermTab)
 const revisions = new Map(); // retain removals so a delayed startup RPC cannot resurrect them
@@ -78,10 +78,23 @@ function opened(r) {
   if (r?.notice) toast(r.notice);
 }
 
+// RESTART starts the backend's refusal of a resume that would restart the agent's
+// background service (decision D2): the window asks before resuming anyway.
+const RESTART = "restart-service: ";
+
 // resume continues a session: "here", "terminal", or "" (the setting).
 export async function resume(e, w = "") {
   let r;
-  try { r = await api("ResumeSession", e.machine, e.key, w); } catch (err) { fail(err); return; }
+  try { r = await api("ResumeSession", e.machine, e.key, w); } catch (err) {
+    const msg = errText(err);
+    if (!msg.startsWith(RESTART)) { fail(err); return; }
+    const yes = await ask({ title: `Restart ${e.agentName || "the agent"}'s background service?`, body: msg.slice(RESTART.length), ok: "Restart it and open", danger: true });
+    if (!yes) return;
+    try {
+      await api("AllowServiceRestart", e.machine, e.key);
+      r = await api("ResumeSession", e.machine, e.key, w);
+    } catch (err2) { fail(err2); return; }
+  }
   opened(r);
 }
 

@@ -514,3 +514,27 @@ func TestDeniedTablesAreNeverRead(t *testing.T) {
 		}
 	}
 }
+
+// Decision D2: with no program of the running service's version here, a resume is
+// refused as one that restarts the service (agent.ErrRestartsService); once the person
+// agrees, it runs the PATH opencode.
+func TestResumeRestartingTheService(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	f.status, f.version = serviceURL, "2.2.7"
+	m, h, in := open(t, fh)
+	key := sessionKey(in, sesFiles)
+	pl := agent.Placement{CWD: "/home/u/git/demo"}
+	_, err := m.ResumeOn(ctx, h, in, key, pl, agent.ResumeOptions{})
+	if !errors.Is(err, agent.ErrRestartsService) || !strings.Contains(err.Error(), "--restart-service") {
+		t.Fatalf("not asked: %v", err)
+	}
+	c, err := m.ResumeOn(ctx, h, in, key, pl, agent.ResumeOptions{RestartService: true})
+	if err != nil || c.Argv[0] != "opencode" && !strings.HasSuffix(c.Argv[0], "/opencode") {
+		t.Fatalf("agreed: %v %v", c.Argv, err)
+	}
+	// Agreeing changes nothing when the service is stopped or of the program's version.
+	f.version = "2.3.0"
+	if c, err = m.ResumeOn(ctx, h, in, key, pl, agent.ResumeOptions{RestartService: true}); err != nil || !strings.HasSuffix(c.Argv[0], "opencode") {
+		t.Fatalf("same version: %v %v", c.Argv, err)
+	}
+}

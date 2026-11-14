@@ -176,9 +176,9 @@ func (a *App) ResumeSession(machine, key, where string) (*OpenedDTO, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := core.Resume(inv, e, agent.ResumeOptions{})
+	c, err := core.Resume(inv, e, a.resumeOptions(machine, key, agent.ResumeOptions{}))
 	if err != nil {
-		return nil, err
+		return nil, askRestart(err)
 	}
 	ctx, cancel := ctx20()
 	defer cancel()

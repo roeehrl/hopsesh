@@ -1254,9 +1254,9 @@ func (a *App) ResumeEntry(machine, key string, inApp bool) error {
 	if err != nil {
 		return err
 	}
-	c, err := core.Resume(inv, e, agent.ResumeOptions{App: inApp})
+	c, err := core.Resume(inv, e, a.resumeOptions(machine, key, agent.ResumeOptions{App: inApp}))
 	if err != nil {
-		return err
+		return askRestart(err)
 	}
 	// One live tab per session: never a second copy writing to the same conversation.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1269,6 +1269,49 @@ func (a *App) ResumeEntry(machine, key string, inApp bool) error {
 	}
 	return a.openLaunch(app.Launch{Kind: termapp.KindSession, Run: c, Key: e.Session.Key,
 		Labels: termapp.Labels{Title: titleOf(e.Session), Agent: e.AgentName, Machine: e.Machine}})
+}
+
+// restartWindow is how long the person's agreement to restart an agent's background
+// service for a session (AllowServiceRestart) holds: the resume asked right after.
+const restartWindow = 2 * time.Minute
+
+// AllowServiceRestart records that the person agreed to restart the agent's background
+// service to resume this session, which no program of the service's version can open
+// here (decision D2: OpenCode's service is shared with its desktop app and other windows,
+// whose turns stop). It holds for the next resume of the session, within two minutes.
+func (a *App) AllowServiceRestart(machine, key string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.restartOK == nil {
+		a.restartOK = map[string]time.Time{}
+	}
+	a.restartOK[machine+"\x00"+key] = time.Now()
+}
+
+// restartAsk starts the error of a resume that would restart the agent's background
+// service: the window asks (term.js), then calls AllowServiceRestart and resumes again.
+const restartAsk = "restart-service: "
+
+// askRestart marks a resume that would restart the agent's background service, so the
+// window asks instead of showing the error.
+func askRestart(err error) error {
+	if errors.Is(err, agent.ErrRestartsService) {
+		return fmt.Errorf("%s%w", restartAsk, err)
+	}
+	return err
+}
+
+// resumeOptions are o with the person's agreement to restart the service, taken (once)
+// when AllowServiceRestart recorded it for this session.
+func (a *App) resumeOptions(machine, key string, o agent.ResumeOptions) agent.ResumeOptions {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	k := machine + "\x00" + key
+	if at, ok := a.restartOK[k]; ok {
+		delete(a.restartOK, k)
+		o.RestartService = time.Since(at) < restartWindow
+	}
+	return o
 }
 
 // Undo reverses a move or continuation by its journal id; force undoes it even when the
