@@ -30,15 +30,39 @@ func (h *FakeHost) LoadSQL(t testing.TB, p string, files ...string) {
 	h.dbs[path.Clean(p)] = file
 	h.mu.Unlock()
 	h.Put(p, []byte("SQLite format 3\x00"), time.Now())
+	if len(files) == 0 {
+		return
+	}
+	// All files in one transaction: a statement of its own each would wait for the disk
+	// (on Windows that alone takes seconds for a few hundred rows).
+	db, err := sql.Open("sqlite", writeDSN(file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := h.ExecSQL(p, string(b)); err != nil {
+		if _, err := tx.Exec(string(b)); err != nil {
 			t.Fatalf("%s: %v", f, err)
 		}
 	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeDSN opens a test database for writing. Nothing outlives the test, so no write
+// waits for the disk.
+func writeDSN(file string) string {
+	return "file:" + file + "?_pragma=busy_timeout(2000)&_pragma=synchronous(OFF)"
 }
 
 // ExecSQL changes a database made by LoadSQL, as the agent's own program does: Programs
@@ -48,7 +72,7 @@ func (h *FakeHost) ExecSQL(p, q string, args ...any) error {
 	if !ok {
 		return fmt.Errorf("agenttest: no database at %s", p)
 	}
-	db, err := sql.Open("sqlite", "file:"+file+"?_pragma=busy_timeout(2000)")
+	db, err := sql.Open("sqlite", writeDSN(file))
 	if err != nil {
 		return err
 	}
@@ -143,7 +167,7 @@ func (s fakeSQL) Batch(ctx context.Context, db string, stmts []agent.Statement) 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	budget := agent.NewSQLBudget()
 	var out []agent.Rows
 	for _, st := range stmts {

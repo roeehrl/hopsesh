@@ -114,7 +114,7 @@ func program(data string, write func(*sql.Tx) error) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	if err := write(tx); err != nil {
 		return err
 	}
@@ -577,7 +577,7 @@ func (m *Module) Restore(ctx context.Context, h agent.Host, in agent.Install, id
 	return m.SessionStamp(ctx, h, in, id)
 }
 
-// PlanChangeDir: the agent's program moves the session (DirAgent); its anchor stays.
+// PlanChangeDir has the agent's program move the session (DirAgent); its anchor stays.
 func (*Module) PlanChangeDir(_ context.Context, _ agent.Host, _ agent.Install, s agent.Summary, dir string) (agent.DirPlan, error) {
 	return agent.DirPlan{From: s.CWD, To: dir, Method: agent.DirAgent, Main: s.Path}, nil
 }
