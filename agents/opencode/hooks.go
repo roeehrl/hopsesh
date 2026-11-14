@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"path"
 	"slices"
 
@@ -102,10 +103,23 @@ func (m *Module) MovementHooks(h agent.Host, in agent.Install, bin string, args 
 		return out
 	}
 	out.Dir = &agent.HookDir{Root: rootConfig, Path: dir, Staging: staging,
-		// hopsesh owns the folder whole: an install replaces whatever is there.
-		Merge: func(map[string][]byte) (map[string][]byte, error) { return files, nil },
-		Has:   func(have map[string][]byte) bool { return samePlugin(have, files) },
-		Runs:  pluginRuns,
+		// hopsesh owns its plugin folder whole: an install replaces it (files added to it
+		// go too), and a removal takes it out. A folder of that name that is not hopsesh's
+		// plugin is left alone.
+		Merge: func(have map[string][]byte) (map[string][]byte, error) {
+			if len(have) > 0 && !ownPlugin(have) {
+				return nil, fmt.Errorf("%s is not hopsesh's plugin (its %s names no hopsesh notice hook), so hopsesh leaves it; move it away to install hopsesh's", dir, pluginConfigFile)
+			}
+			return files, nil
+		},
+		Remove: func(have map[string][]byte) (map[string][]byte, error) {
+			if !ownPlugin(have) {
+				return have, nil
+			}
+			return nil, nil
+		},
+		Has:  func(have map[string][]byte) bool { return hasPlugin(have, files) },
+		Runs: pluginRuns,
 	}
 	if !agent.HookVersionAtLeast(in.Version, hookFloor) {
 		out.Reason = agent.NeedsVersion("OpenCode", in.Version, hookFloor)
@@ -131,16 +145,27 @@ func renderPlugin(argv []string, rules string) (map[string][]byte, error) {
 	return files, nil
 }
 
-func samePlugin(have, want map[string][]byte) bool {
-	if len(have) != len(want) {
+// hasPlugin reports whether the folder runs this hopsesh's notice hook (config.json as
+// this install writes it) with hopsesh's plugin files: an older copy of those files still
+// protects (the app reports it as differing), and a file added to the folder changes
+// nothing.
+func hasPlugin(have, want map[string][]byte) bool {
+	if !bytes.Equal(have[pluginConfigFile], want[pluginConfigFile]) {
 		return false
 	}
-	for name, b := range want {
-		if !bytes.Equal(have[name], b) {
+	for _, name := range pluginFiles {
+		if _, ok := have[name]; !ok {
 			return false
 		}
 	}
 	return true
+}
+
+// ownPlugin reports whether a folder is hopsesh's plugin: its config.json runs a hopsesh
+// notice hook for OpenCode.
+func ownPlugin(have map[string][]byte) bool {
+	_, ok := pluginRuns(have)
+	return ok
 }
 
 // pluginRuns is the program a plugin folder's notice hook runs, whatever its arguments

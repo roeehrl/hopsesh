@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/agent/agenttest"
@@ -114,17 +115,28 @@ func TestPluginInstallHasRemove(t *testing.T) {
 	if prog, ok := other.Runs(have); !ok || prog != bin {
 		t.Fatalf("Runs reads the program whatever the arguments: %q %v", prog, ok)
 	}
+	// An older (or edited) copy of the plugin's code, and a file added to the folder (a
+	// .DS_Store), still run this hopsesh's notice hook: installed.
 	if err := os.WriteFile(filepath.Join(d.Path, "hopsesh.js"), []byte("edited"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if have, _ := agent.ReadHookDir(osDirFS{}, pa, other); other.Has(have) {
-		t.Fatal("an edited plugin reads as installed")
+	if err := os.WriteFile(filepath.Join(d.Path, ".DS_Store"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if have, _ := agent.ReadHookDir(osDirFS{}, pa, other); other.Has(have) || !d.Has(have) {
+		t.Fatal("an older copy of this hopsesh's plugin does not read as installed, or another's does")
+	}
+	if have, _ := agent.ReadHookDir(osDirFS{}, pa, d); d.Has(map[string][]byte{"config.json": have["config.json"]}) {
+		t.Fatal("config.json alone reads as installed")
 	}
 	if _, err := agent.InstallHookDir(osDirFS{}, pa, other); err != nil {
 		t.Fatal(err)
 	}
 	if have, _ := agent.ReadHookDir(osDirFS{}, pa, other); !other.Has(have) || d.Has(have) {
 		t.Fatal("the install did not replace the plugin")
+	}
+	if have, _ := agent.ReadHookDir(osDirFS{}, pa, other); len(have) != 4 {
+		t.Fatalf("the install kept a file added to the folder: %v", keys(have))
 	}
 	if changed, err := agent.RemoveHookDir(osDirFS{}, pa, other); err != nil || !changed {
 		t.Fatalf("remove: %v %v", changed, err)
@@ -134,6 +146,24 @@ func TestPluginInstallHasRemove(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(d.Staging); len(entries) != 0 {
 		t.Fatalf("staging copies left: %v", entries)
+	}
+	// A plugins/hopsesh folder that is not hopsesh's is never replaced or removed.
+	for name, b := range map[string]string{"index.js": "export default {}\n", "config.json": `{"argv":["/x/other","notice-hook","--agent","claude"]}`} {
+		if err := os.MkdirAll(d.Path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d.Path, name), []byte(b), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := agent.InstallHookDir(osDirFS{}, pa, d); err == nil || !strings.Contains(err.Error(), "not hopsesh's plugin") {
+		t.Fatalf("installed over someone else's folder: %v", err)
+	}
+	if changed, err := agent.RemoveHookDir(osDirFS{}, pa, d); err != nil || changed {
+		t.Fatalf("removed someone else's folder: %v %v", changed, err)
+	}
+	if have, _ := agent.ReadHookDir(osDirFS{}, pa, d); len(have) != 2 || d.Has(have) {
+		t.Fatalf("someone else's folder changed: %v", keys(have))
 	}
 }
 
@@ -208,6 +238,9 @@ func TestPluginTrust(t *testing.T) {
 	builtin := p("opencode.agent", "builtin", "", "active")
 	failed := p("hopsesh", "local", dir, "failed")
 	failed.State.Error, failed.State.Ref = "Plugin entrypoint not found", "err_1234"
+	// A plugin that fails to load is listed by its folder, with no id.
+	unloaded := p("", "local", dir, "failed")
+	unloaded.State.Error, unloaded.State.Ref = "Plugin must export a default definition\x1b[31m\nwith an id", "err_5678"
 	for _, c := range []struct {
 		name    string
 		plugins []pluginInfo
@@ -218,6 +251,8 @@ func TestPluginTrust(t *testing.T) {
 		{"loaded, folder written another way", []pluginInfo{p("hopsesh", "local", dir+"/", "active")}, agent.HookTrusted, ""},
 		{"removed or denied", []pluginInfo{builtin}, agent.HookMissing, `"-hopsesh"`},
 		{"failed", []pluginInfo{builtin, failed}, agent.HookMissing, "err_1234"},
+		{"failed to load", []pluginInfo{builtin, unloaded}, agent.HookMissing, "definition [31m with an id (err_5678 in OpenCode's log)"},
+		{"failed to load, another hopsesh loaded", []pluginInfo{p("hopsesh", "local", "/elsewhere/hopsesh", "active"), unloaded}, agent.HookMissing, "err_5678"},
 		{"someone else's", []pluginInfo{p("hopsesh", "local", "/elsewhere/hopsesh", "active")}, agent.HookMissing, "another plugin"},
 		{"ours among others", []pluginInfo{p("hopsesh", "local", "/elsewhere/hopsesh", "active"), p("hopsesh", "local", dir, "active")}, agent.HookTrusted, ""},
 	} {
@@ -237,6 +272,9 @@ func TestPluginTrust(t *testing.T) {
 // HookTrust asks only a running service, never a private one (which answers before it
 // loads plugins), and reads the plugin's failure count from its storage.
 func TestHookTrust(t *testing.T) {
+	wait := pluginRetryWait
+	pluginRetryWait = time.Millisecond
+	t.Cleanup(func() { pluginRetryWait = wait })
 	fh, f := newMachine(t, setup{})
 	m, h, in := open(t, fh)
 	dir, _ := pluginDir(h, in)
@@ -266,14 +304,30 @@ func TestHookTrust(t *testing.T) {
 	if got := m.HookTrust(ctx, h, in, nil); got.State != agent.HookTrusted || got.Failures != 3 || !strings.Contains(got.Detail, "did not answer within 5000 ms") {
 		t.Fatalf("with failures: %+v", got)
 	}
+	// A list without hopsesh's plugin (OpenCode may not have reloaded its plugins yet) is
+	// asked for again: three times in all.
+	asked = 0
 	f.onCall = func(args []string) (agent.Result, bool) {
 		if slices.Contains(args, "/api/plugin") {
+			asked++
 			return agent.Result{Stdout: []byte(`{"data":[{"id":"opencode.agent","source":{"type":"builtin"},"state":{"status":"active"}}]}`)}, true
 		}
 		return agent.Result{}, false
 	}
-	if got := m.HookTrust(ctx, h, in, nil); got.State != agent.HookMissing {
-		t.Fatalf("not loaded: %+v", got)
+	if got := m.HookTrust(ctx, h, in, nil); got.State != agent.HookMissing || asked != 3 || !strings.Contains(got.Detail, "not reloaded") {
+		t.Fatalf("not loaded (asked %d): %+v", asked, got)
+	}
+	asked = 0
+	lists[0] = `{"data":[{"id":"opencode.agent","source":{"type":"builtin"},"state":{"status":"active"}}]}`
+	f.onCall = func(args []string) (agent.Result, bool) {
+		if slices.Contains(args, "/api/plugin") {
+			asked++
+			return agent.Result{Stdout: []byte(lists[min(asked, len(lists))-1])}, true
+		}
+		return agent.Result{}, false
+	}
+	if got := m.HookTrust(ctx, h, in, nil); got.State != agent.HookTrusted || asked != 2 {
+		t.Fatalf("loaded a moment later (asked %d): %+v", asked, got)
 	}
 	f.status = "garbled"
 	if got := m.HookTrust(ctx, h, in, nil); got.State != agent.HookUnknown {
@@ -281,7 +335,8 @@ func TestHookTrust(t *testing.T) {
 	}
 }
 
-// The plugin's own tests run with Bun, where it is installed (CI); without Bun they skip.
+// The plugin's own tests run with Bun where it is installed (not yet in CI: PR 9 adds it);
+// without Bun they skip.
 func TestPluginJS(t *testing.T) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {

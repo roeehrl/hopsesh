@@ -28,7 +28,7 @@ var builtinPlugins = []string{"opencode.agent", "opencode.tool.shell"}
 
 // plugin is one plugin OpenCode would load for a folder.
 type plugin struct {
-	id     string
+	id     string // "" for one that failed to load: OpenCode lists it by its folder only
 	dir    string // its folder (or file)
 	entry  string // the entry file
 	failed string // why it did not load ("" when it did)
@@ -129,7 +129,6 @@ func loadPlugin(target string) (plugin, bool) {
 		p.id = string(m[1])
 	} else {
 		p.failed = "Plugin must export a default definition with an id and an effect or setup function."
-		p.id = filepath.Base(target)
 	}
 	return p, true
 }
@@ -168,7 +167,9 @@ func (r *run) pluginList() *value {
 	}
 	add := func(id string, source, state *value) {
 		p := obj()
-		p.set("id", str(id))
+		if id != "" {
+			p.set("id", str(id))
+		}
 		p.set("source", source)
 		f := obj()
 		f.set("server", lit("true"))

@@ -49,7 +49,8 @@ func (m *machine) write(rel, s string) {
 
 // OpenCode lists the plugins a running server loaded: its own, then the config folders'
 // plugin folders, less those a config entry removes ("-id", "-*", "-prefix.*" matching
-// the id) or a policy denies; a private server answers before loading any.
+// the id) or a policy denies; a private server answers before loading any. A plugin that
+// failed to load has no id (only "-*" removes it).
 func TestPluginList(t *testing.T) {
 	m := newMachine(t)
 	m.env["FAKE_OPENCODE_SERVICE"] = "running"
@@ -59,7 +60,7 @@ func TestPluginList(t *testing.T) {
 	m.write(".config/opencode/plugins/broken/index.ts", "export default 42\n")
 	m.write(".config/opencode/plugins/notes/README.md", "no entry: not a plugin\n")
 	m.write(".opencode/plugins/local/server.ts", "export default { id: 'project.local', setup() {} }\n")
-	all := []string{"opencode.agent:active", "opencode.tool.shell:active", "broken:failed", "hopsesh:active", "other.tool:active", "project.local:active"}
+	all := []string{"opencode.agent:active", "opencode.tool.shell:active", ":failed", "hopsesh:active", "other.tool:active", "project.local:active"}
 	if got := m.pluginIDs(); !slices.Equal(got, all) {
 		t.Fatalf("plugins: %v", got)
 	}
@@ -71,9 +72,9 @@ func TestPluginList(t *testing.T) {
 		want         []string
 	}{
 		{"removed by id", `{"plugins":["-hopsesh"]}`, without("hopsesh:active")},
-		{"removed with every plugin", `{"plugins":["-*"]}`, without("hopsesh:active", "other.tool:active", "broken:failed", "project.local:active")},
+		{"removed with every plugin", `{"plugins":["-*"]}`, without("hopsesh:active", "other.tool:active", ":failed", "project.local:active")},
 		{"a prefix of other ids", `{"plugins":["-hop.*","-other.*"]}`, without("other.tool:active")},
-		{"denied by policy", `{"policies":[{"action":"plugin.use","resource":"*","effect":"deny"}]}`, without("hopsesh:active", "other.tool:active", "broken:failed", "project.local:active")},
+		{"denied by policy", `{"policies":[{"action":"plugin.use","resource":"*","effect":"deny"}]}`, without("hopsesh:active", "other.tool:active", ":failed", "project.local:active")},
 		{"a policy for another folder", `{"policies":[{"action":"plugin.use","resource":"*/other.js","effect":"deny"}]}`, without("other.tool:active")},
 		{"allowed first", `{"policies":[{"action":"plugin.use","resource":"*","effect":"allow"},{"action":"plugin.use","resource":"*","effect":"deny"}]}`, all},
 	} {
