@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -238,6 +239,64 @@ func TestHooksAndSkillReadOverSSH(t *testing.T) {
 	}
 	if c := remoteSkill(fsys, skill, "0.6.0"); c.State != CheckOK {
 		t.Fatalf("current: %+v", c)
+	}
+}
+
+// Over SSH, a hook folder (OpenCode's plugin) is installed when its notice hook runs a
+// program that is there. OpenCode asks no approval, so that is known over SSH as well.
+func TestHookFolderReadOverSSH(t *testing.T) {
+	dir := t.TempDir()
+	prog := filepath.Join(dir, "bin", "hopsesh")
+	os.MkdirAll(filepath.Dir(prog), 0o700)
+	os.WriteFile(prog, []byte("#!/bin/sh\n"), 0o700)
+	pa := agent.PathFor(runtime.GOOS)
+	fsys := host.LocalFS()
+	plugin := filepath.Join(dir, "config", "plugins", "hopsesh")
+	d := &agent.HookDir{Root: "config", Path: plugin, Staging: filepath.Join(dir, "config", ".hopsesh"),
+		Runs: func(files map[string][]byte) (string, bool) {
+			var cfg struct{ Argv []string }
+			if json.Unmarshal(files["config.json"], &cfg) != nil || len(cfg.Argv) == 0 {
+				return "", false
+			}
+			return cfg.Argv[0], true
+		}}
+	hi := agent.HookIntegration{Dir: d}
+	if c, ok := remoteHooks(fsys, pa, hi, false); !ok || c.State != CheckOff || c.Fix != FixHooks {
+		t.Fatalf("no folder: %+v", c)
+	}
+	os.MkdirAll(plugin, 0o700)
+	argv, _ := json.Marshal(map[string][]string{"argv": {prog, "notice-hook", "--agent", "opencode"}})
+	os.WriteFile(filepath.Join(plugin, "config.json"), argv, 0o600)
+	os.WriteFile(filepath.Join(plugin, "index.js"), []byte("export default {}\n"), 0o600)
+	if c, _ := remoteHooks(fsys, pa, hi, false); c.State != CheckOK || c.Text != "installed" {
+		t.Fatalf("installed: %+v", c)
+	}
+	if c, _ := remoteHooks(fsys, pa, hi, true); c.Text != trustAtLogin {
+		t.Fatalf("an agent that asks approval: %+v", c)
+	}
+	os.Remove(prog)
+	if c, _ := remoteHooks(fsys, pa, hi, false); c.State != CheckError || !strings.Contains(c.Reason, "isn't there") {
+		t.Fatalf("a plugin whose program is gone is broken: %+v", c)
+	}
+	if _, ok := remoteHooks(fsys, pa, agent.HookIntegration{}, false); ok {
+		t.Fatal("an agent without hooks has one")
+	}
+	if err := (readOnlyHookDirFS{fsys}).WriteFile(filepath.Join(plugin, "x"), nil, 0o600); err == nil {
+		t.Fatal("wrote over SSH")
+	}
+}
+
+// A hook the agent doesn't run (it doesn't list it, or doesn't load it) protects nothing.
+func TestHookNotRunning(t *testing.T) {
+	h := MovementHookStatus{Agent: "opencode", Supported: true, Installed: true, Enabled: true,
+		Trust: &agent.HookTrust{State: agent.HookMissing, Detail: "OpenCode doesn't load the hopsesh plugin", Fix: "Take the entry out"}}
+	c := hookCheck(h, "OpenCode")
+	if c.State != CheckWarn || !strings.Contains(c.Text, "not running in OpenCode") || !strings.Contains(c.Reason, "doesn't load") {
+		t.Fatalf("%+v", c)
+	}
+	h.Trust = &agent.HookTrust{State: agent.HookUnknown, Detail: "OpenCode isn't running"}
+	if c := hookCheck(h, "OpenCode"); c.State != CheckOK {
+		t.Fatalf("not known to be off: %+v", c)
 	}
 }
 

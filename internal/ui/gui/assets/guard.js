@@ -63,7 +63,7 @@ function hookRow(x, r, name) {
   if (t === "needs-review") return { ...base, wait: true, review: true, note: "installed · waiting for your approval in " + app };
   if (t === "disabled") return { ...base, wait: true, review: true, note: "installed · turned off in " + app };
   if (t === "missing") return { ...base, todo: true, note: "not seen by " + app };
-  if (t === "unknown") return { ...base, ok: true, note: "set up (approval not checked)" };
+  if (t === "unknown") return { ...base, ok: true, note: agentInfo(x.agent)?.hookReview ? "set up (approval not checked)" : "set up (not checked yet)" };
   return { ...base, ok: true, note: r ? "installed" : "set up" };
 }
 

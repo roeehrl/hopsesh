@@ -526,3 +526,45 @@ func TestMovementHookWrittenReceiptAppearsInScanJSON(t *testing.T) {
 	}
 	check("pending")
 }
+
+// A hook folder (an agent plugin) is read, installed whole and removed under the
+// machine's hook lock, and only inside the root it names.
+func TestMovementHookFolder(t *testing.T) {
+	root := t.TempDir()
+	config := filepath.Join(root, "config")
+	in := agent.Install{Roots: map[string]string{"data": filepath.Join(root, "data"), "config": config}}
+	want := map[string][]byte{"index.js": []byte("export default {}\n"), "config.json": []byte(`{"argv":["/bin/hopsesh"]}`)}
+	d := &agent.HookDir{Root: "config", Path: filepath.Join(config, "plugins", "hopsesh"), Staging: filepath.Join(config, ".hopsesh"),
+		Merge: func(map[string][]byte) (map[string][]byte, error) { return want, nil },
+		Has: func(have map[string][]byte) bool {
+			return len(have) == len(want) && bytes.Equal(have["index.js"], want["index.js"]) && bytes.Equal(have["config.json"], want["config.json"])
+		}}
+	ctx := context.Background()
+	for _, step := range []struct {
+		action    string
+		supported bool
+		installed bool
+	}{{"status", true, false}, {"install", false, false}, {"install", true, true}, {"status", true, true}, {"remove", true, false}} {
+		st := MovementHookStatus{Supported: step.supported}
+		if err := movementHookDir(ctx, step.action, &st, in, d); err != nil || st.Installed != step.installed || st.Path != d.Path {
+			t.Fatalf("%s: %+v %v", step.action, st, err)
+		}
+	}
+	if _, err := os.Stat(d.Path); !os.IsNotExist(err) {
+		t.Fatalf("removed folder: %v", err)
+	}
+	if entries, _ := os.ReadDir(d.Staging); len(entries) != 1 || entries[0].Name() != ".hopsesh-notice-lock" {
+		t.Fatalf("staging holds more than the lock: %v", entries)
+	}
+	outside := *d
+	outside.Path = filepath.Join(root, "elsewhere", "hopsesh")
+	st := MovementHookStatus{Supported: true}
+	if err := movementHookDir(ctx, "install", &st, in, &outside); err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("a folder outside its root: %v", err)
+	}
+	inside := *d
+	inside.Staging = filepath.Join(d.Path, "staging")
+	if err := movementHookDir(ctx, "install", &st, in, &inside); err == nil {
+		t.Fatal("staged inside the folder")
+	}
+}
