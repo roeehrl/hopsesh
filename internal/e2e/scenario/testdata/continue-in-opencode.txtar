@@ -1,0 +1,41 @@
+# A Claude Code session continues in OpenCode on the same machine. hopsesh writes
+# OpenCode's own transfer and OpenCode's program imports it (on a private server, as its
+# background service is stopped), never writing OpenCode's database; OpenCode lists the new
+# session under the session's own name, and undo deletes it while unused.
+git-repo proj https://github.com/example/proj.git
+claude-session 11111111-2222-4333-8444-555555555555 proj 'Fix the parser' 'please fix the parser in'
+mkdir $HOME/.local/share/opencode
+
+exec hopsesh pull 11111111-2222-4333-8444-555555555555 --in opencode --yes --json
+stdout '"kind": "continue"'
+stdout '"argv": \[\s+"opencode",\s+"-s",\s+"ses_'
+cp stdout pull.json
+result-session pull.json
+grep -count=1 '^opencode session import .*hopsesh.opencode.tmp.ses_.*\.json --directory .*proj --standalone$' $WORK/agents.log
+
+# OpenCode has it, under the session's title, in the repository's folder.
+cd proj
+exec opencode session list --format json --standalone
+stdout '"title": "Fix the parser"'
+cd $WORK
+exec hopsesh ls --host local --agent opencode --json
+stdout '"title": "Fix the parser"'
+stdout '"cwd": ".*proj"'
+stdout '"lastPrompt": "please fix the parser in'
+! stdout 'lastPrompt": "\[hopsesh\]'
+
+# Its messages are OpenCode's own shape: replies hopsesh wrote name its provider, and
+# the session names no model, so OpenCode continues it with the model it would pick.
+exec opencode session export $RETURN_ID --standalone
+stdout '"providerID": "hopsesh"'
+stdout '"type": "idle"'
+
+# Undo deletes the session OpenCode imported (it was not used since).
+exec hopsesh undo --yes
+exec hopsesh ls --host local --agent opencode --json
+! stdout 'Fix the parser'
+grep -count=1 '^opencode session delete '$RETURN_ID' --standalone$' $WORK/agents.log
+
+# hopsesh asked whether the background service runs, and never started it.
+grep '^opencode service status' $WORK/agents.log
+! grep 'started the background service' $WORK/agents.log

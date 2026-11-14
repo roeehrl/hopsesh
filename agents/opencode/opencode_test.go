@@ -111,6 +111,7 @@ func TestDetectRoots(t *testing.T) {
 }
 
 func TestDetectDesktop(t *testing.T) {
+	t.Setenv("HOPSESH_APP_RUNTIMES", "on") // a fake host's /Applications: nothing real is found or run
 	fh := agenttest.NewFakeHost(home)
 	fh.Put("/Applications/OpenCode.app/Contents/Info.plist", []byte("<dict><key>CFBundleIdentifier</key>\n<string>ai.opencode.desktop</string><key>CFBundleShortVersionString</key>\n<string>2.2.7</string></dict>"), timeZero)
 	fh.Put("/Applications/OpenCode.app/Contents/Resources/opencode-cli.version", []byte("2.2.7\n"), timeZero)

@@ -64,6 +64,14 @@ func TestRenderNativeAndNote(t *testing.T) {
 	if !found || res.Report.NativeCalls != 1 {
 		t.Fatalf("native replay: %+v", res.Report)
 	}
+	// Replayed with paths mapped: the command and the folder it ran in.
+	ns := session()
+	ns[2].Tool.Shell.Dir = "/src/demo/sub"
+	mapped := Render(Request{Nodes: ns, From: "Codex", To: "OpenCode", Fidelity: History, Native: true, Window: 1000000,
+		Mappings: []agent.Mapping{{From: "/src/demo", To: "/dst/demo"}}})
+	if it := mapped.Items[1]; it.Tool == nil || it.Tool.Call.Shell.Command != "cat /dst/demo/notes.txt" || it.Tool.Call.Shell.Dir != "/dst/demo/sub" {
+		t.Fatalf("mapped replay: %+v", it.Tool)
+	}
 	note := Render(Request{Nodes: session(), From: "Codex", To: "Claude Code", Fidelity: Note, Window: 1000000})
 	if len(note.Items) != 2 {
 		t.Fatalf("a note is only the briefing and its import notice: %d", len(note.Items))

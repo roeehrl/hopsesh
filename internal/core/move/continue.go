@@ -145,8 +145,11 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		return nil, err
 	}
 	// A full destination remains untouched. The replacement stays on the same
-	// logical branch; this is capacity rollover, never a user fork.
-	if cp.AppendTo != nil && (capacity.Unknown || capacity.Allowance() < 4096) {
+	// logical branch; this is capacity rollover, never a user fork. A writer that cannot
+	// add to a session (OpenCode) rolls over the same way: the new work goes into a new
+	// session that continues the copy there.
+	cannotAdd := cp.AppendTo != nil && !writer.Profile(tgt.Install).PortableAppend
+	if cp.AppendTo != nil && (cannotAdd || capacity.Unknown || capacity.Allowance() < 4096) {
 		cp.Rollover = cp.AppendTo
 		cp.RolloverCursor = cp.expect
 		cp.AppendTo = nil
@@ -157,7 +160,11 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.Warnings = append(p.Warnings, "The original session is too full to add to, so this starts a new session that continues it; the original stays as it is.")
+		if cannotAdd {
+			p.Warnings = append(p.Warnings, spec.Name+" cannot add to an existing session, so this starts a new session that continues the one there; that one stays as it is.")
+		} else {
+			p.Warnings = append(p.Warnings, "The original session is too full to add to, so this starts a new session that continues it; the original stays as it is.")
+		}
 		// The original is not written, so whether it is open no longer matters.
 		p.Blockers = slices.DeleteFunc(p.Blockers, func(b string) bool { return b == "the destination copy is open; quit it first" })
 		p.Warnings = slices.DeleteFunc(p.Warnings, func(w string) bool { return w == openBlockedNote(spec.Name) })
@@ -723,7 +730,9 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 		}
 	}
-	res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
+	// The command checked on the target now that the session is there (an agent that
+	// installs its own sessions picks a program there, or refuses to).
+	finishResume(ctx, p, tgt, h, res)
 	if err := j.SealWith(ctx, reachOf(ctx, p, in)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
 	}

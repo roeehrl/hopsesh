@@ -10,7 +10,8 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// What a machine's protection still needs: hooks not installed or awaiting approval, and
+// What a machine's protection still needs: hooks not installed, not running or awaiting
+// approval, and
 // a skill that is not current; an agent that cannot take a hook asks nothing.
 func TestNeedsOfNamesWhatIsLeft(t *testing.T) {
 	names := (&App{core: app.New(config.Defaults(), all.Registry(), t.TempDir(), nil)}).agentName
@@ -19,8 +20,11 @@ func TestNeedsOfNamesWhatIsLeft(t *testing.T) {
 		{Agent: "claude", Supported: true, Installed: false},
 		{Agent: "codex", Supported: true, Installed: true, Trust: &agent.HookTrust{State: agent.HookNeedsReview}},
 		{Agent: "codex", Supported: false},
+		// Installed but not loaded (OpenCode: a config removes its plugin) asks no approval.
+		{Agent: "opencode", Supported: true, Installed: true, Trust: &agent.HookTrust{State: agent.HookMissing}},
+		{Agent: "opencode", Supported: true, Installed: true, Trust: &agent.HookTrust{State: agent.HookUnknown}},
 	}}
-	if got, want := needsOf(p, names), []string{"Claude Code hook", "Codex hook approval", "skill"}; !reflect.DeepEqual(got, want) {
+	if got, want := needsOf(p, names), []string{"Claude Code hook", "Codex hook approval", "OpenCode hook", "skill"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("%v, want %v", got, want)
 	}
 	if got := needsOf(&app.Protection{Command: true, Skill: app.SkillReport{State: "current"}}, names); len(got) != 0 {

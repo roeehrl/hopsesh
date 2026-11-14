@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/internal/core/proc"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // The login environment: apps started from Finder do not inherit the shell's PATH or
@@ -102,6 +103,9 @@ func adoptLoginEnv(getenv func(string) string, login func() map[string]string) {
 func AdoptLoginPATH() {
 	if runtime.GOOS == "windows" {
 		return // programs inherit the user's PATH there
+	}
+	if !agent.SystemPrograms() {
+		return // a test: the login shell's PATH holds this machine's real agents
 	}
 	if p := LoginEnv()["PATH"]; p != "" {
 		_ = os.Setenv("PATH", mergePath(p, os.Getenv("PATH")))

@@ -52,7 +52,7 @@
         "required": ["path", "kind", "sha256", "size"],
         "properties": {
           "path": {"type": "string", "description": "Relative to the bundle's root folder."},
-          "kind": {"enum": ["doc", "schema", "specs", "program", "fixture", "hook", "registry", "notify", "export"]},
+          "kind": {"enum": ["doc", "schema", "specs", "program", "fixture", "hook", "registry", "notify", "export", "notice"]},
           "agent": {"type": "string"},
           "agentVersion": {"type": "string"},
           "schema": {"type": "string", "description": "The schema the file was validated against."},

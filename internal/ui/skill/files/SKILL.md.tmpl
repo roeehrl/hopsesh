@@ -48,13 +48,15 @@ It moves a session here in the same agent, or continues it in another agent. Run
   from lineage; hopsesh never changes titles). `copies` lists every place and agent that has
   the session when it moved before; the entry is the newest copy.
 - After a move, hopsesh usually **blocks the original**: prompts there are refused with a
-  "Blocked by hopsesh" reason until the session moves back. If you run in such a session,
+  "Blocked by hopsesh" reason until the session moves back (in OpenCode the prompt goes
+  through, and every tool call fails with that reason instead). If you run in such a session,
   tell the user where the moved copy is. Never run `{{.Bin}} unblock` yourself: only the
   user decides to continue an original, because the copies then diverge.
 - A session reference is `[<machine>:][<agent>/]<id-prefix-or-title>`. Without a machine,
   hopsesh takes the newest copy: that is how a session comes back after working on it elsewhere.
 - To act on the session you are running in, find it in `{{.Bin}} ls --host <this machine> --json`:
-  the live session of your agent in this folder.
+  the live session of your agent in this folder. In OpenCode, `$OPENCODE_SESSION_ID` is this
+  session's id: the reference is `opencode/$OPENCODE_SESSION_ID`.
 
 ## Move a session here, or continue it in another agent
 
@@ -103,7 +105,7 @@ hopsesh there makes the change; it must be set up there and receive sessions.
 Plan with `{{.Bin}} cd <ref> <dir> --dry-run --json` and show `plan.from`, `plan.to`,
 `plan.warnings` and `plan.blockers`; after a yes, run `{{.Bin}} cd <ref> <dir> --json --yes`.
 A folder in another repository is blocked unless the user asks for `--other-repo`. When
-`open` is true and `inSession` is set (Claude Code's `/cd <dir>`), the change happens inside
+`open` is true and `inSession` is set (`/cd <dir>` in Claude Code and OpenCode), the change happens inside
 the open session: tell the user to type `inSession` there, and run the command again only if
 they want hopsesh to wait and check (`--wait`). If you run in that session yourself, you
 cannot type it: `/cd` is the user's command. When the session is open and `inSession` is

@@ -34,10 +34,17 @@ func (d dbSchema) listQuery() string {
 	}
 	return `SELECT ` + d.sessionCols() + `, ` +
 		`(SELECT count(*) FROM session_message m WHERE m.session_id = s.id AND ` + settledSQL + `) AS settled, ` + parts +
-		`(SELECT coalesce(json_extract(m.data, '$.metadata.displayText'), json_extract(m.data, '$.text')) FROM session_message m WHERE m.session_id = s.id AND m.type = 'user' ORDER BY m.seq DESC LIMIT 1) AS last_prompt, ` +
-		`(SELECT coalesce(json_extract(m.data, '$.metadata.displayText'), json_extract(m.data, '$.text')) FROM session_message m WHERE m.session_id = s.id AND m.type = 'user' ORDER BY m.seq LIMIT 1) AS first_prompt ` +
+		`(SELECT ` + promptSQL + ` FROM session_message m WHERE m.session_id = s.id AND m.type = 'user' AND ` + ownPromptSQL + ` ORDER BY m.seq DESC LIMIT 1) AS last_prompt, ` +
+		`(SELECT ` + promptSQL + ` FROM session_message m WHERE m.session_id = s.id AND m.type = 'user' AND ` + ownPromptSQL + ` ORDER BY m.seq LIMIT 1) AS first_prompt ` +
 		`FROM session_v2 s ORDER BY s.time_updated DESC`
 }
+
+// promptSQL is a user message's text as the person typed it.
+const promptSQL = `coalesce(json_extract(m.data, '$.metadata.displayText'), json_extract(m.data, '$.text'))`
+
+// ownPromptSQL leaves out hopsesh's own notes (agent.NotePrefix: the briefing a
+// continuation writes as a user message), which are no one's prompt.
+const ownPromptSQL = `ltrim(coalesce(` + promptSQL + `, ''), ' ' || char(9) || char(10) || char(13)) NOT LIKE '[hopsesh] %'`
 
 func (d dbSchema) sessionQuery() string {
 	return `SELECT ` + d.sessionCols() + ` FROM session_v2 s WHERE s.id = ?`
@@ -70,6 +77,10 @@ const maxVersionQuery = `SELECT version FROM session_v2`
 
 const migrationQuery = `SELECT id FROM migration ORDER BY id DESC LIMIT 1`
 
+// pluginStorageQuery reads one entry of a plugin's OpenCode storage (hopsesh's plugin's
+// failure count), and only it, from kv.
+const pluginStorageQuery = `SELECT value FROM kv WHERE key = ?`
+
 // catalogQuery reads the models.dev catalog OpenCode caches, and only it, from kv: the
 // default source's (models-dev:v2:catalog) or a custom one's (models-dev:v2:catalog:<sha1>),
 // whichever OpenCode wrote last; never their ":meta" entries.
@@ -79,10 +90,14 @@ const catalogQuery = `SELECT value FROM kv WHERE (key = 'models-dev:v2:catalog' 
 // The model and usage of the newest completed assistant message: of one session, or of
 // any (for a new session).
 const lastAssistantQuery = `SELECT m.seq, json_extract(m.data, '$.model') AS model, json_extract(m.data, '$.tokens') AS tokens FROM session_message m ` +
-	`WHERE m.session_id = ? AND m.type = 'assistant' AND json_extract(m.data, '$.time.completed') IS NOT NULL ORDER BY m.seq DESC LIMIT 1`
+	`WHERE m.session_id = ? AND m.type = 'assistant' AND json_extract(m.data, '$.time.completed') IS NOT NULL AND ` + modelReplySQL + ` ORDER BY m.seq DESC LIMIT 1`
 
 const anyAssistantQuery = `SELECT json_extract(m.data, '$.model') AS model FROM session_message m WHERE m.type = 'assistant' ` +
-	`AND json_extract(m.data, '$.time.completed') IS NOT NULL ORDER BY m.time_created DESC LIMIT 1`
+	`AND json_extract(m.data, '$.time.completed') IS NOT NULL AND ` + modelReplySQL + ` ORDER BY m.time_created DESC LIMIT 1`
+
+// modelReplySQL leaves out the replies hopsesh wrote (writtenProvider): no model made
+// them, so they name no model and count no tokens.
+const modelReplySQL = `coalesce(json_extract(m.data, '$.model.providerID'), '') <> '` + writtenProvider + `'`
 
 // The newest completed compaction of a session.
 const lastCompactionQuery = `SELECT max(m.seq) AS seq FROM session_message m WHERE m.session_id = ? AND m.type = 'compaction' ` +

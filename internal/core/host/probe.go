@@ -129,16 +129,16 @@ func lookLocal(b agent.Binary, home string) string {
 	return ""
 }
 
-// candidates are where to look for b besides PATH. HOPSESH_APP_RUNTIMES=off leaves out
-// runtimes bundled inside desktop apps (".app/"), so a test machine never runs the real
-// app's agent.
+// candidates are where to look for b besides PATH. Without agent.SystemPrograms (a test)
+// only those under the home folder are: never the system's program folders or a runtime
+// bundled inside a desktop app (".app/"), so a test never runs this machine's real agent.
 func candidates(b agent.Binary, goos string) []string {
 	c, ok := b.Candidates[goos]
 	if !ok {
 		c = b.Candidates["*"]
 	}
-	if os.Getenv("HOPSESH_APP_RUNTIMES") == "off" {
-		c = slices.DeleteFunc(slices.Clone(c), func(p string) bool { return strings.Contains(p, ".app/") })
+	if !agent.SystemPrograms() {
+		c = slices.DeleteFunc(slices.Clone(c), func(p string) bool { return !strings.HasPrefix(p, "~/") || strings.Contains(p, ".app/") })
 	}
 	return c
 }

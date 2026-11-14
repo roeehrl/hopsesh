@@ -182,8 +182,8 @@ Abbreviations:
 | `account.go` | `Account`: provider ids and labels from `auth list --format json` (D7); `Key` empty; Confidence limited. `LocalIdentity` false. `ResumeAcrossAccounts` true. |
 | `fork.go` / `orphan.go` | `VerifyNativeFork`: compares content hashes of the parent's messages up to `fork_boundary` with the child's prefix (fork message-id behaviour UNVERIFIED). `NativeParentGone` = parent row missing. Local only; across machines lineage comes from the sidecar. |
 | `cd.go` | `DirChanger`: `PlanChangeDir` (creates the anchor if missing, §3.5), `ChangeDir` = `api POST …/move` then wait for `location-switched`, `InSession` = `/cd <dir>`. |
-| `integrate.go` | `Integration`: SkillDir `~/.agents/skills`; RuleFile = the plugin's `config.json`. |
-| `hooks.go` / `hooktrust.go` / `plugin/` | Embedded plugin (`plugin/index.ts`, `plugin/package.json`) and a `HookDir` implementation (§5). |
+| `integrate.go` | `Integration`: SkillDir `~/.agents/skills`; RuleFile `{config}/.hopsesh/rules.json`, which the plugin reads (as built in PR 6; the plan said the plugin's `config.json`). |
+| `hooks.go` / `hooktrust.go` / `plugin/` | Embedded plugin (`plugin/index.js`, `plugin/hopsesh.js`, `plugin/package.json`; plain JavaScript as built in PR 6), its `HookDir`, the notice hook's JSON (`NoticeHookProtocol`) and `HookTrust` (§5). |
 | `desktop.go` | App detection, version, `CheckApp`; staged-CLI discovery from the `desktop` root. |
 | `icon.svg` | Neutral icon; trademark wording checked. |
 | `testdata/2.3.0/…` | §7. |
@@ -418,17 +418,26 @@ channel's `opencode-<channel>.db`) and its `-wal`, and `{data}/hopsesh/opencode/
 ### Writer (IR → OpenCode), `writer.go`
 - **Profile:** `{Window: ContextCapacity, NativeReplay: true (shell only), PortableAppend: false}`;
   true only with PR 11 (D4).
-- **`Write(New)`:**
-  1. Session id from the core's `SessionIDMinter`; `msg_` ids ascending; times start at "now − n ms".
-  2. Info: `{id, title, agent:"build", projectID:"global" (recomputed), location:{directory:cwd}, time…}`;
-     `model` omitted unless the target config model is known (never `{}`).
-  3. Messages: user items → `user {text, files:[], agents:[], time}`; agent text → `assistant {agent,
-     content:[{type:"text",text}], finish:"stop", cost:0, tokens:0…, time}`; NativeReplay shell items →
-     assistant `{type:"tool", id:call_…, name:"shell", executed:true, state:{status:"completed",
-     input:{command}, content:[{type:"text",text:output}], metadata:{exit}}}` (content non-empty);
-     an `idle {outcome:"succeeded"}` after each assistant turn (necessity UNVERIFIED); the briefing and
-     the `[hopsesh] Import ready` item as the last assistant text.
-  4. Write JSONL to the anchor, convert, import (success = `Imported session: <id>` on stdout).
+- **`Write(New)`** (as built in PR 5; the PR 5 note below has the reasons):
+  1. Session id: `WriteRequest.SessionID` (the core minted it with the `SessionIDMinter`); without
+     one in OpenCode's form, one made from the operation id. `msg_` ids ascending (time part from the
+     message's time, tail hashed from the session id, operation and position); message times are the
+     items' own, kept increasing, items without one after them; the session's creation time is the
+     write's.
+  2. Info: `{id, title, projectID:"global" (recomputed), location:{directory:cwd}, cost, tokens, time}`;
+     no `model` and no `agent` (OpenCode picks its default for the next turn; never `{}`).
+  3. Messages: user items → `user {text, files:[], time}`; agent text → `assistant {agent:"build",
+     model:{id:<source model or "unknown">, providerID:"hopsesh"}, content:[{type:"text",text}],
+     finish:"stop", cost:0, tokens:0…, time:{created, completed}}`; NativeReplay shell items →
+     assistant `{type:"tool", id:call_…, name:"shell", executed:false, state:{status:"completed",
+     input:{command}, content:[{type:"text",text:output}], metadata:{status, truncated, exit}},
+     time:{created, ran, completed}}` with `finish:"tool-calls"` (a failed call without an exit status
+     is `state:{status:"error", error:{type:"tool.execution", message}}`); an `idle {outcome:"succeeded"}`
+     after each turn of replies, as OpenCode's own turns end; the briefing (a user message) and the
+     `[hopsesh] Import ready` item (the last reply) as the converter renders them.
+  4. Write JSON lines to the anchor, then the transfer to `{data}/hopsesh/opencode/tmp/`, import
+     (success = `Imported session: <id>` on stdout; a session already there with these messages is
+     done, with others `ErrDiverged`). Verified with a real 2.3.0 `--standalone` import (PR 5).
 - **Result:** `WriteResult{SessionID, Path: anchor, From:0, To: settled count, Cursor}`. The projection
   maps each `ir.Item` to its `msg_` id via `ir.ProjectionFor`.
 - **Lost into OpenCode:** non-shell tool calls (flattened, as for Claude and Codex), reasoning, Claude
@@ -436,13 +445,21 @@ channel's `opencode-<channel>.db`) and its `-wal`, and `{data}/hopsesh/opencode/
   per-message model identity.
 - **Lost out of OpenCode:** `native` replay, snapshots and revert, instruction state, child detail
   (summarised), media blobs (names only).
-- **Fetch and adopt append** are gated on `Profile.PortableAppend` (today `fetch.go:495` sets
-  `CanAppend` for any Reader+Writer; `write.go:213` and `adopt.go:439` then append). Fixed in PR 5 with
-  a test.
+- **Fetch and adopt append** are gated on `Profile.PortableAppend` (`relateFetch` offers the original
+  only to such a writer; `appendOriginal` refuses otherwise). Done in PR 5, with tests.
 
 ---
 
 ## 5. Protection, rules and skills (plugin)
+
+As built in PR 6, with the corrections the "Left by PR 6" note (§8) explains: the plugin is
+plain JavaScript (`index.js`, `hopsesh.js`), the instruction entry's key is `hopsesh-notice`
+(OpenCode refuses a slash), the rules live in `{config}/.hopsesh/rules.json` (the plugin's
+`config.json` names that file), the plugin also checks again after a failure only once 10 s
+have passed and keeps a verdict 30 s for tool calls, a subagent's session follows its root
+session's verdict, HookTrust asks only a running service (a private server answers
+before it loads plugins), and only `-hopsesh` and `-*` remove the plugin (a selector `x.*`
+matches ids that start with `x.`). The text below is the plan.
 
 **Files** in `{config}/plugins/hopsesh/`, owned by hopsesh:
 - `index.ts`: `Plugin.define({id:"hopsesh", setup})`.
@@ -476,7 +493,7 @@ profile. Installed only when the **service** version is ≥ 2.1.0 (the plugin ru
 `Plugin.define` on 2.1/2.2 is verified in PR 6 before the floor is final.
 
 **Trust (`HookTrust`).** Trusted when `opencode api GET /api/plugin` (JSON) lists `hopsesh` as loaded,
-no config remove entry matches it (`-hopsesh`, `-*`, `-<prefix>.*`), and managed policy does not deny
+no config remove entry matches it (`-hopsesh`, `-*`), and managed policy does not deny
 plugins. Hot reload of plugin directories is UNVERIFIED; if it does not happen, HookTrust reports
 "loads after the next OpenCode service restart" (hopsesh never restarts it).
 
@@ -1100,6 +1117,318 @@ Decisions and what is left:
   the root alone had been imported (its stamp now another: 2.3.0's import sets
   `time_updated`) imported only the child.
 
+**Left by PR 5 for later PRs.** Sessions now continue between Claude Code or Codex and OpenCode.
+`writer.go` writes OpenCode's own transfer (§4) at the session's anchor and has OpenCode's program
+import it under `WriteRequest.SessionID` (the core runs no AfterInstall after a write);
+`RecoverWrite` finds the session by the same id (or the one made from `OperationID` when the
+request had none in OpenCode's form), checks the placed file is the one the request makes (the
+same bytes: ids, times and the session's creation time, read back from the file, are made from
+the request), writes it when the write stopped before it, and imports it when OpenCode does not
+have it; a session there with other messages is `ErrDiverged`. Done here from the earlier notes:
+the projection (each written node's item, a shell call's call and result), fetch/adopt append
+gating (`PortableAppend`), the remaining resume call sites (a continuation, a no-work sync,
+recovery and a resume where the session already is now go through `finishResume`, so
+OpenCode's `ResumeOn` checks the session and picks the program; a recovery keeps the fresh
+plan's resume options), and a subagent's answer folded into its call's result. The id minting
+on the capacity-rollover and fetch paths was already in the core (PR 1b); PR 5 tests both with
+OpenCode. Decisions and what is left:
+- **Return into an OpenCode copy (D4).** A writer without `PortableAppend` gets no append from the
+  core: where the copy here is behind the source (an append for Claude or Codex), the plan rolls
+  over to a new session that continues it, as for a full destination (lineage `Rollover`; the
+  copy stays as it is; the plan warns "OpenCode cannot add to an existing session…"). PR 11
+  replaces this with delete + re-import.
+- **Replies need a model.** OpenCode's schema requires `model` on every assistant message; hopsesh
+  names `{id: <the source's model, or "unknown">, providerID: "hopsesh"}`. OpenCode replays a
+  reply's provider state only to the model that made it, and no provider is called `hopsesh`, so
+  nothing is replayed (hopsesh writes none). The session names no model or agent: OpenCode
+  continues it with the model and agent it would pick for a new session. A bounded continuation
+  of an OpenCode session could name the source's model (same machine and profile); it does not
+  yet. How the TUI and desktop app show such a reply's model was not looked at.
+- **Shape corrections to the plan.** Shell calls are `executed:false` (true means a tool the
+  provider ran itself; OpenCode would then not send the result as a tool message), a tool item
+  needs `time` (`created`, `ran`, `completed`), and the session has no `agent` (the captured
+  sessions have none). The idle messages are kept (OpenCode's own turns end with one); whether
+  an import without them works was not tried. A call that exited non-zero gets a second text
+  item, `Exit code: N`, as OpenCode's own shell tool gives its model (the exit status in
+  `metadata.exit` is not shown to it); an output read from OpenCode that ends with that line is
+  not given it twice. The folder a call ran in (`ir.Shell.Dir`, which Codex records) is written
+  as the shell input's `workdir`, its paths mapped by the converter like the command's. Every
+  message time is before the write's own (room left for the messages after it), so a source
+  clock ahead of this one never gives a written message an id after the ones OpenCode makes for
+  the next turn.
+- **Listing.** A session's first and last prompts leave out hopsesh's notes (`[hopsesh] …`, the
+  briefing a continuation writes as a user message), so a written session lists the person's
+  last prompt. Capacity leaves out hopsesh's replies (no tokens, no model): a written session's
+  usage is its bytes, and a new session's model is never `hopsesh/…`.
+- **Subagent answers** (PR 2's note): a synthetic message from a subagent's session (metadata
+  `source:"subagent"`, `childID`) is read as a second result of the call that started that
+  child (what the call returned, then the answer), where the answer came, so the nodes before it
+  do not change when it arrives; the converter uses a call's last result. Node ids are chained,
+  so every node after an answer has a new id once, at this upgrade, against what the PR 2–4
+  reader gave: a cursor or lineage head taken past an answer before it reads as diverged (only
+  development data; OpenCode is not released). A consumer that pairs a call with its first
+  result only would miss the answer. An answer whose child no call names is still left out. An
+  answer that arrives after its call was carried (a parent continued while a background
+  subagent still ran, continued again once it answered) is lost on the incremental return: the
+  call is covered, so only the answer node is rendered, and the converter renders results only
+  through their call (`convert.history` has no case for a lone result). Not reproduced; a fix
+  renders such a result as text (PR 9, with the two-agent loops).
+- **Fork on resume (D5)** is not done: it needs a fork through `api POST …/fork` at the moment a
+  resume is launched (journaled, from a UI action), not a plan-time command; CapFork stays off.
+  PR 7/8, with the D2 confirmation, which also needs a `ResumeOptions` field.
+- **Writer and versions.** The writer uses message types every 2.1+ OpenCode has, and checks no
+  target version; only 2.3.0 was run. A move still checks versions (`CheckInstall`). A write
+  through a running service of another version is not checked either: `session import` then
+  runs in that service, whose import schema may differ from the program's (a D2-like risk for
+  writes, not for resumes). PR 7/8 decides with the D2 confirmation whether a write asks too.
+- **Hand-offs.** An OpenCode session handed off to a cloud and brought back into OpenCode comes as
+  a new OpenCode session (tested with Codex cloud); asking to add the cloud's work to the
+  original (`--append`) is refused at planning ("OpenCode cannot add to an existing session…").
+  Cloud briefings now say "an OpenCode session".
+- **`--target-session` naming an OpenCode copy** rolls over to a new session that continues the
+  named copy, with the same warning, as a full destination does; it is not refused, because a
+  plan with several OpenCode copies asks which one to continue, and that choice still matters
+  for the lineage.
+- **Recovery.** A recovered continuation journals the session it is to make before
+  `RecoverWrite` (the interrupted run may have saved its request and stopped before journaling
+  it), and a target it cannot reach for the resume check keeps the planned command, as a
+  no-work sync does.
+- **Stamp at the write, not fixed.** The stamp of a written session is read in a query after the
+  import (`stampMade`; in a recovery after `RecoverWrite`'s message check). A turn the person
+  added to the new session in between would be recorded as the operation's, so an unforced
+  undo would delete it. The window is one query; closing it needs the writer to give the stamp
+  it left (with its settled count checked against the messages it wrote) and Seal not to stamp
+  a session the write found used (an SDK change: a stamp on `ir.WriteResult`). PR 9 or later.
+- **A written session can start with a reply.** A history that begins with an agent item (a
+  compaction summary, which the converter renders as agent text, or a fitted history cut
+  before its first prompt) is written with an assistant message first. Whether OpenCode 2.3.0
+  sends such a history to providers that refuse one (Gemini, older Anthropic models) as it is
+  was not checked; this is the converter's for every writer, not OpenCode's alone. To check
+  with PR 9's sandbox runs (a compacted Claude Code session continued into OpenCode); a fix
+  writes an OpenCode `compaction` message or a prompt first.
+- **Attribution and fidelity, minor.** Every written reply names `Header.Model`, the source's last
+  model, also in a session that switched models. Attachment placeholders ("[an attachment …
+  was here]") are user messages, so they can be a written session's listed first or last
+  prompt (`ownPromptSQL` leaves out only `[hopsesh] `). A person's own shell command from an
+  OpenCode `shell` message is replayed into another agent as the assistant's tool call (the
+  converter's, from before). A failed call with no output and no exit status reads back as
+  "The command failed.".
+- **Tests carried to PR 9.** PR 3's note item "the stand-in is not in `fakecloud.Programs`" is
+  still open (the cloud test links the test binary as `opencode` instead); PR 9 joins it there
+  or drops the item. §7's OpenCode legs in `context_capacity_test.go`, `lineage_routes_test.go`,
+  `peer_test.go` and a remote continue into OpenCode are not here (PR 5's are in
+  `opencodecontinue_test.go`); PR 9, with the two-agent loops. A resume where the session
+  already is (`ResumeHere`) goes through `finishResume` but no test reaches it with OpenCode
+  (it needs an account boundary OpenCode does not have). The D2 tests use a service version
+  no desktop app ships, since `desktopCLIs` also reads `/Applications`; the e2e world is not
+  hermetic there (PR 9: let tests set the desktop app folders).
+- **Leftovers on disk.** The written anchor is journaled; undo removes it, the transfer file in
+  `tmp/`, the title line in `titles.jsonl` and the lineage beside the anchor. After a kept
+  operation the transfer file in `tmp/` stays, as for moves (PR 4).
+- **Stand-in.** `$FAKE_OPENCODE_FAIL` ("session import") makes a command fail as a program that
+  died would; the recovery tests use it. The test bundle's `export/written-by-hopsesh.json` is
+  real 2.3.0's export of a session hopsesh wrote (shell calls, a failed call without an exit
+  status, notices), scrubbed.
+- **Real-binary check** (opencode 2.3.0, a fresh copy of the sandbox, a guard program that refused
+  any command without `--standalone` and answered `service status` itself; Claude Code and Codex
+  data in the scratch folders): a written transfer with every item kind imported, and OpenCode's
+  export of it equalled the written messages; a Claude Code session and a Codex thread continued
+  into OpenCode through hopsesh (the Codex one interrupted after the write and recovered: one
+  import), OpenCode's exports equalled the placed messages (no `model` on the session, the title
+  kept), hopsesh listed them with the person's last prompt and read them back; undo of the Codex
+  one deleted it through OpenCode. Then one `opencode run -s <id> --standalone` prompt against
+  omlx (D9; data, state and cache in the copy, the config dir the user's, unchanged): OpenCode
+  continued the written session and answered from its history ("PLUM-7"). Continued back, the
+  reply was added to the original Claude Code session (its old lines byte for byte) and written
+  as a new Codex thread, without the earlier legs' notices. Through the guard, 7 commands
+  reached the real binary (imports, exports, a delete), every one `--standalone`; the prompt was
+  the only other run. Run twice on fresh copies with the same results; in one run the local
+  model's reasoning called a hopsesh notice in the history "a prompt injection attempt" (and
+  still answered from the history), which is about the notices' wording, not OpenCode. The
+  harness was not committed (PR 9). Re-run after the review fixes (a fresh copy, the same
+  guard): the transfer `writeRequest` makes (`writer_test.go`, now with the `Exit code: 2` line
+  and a `workdir`) imported, and real 2.3.0 exported exactly its messages (that export, the
+  folder scrubbed, is the bundle's `written-by-hopsesh.json`, which `TestWrittenAsExported`
+  compares with the writer); the Claude Code and Codex legs, the recovery (one import) and the
+  undo as before; one `opencode run -s <id> --standalone` prompt answered "PLUM-7" from the
+  history (config dir listing unchanged); back into Claude Code (an addition, its old lines byte
+  for byte) and into Codex (a new thread). 8 commands reached the real binary through the guard
+  (3 imports, 3 exports, a delete, `--version`), every change `--standalone`.
+- **PR 6:** a session continued into OpenCode keeps its lineage at `agent.AnchorRel`, so the
+  notice-hook lookup by session id finds it; until the plugin exists, the OpenCode copy a
+  continuation leaves behind is unprotected and the result says so ("not protected").
+  Continuations print OpenCode's resume command from `ResumeOn`; a D2 refusal leaves it shown,
+  not runnable, as for moves.
+
+**Left by PR 6 for later PRs.** OpenCode sessions are now protected: `hopsesh notices
+install` puts hopsesh's plugin in `{config}/plugins/hopsesh` (a `HookDir` the app installs
+whole with `agent.InstallHookDir`/`RemoveHookDir`, staged in `{config}/.hopsesh`, under a lock
+file there), and the plugin refuses every tool call of a session whose copy hopsesh moved or
+continued elsewhere, with hopsesh's reason. Done here from the earlier notes: the notice-hook
+generalisation (`agent.NoticeHookProtocol`: the module decodes the plugin's call and encodes
+its answer; Claude Code and Codex keep the command-hook JSON), the split of
+`HookTrustReporter` ("reports trust") from the new `agent.HookApprover` ("runs a new hook
+only after the user approves it": Codex), used for the GUI's `hookReview`, the SSH check's
+"trust checked at login" and the needs list; hook folders in `machine_status.go` (read over
+SSH by the program their notice hook runs); a hook the agent does not run (`HookMissing`) is
+now a warning ("installed, not running in …") instead of "installed". Decisions and what is
+left:
+- **The plugin** (`agents/opencode/plugin/`): plain JavaScript, `index.js` with
+  `Plugin.define` from the host's `@opencode/plugin` (nothing installed; `package.json` names
+  the API range, `>=2.2.7 <3`, for people only), the logic in `hopsesh.js`, and a
+  `config.json` per install: the notice hook's argv (spawned with no shell), the rules file,
+  a 5 s timeout and a 30 s verdict cache. It asks the notice hook on every prompt (`session.hook
+  ("prompt")`, never throwing) and on `session.created`/`moved`/`forked`, keeps a verdict per
+  root session (a subagent's session follows its root, found with `session.get`, which returns
+  the session itself: the Promise API unwraps `{data}`; a lookup that fails is not kept, and a
+  subagent's `session.created` records its `parentID` and checks nothing), and asks again on a
+  tool call with no fresh verdict (a restart, a resumed turn). While blocked,
+  `tool.hook("execute.before")` throws the reason (every tool, read-only ones too: a prompt
+  cannot be refused), `permission.hook("evaluate")` denies, and the instruction entry
+  `hopsesh-notice` (keys are `[a-z0-9._-]`, no slash) tells the model why; an allowed verdict
+  takes an earlier entry out. A hook that fails, prints nothing or takes over 5 s lets the call
+  through, is logged to the server's stderr, and is counted in the plugin's storage (`kv`
+  under `plugin:<hex id>:failures`, which `HookTrust` reads); the plugin then asks again only
+  after 10 s, so a hanging hopsesh does not stall every call. A failed check keeps a block
+  less than 30 s old (one failure does not lift it). A config without an argv registers
+  nothing.
+- **The notice hook's JSON for OpenCode:** `{session_id, directory, event}` in (no transcript:
+  the core finds the anchor from the id; the folder is not used), and always a verdict out:
+  `{"block":false}`, `{"block":false,"context":…}` or `{"block":true,"reason":…}` on either
+  event. A failure prints nothing, which the plugin counts.
+- **Trust.** `HookTrust` asks `opencode api GET /api/plugin` only while the service runs (a
+  private server lists nothing: it answers before loading plugins, confirmed on 2.3.0), for the
+  home folder, asking again (three asks a second apart, the service probed before each) while
+  the list is empty or lacks hopsesh's plugin (OpenCode reloads a changed plugin folder a
+  moment after the change). hopsesh's plugin is found by its folder first (a plugin that
+  failed to load is listed with its folder and no id), then by its id. Listed `active` in
+  its folder it is trusted; absent is `HookMissing` ("a config entry removes it, `-hopsesh` or
+  `-*`, a policy denies plugins, or OpenCode has not reloaded its plugins": hopsesh never
+  reads OpenCode's config, so it cannot say which); `failed` is `HookMissing` with OpenCode's
+  error and log ref (on one line, without control characters); another folder's `hopsesh`
+  is `HookMissing`. Right after an install that changed the folder, `HookMissing` is shown
+  as unknown ("just installed; it usually loads within seconds"). With the service stopped
+  trust is unknown ("loads when it starts"), and the machine, and now the GUI's guard too,
+  count the original as protected, as for an installed hook it cannot ask about (the GUI
+  still shows an unknown hook as a problem for an agent that runs hooks only once approved,
+  Codex). Over SSH an installed plugin reads "installed", with the note that whether
+  OpenCode loads it is not checked from there. A removal in one project's
+  `.opencode/opencode.json` is not seen (the list is the home folder's). The plugin itself is
+  not hot-reload-tested (source says a change in a plugin folder reloads it).
+- **Floor.** The plugin is offered for OpenCode 2.2.7 and newer (loading and hook
+  registration seen on the desktop's 2.2.7 CLI in an empty sandbox, the hooks run on 2.3.0),
+  judged by the program's version; a service of another version runs it (the plugin runs in
+  the service). PR 7, with the D2 confirmation, could judge by the running service's version;
+  a service too old only shows as "not loaded" now.
+- **Rules** (`integrate.go`): `{config}/.hopsesh/rules.json` (`{format, bin, allow, ask}`, the
+  core's `app.Rules`), owned by hopsesh and written by `skill install --add-rules`; the plugin
+  reads it on each permission: every command of a shell call matching an allow prefix after
+  the exact `bin` → allow, any matching an ask prefix → ask, else OpenCode's own rules; a deny
+  the user configured never reaches the plugin. OpenCode splits a shell call at `&&`, `;`, `|`
+  and `$(…)`, but a redirection stays in its command, so a command with `<`, `>`, `|`, `&`,
+  `;`, a backtick, `$(` or a second line is never allowed. Left: an "ask" the user configured
+  can still become "allow" for hopsesh's read-only commands; the hook gets only the combined
+  effect, and its `source` names the tool call, not the rule, so the plugin cannot tell a
+  user's ask from OpenCode's default. The rules do nothing without the plugin; the
+  skill report says "present" either way (PR 8 could say so).
+- **Skill.** OpenCode now has an `Integration`: it shares Codex's `~/.agents/skills` copy
+  (`skill.txtar` reads "(Codex, OpenCode)"); a second copy in `~/.claude/skills` is one skill
+  in OpenCode (source: skills are kept by id). The template says how a blocked OpenCode
+  session behaves and that `$OPENCODE_SESSION_ID` names the session; its other examples
+  stay for PR 10.
+- **Accounts (PR 7).** Only the default config folder gets the plugin: OpenCode has no
+  `Accounts` yet, so `movementHookInstalls` finds no profile. A profile's own
+  `OPENCODE_CONFIG_DIR` needs its own plugin (the argv's `--profile` then names it).
+- **GUI copy (PR 8).** Settings still says the hooks run "before a prompt", and "trusted by
+  the agent" reads oddly for a loaded plugin; the guard shows "set up (not checked yet)" for an
+  agent that asks no approval. The failure count is in `HookTrust.Failures` and the detail,
+  shown by `notices status`, not yet by the GUI; it is never reset.
+- **Notices.** The notice goes on the root session (a subagent's check asks about the root);
+  a block also goes on the subagent's session, and comes off it when the block ends. Unlike
+  Claude Code's `additionalContext`, which stays in the transcript, a notice that is not a
+  block is shown only until the next check: hopsesh marks it delivered when the plugin gets
+  it (not when the model has read it), the next answer carries no text, and the plugin takes
+  the entry out. A move event during a prompt's check runs its own check (checks are shared
+  per root and event). The event subscription is made again when it ends (waiting 1 s, up to
+  a minute), and the plugin remembers at most 2000 sessions' verdicts, parents and notices.
+- **The plugin folder** is hopsesh's only when its `config.json` runs a hopsesh notice hook
+  for OpenCode (`notice-hook --agent opencode`): `notices install` refuses another
+  `plugins/hopsesh` folder and `notices remove` leaves it. Installed (`Has`) means this
+  install's `config.json` and hopsesh's three files present; an older or edited copy of those
+  files still runs, so it reads installed, and `notices status` adds that install replaces
+  them (no upgrade refreshes the plugin by itself; PR 8 could offer it in the GUI). A file
+  added to the folder (a `.DS_Store`) changes nothing; an install drops it. A removal where
+  nothing was installed writes nothing (no lock, no `{config}/.hopsesh`). A replace that
+  stopped between its two renames reads "stopped halfway; install again" in status (the
+  next install or removal finishes it), and on Windows a rename the agent's watcher or an
+  antivirus holds is tried again for up to two seconds.
+- **Codex** changes with the trust split, beyond the warning above: the GUI's needs list
+  says "Codex hook" for a missing hook (not "Codex hook approval"), `notices status` says
+  "NOT RUNNING: not seen by the agent" and prints the agent's detail whenever the hook is
+  not trusted, and the GUI's message for a hook the agent does not run now carries the
+  agent's detail (OpenCode's load error and log ref, for one). Its "Set up protection"
+  action still cannot fix a config that removes the plugin (PR 8).
+- **Drift.** The 2.2.7 floor is declared in `driftmanifest/targets.go` (it gates the plugin),
+  with `GET /api/plugin`, the plugin API and kv storage in the target's surface, OpenCode's
+  plugin supervisor, host, folder source, config source, Promise adapter and session events
+  in its code paths, and plugin, instruction and permission changes in its release grep.
+- **Leftovers.** An instruction entry stays in a session if the plugin is removed while the
+  session is blocked (OpenCode keeps entries; the next allowed verdict would take it out).
+  The staging folder keeps its lock file. The stand-in finds a session's root by
+  `parent_id` in its database, so the plugin's own `session.get` is checked only by the
+  plugin tests and the real-binary check.
+- **Stand-in.** It finds plugins in `{config}` and the working folder's `.opencode`, applies a
+  config's removals and `plugin.use` policies, lists them from a running service (OpenCode's
+  own plugins first; `-*` does not remove those), and with `$FAKE_OPENCODE_TOOL` plays a `run
+  -s <id>` turn whose one shell call goes through hopsesh's plugin as Go code (no JavaScript),
+  printed as 2.3.0's `run` prints a refused tool (`✗ <command> failed`, `Error: <reason>`);
+  the turn's messages are not recorded and the command never runs.
+- **Test bundle.** The PR 3 note's slot is here: `testbundle/opencode/<version>/notice/<event>/`
+  holds what the plugin writes to the notice hook (`opencode-plugin-notice.schema.json`; the
+  checker also has the module decode it), with a prompt's and an event's call as the plugin
+  makes them (the folder scrubbed). The bundle's README describes the stand-in's plugins.
+- **Plugin tests (PR 9).** `plugin/hopsesh.test.js` (Bun's test runner; 31 tests: verdict
+  cache, cache-miss check, prompt hook never throws, allow/ask/deny and redirections, timeout
+  and failures fail open and are counted, a failed check keeps a fresh block, subagent root
+  with `session.get`'s real shape and a failed lookup not kept, notices on the root, an answer
+  split inside a character, setup, events and a subscription made again) runs from `go test ./agents/opencode` where Bun is
+  installed and skips otherwise. Bun is not installed on this Mac: they ran under Node with a
+  `bun:test` stand-in (not committed), all passing. CI has no Bun yet: PR 9 adds it
+  (`oven-sh/setup-bun`) so they run there.
+- **Windows** (not run): the plugin spawns the argv as is (no shell, `windowsHide`), so the
+  PowerShell wrapper of the command hooks is not needed.
+- **Real-binary check** (opencode 2.3.0; a fresh copy of the sandbox, data, state, cache and
+  home in the scratch folder, behind the PR 5 guard that refuses any command without
+  `--standalone` and answers `service status` itself): `hopsesh notices install` wrote the
+  plugin into a scratch config folder, which was then copied to the sandbox repository's
+  project-local `.opencode/plugins/hopsesh` (the user's config folder, used for the omlx
+  provider, was never written: its listing was the same before and after). Two `opencode run
+  --standalone` prompts against omlx: a new session's `hopsesh version` shell call ran (the
+  plugin asked the notice hook: its delivery receipt appeared), the session was continued into
+  Claude Code with hopsesh, and then the original's `echo` call failed with `✗ echo … failed` /
+  `Error: Blocked by hopsesh. Prepared in Claude Code on sandbox. …` and the model, which also
+  saw the `api/hopsesh-notice` instruction entry, quoted the reason and told the user to unblock.
+  The session's export shows the tool `state.status: "error"` with hopsesh's reason. No warning
+  or error in OpenCode's log. A probe plugin also loaded and registered its hooks with the
+  desktop's 2.2.7 CLI (an empty scratch sandbox). `api GET /api/plugin --standalone` and `GET
+  /api/skill --standalone` answered empty lists (before loading), and `GET /api/model
+  --standalone`, which waits for plugins, did load them. 11 commands reached the real binary
+  through the guard (2 runs, a session list, an export, 2 api probes, 5 `--version`), every
+  other one `--standalone`; the harness was not committed (PR 9). Re-run after the review
+  fixes, on another fresh copy behind the same guard, with the plugin's `config.json` in the
+  project-local copy pointed at a wrapper that logs each notice-hook call and a 1 ms verdict
+  cache (so every tool call asks): a new session's model started a subagent with the task
+  tool, which ran `hopsesh version`; all six notice-hook calls carried the root session's id,
+  none the subagent's (whose `parent_id` is the root), and the subagent's `session.created`
+  started no check. After `hopsesh pull … --in claude`, a prompt in the subagent's own session
+  had its `echo` refused with the root's reason (`✗ echo PR6-SUBAGENT failed`), and one in the
+  root likewise; both sessions then held the `hopsesh-notice` block entry. No warning or error
+  in OpenCode's log; the user's config folder listing was the same before and after. 8
+  commands reached the real binary through the guard (3 runs, 5 `--version`; `service status`
+  was answered by the guard itself). Also checked there: `notices remove` with nothing installed
+  wrote no `.hopsesh` folder, and a `plugins/hopsesh` folder without hopsesh's `config.json`
+  was neither replaced nor removed.
+
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
 
@@ -1138,12 +1467,18 @@ one-line PR after D10's condition is met.
     directory hopsesh last saw, and the next List shows the new one.
 
 **Still UNVERIFIED, each with how to verify**
-- `Plugin.define` and hooks on a 2.1/2.2 service: sandbox with a 2.2.7 standalone binary.
-- Hot reload of plugin directories: sandbox, watch `GET /api/plugin`.
-- `permission.hook` deny/allow/ask in practice: sandbox shell call.
+- `Plugin.define` and hooks on a 2.1 service (PR 6: loading and hook registration seen on the
+  desktop's 2.2.7 CLI and on 2.3.0, the hooks run on 2.3.0): a 2.1 binary in a sandbox.
+- Hot reload of plugin directories (source: a change in a `{plugin,plugins}` folder reloads
+  plugins; not run, since the sandbox never starts a service): with a running service.
+- `permission.hook` allow/ask in practice (PR 6: a `hopsesh version` call ran in `opencode
+  run` without `--auto`, which the rules allow, though OpenCode's default may allow it too;
+  the deny was not seen, since `execute.before` refuses first): sandbox shell calls.
 - Fork message-id behaviour: sandbox `api POST …/fork`.
 - Whether child exports carry `parentID` (checked exports show none): export a session with a subagent.
-- Skill dedup across two roots: sandbox with the same skill in both.
+- Skill dedup across two roots: source-verified in PR 6 (skills are kept in a map by id, a
+  later source replacing an earlier one), not run (`GET /api/skill` on a private server
+  answers before it loads them).
 - MCP tool naming inside `execute`: source and a sandbox MCP server.
 - Idle-message necessity on import: sandbox import without idles.
 - Standalone server of an older binary on a newer DB: sandbox.
@@ -1187,3 +1522,14 @@ one-line PR after D10's condition is met.
   differently: a cache miss in `execute.before` asks the notice-hook, which reads hopsesh's own lineage.
   That survives restarts without a second copy of the verdict that could go stale.
 - **Remote snapshot tier and the old Q2/Q3.** Dropped as the reviews recommended; no decision remains.
+- **Keep a user-configured "ask" over hopsesh's allow rules (PR 6 safety review, item 7).** Not
+  followed: OpenCode's `permission.evaluate` hook gets the combined effect, and its `source`
+  names the tool call, not the rule, so a user's ask and OpenCode's default ask look the same.
+  The redirection part of that item is followed.
+- **Report HookUnknown after a changed install (PR 6 safety review, item 4).** Followed in the
+  app rather than the module: `HookTrust` does not know an install just happened, so the app
+  shows a `HookMissing` that follows an install which changed a hook folder as unknown ("just
+  installed"); the module asks again for a few seconds while hopsesh's plugin is absent.
+- **Report an outdated plugin, or refresh it on upgrade (PR 6 safety review, item 5).** Followed
+  in part: an older copy of hopsesh's plugin files reads installed, and `notices status` says
+  an install replaces them; nothing refreshes it by itself yet.

@@ -293,6 +293,9 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 				if call.Shell != nil {
 					sh := *call.Shell
 					sh.Command = res.mapText(r, sh.Command)
+					if sh.Dir != "" {
+						sh.Dir = res.mapText(r, sh.Dir)
+					}
 					call.Shell = &sh
 				}
 				result.Output = res.mapText(r, shorten(result.Output, &res.Report))
