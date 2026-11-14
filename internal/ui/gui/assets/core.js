@@ -374,6 +374,32 @@ export function dialog(...kids) {
 // RESTART starts the backend's refusal of a resume or a new session that would restart
 // the agent's background service (decision D2): the window asks before going on anyway.
 export const RESTART = "restart-service: ";
+// askRestart asks before going on anyway: the backend's reason (why it would restart the
+// service, and how to avoid that) and what going on does. what is the button's action
+// ("open", "start").
+// asking runs call; when the backend refuses because it would restart the agent's
+// background service, it asks, records the yes (allow) and runs call again. null: the
+// person said no.
+export async function asking(agentName, call, allow, what = "open") {
+  try { return await call(); } catch (e) {
+    const msg = errText(e);
+    if (!msg.startsWith(RESTART)) throw e;
+    if (!await askRestart(agentName, msg, what)) return null;
+    await allow();
+    return call();
+  }
+}
+// onMachine opens session e on its own machine through hopsesh there (method:
+// ContinueOnMachine, or ContinueOriginalAnyway), asking first when that would restart the
+// agent's background service there.
+export const onMachine = (e, method = "ContinueOnMachine") =>
+  asking(e.agentName, () => api(method, e.machine, e.key), () => api("AllowServiceRestart", e.machine, e.key));
+export const askRestart = (agentName, msg, what) => ask({
+  title: `Restart ${agentName || "the agent"}'s background service?`,
+  body: [h("p", { style: "margin:0 0 8px" }, rich(msg.slice(RESTART.length))),
+    h("p", { style: "margin:0" }, `If you go on, ${agentName || "the agent"} stops its running service and starts it again with the version hopsesh opens it with. Its windows reconnect; a turn it is running now stops.`)],
+  ok: `Restart it and ${what}`, danger: true,
+});
 
 export function ask({ title, body, ok, danger = false }) {
   return new Promise((resolve) => {

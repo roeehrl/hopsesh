@@ -81,6 +81,10 @@ const (
 	CodeProtocol = "protocol" // the two ends speak different protocols
 	CodeRefused  = "refused"  // the machine does not receive sessions
 	CodeFailed   = "failed"
+	// CodeRestartsService: the agent's program there would restart its background service
+	// (agent.ErrRestartsService, decision D2); the request can carry the person's yes
+	// (TerminalRequest.RestartService).
+	CodeRestartsService = "restarts-service"
 )
 
 // Error is a failure the other end reported. A protocol mismatch also says which protocol
@@ -102,7 +106,8 @@ var (
 
 // Is maps codes to the sentinel errors.
 func (e *Error) Is(target error) bool {
-	return target == ErrProtocol && e.Code == CodeProtocol || target == ErrRefused && e.Code == CodeRefused || target == ErrNoLogin && e.Code == CodeNoLogin
+	return target == ErrProtocol && e.Code == CodeProtocol || target == ErrRefused && e.Code == CodeRefused || target == ErrNoLogin && e.Code == CodeNoLogin ||
+		target == agent.ErrRestartsService && e.Code == CodeRestartsService
 }
 
 // Refused is the error a peer returns when receiving is off.
@@ -505,8 +510,12 @@ type TerminalRequest struct {
 	// refuses. The user confirmed it; hopsesh there releases that copy first. An older
 	// hopsesh ignores it (it never refused).
 	Anyway bool `json:"anyway,omitempty"`
-	Cols   int  `json:"cols,omitempty"`
-	Rows   int  `json:"rows,omitempty"`
+	// RestartService: the person agreed, where they asked, to restart the agent's
+	// background service there when no program of its version is there (decision D2). An
+	// older hopsesh ignores it (and refuses such a resume).
+	RestartService bool `json:"restartService,omitempty"`
+	Cols           int  `json:"cols,omitempty"`
+	Rows           int  `json:"rows,omitempty"`
 }
 
 // Terminal is a terminal hopsesh runs there, and what runs in it.

@@ -35,7 +35,8 @@ func (a *App) ContinueOnMachine(machine, key string) (*OpenedDTO, error) {
 			return &OpenedDTO{Where: WhereShown, Tab: id}, nil
 		}
 	}
-	req := peer.TerminalRequest{Kind: peer.TerminalResume, Agent: e.Agent, Profile: e.Session.Key.Profile, Session: string(e.Session.Key.Session)}
+	req := peer.TerminalRequest{Kind: peer.TerminalResume, Agent: e.Agent, Profile: e.Session.Key.Profile, Session: string(e.Session.Key.Session),
+		RestartService: a.takeRestart(machine, key)}
 	return a.remoteTab(machine, req, TabMeta{Kind: TabRemote, Agent: e.AgentName, Machine: machine, Key: key}, titleOf(e.Session)+" · "+machine)
 }
 
@@ -57,10 +58,11 @@ func (a *App) ContinueOriginalAnyway(machine, key string) (*OpenedDTO, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	// Asked even when a tab shows it already: hopsesh there releases it then too.
-	req := peer.TerminalRequest{Kind: peer.TerminalResume, Agent: e.Agent, Profile: e.Session.Key.Profile, Session: string(e.Session.Key.Session), Anyway: true}
+	req := peer.TerminalRequest{Kind: peer.TerminalResume, Agent: e.Agent, Profile: e.Session.Key.Profile, Session: string(e.Session.Key.Session), Anyway: true,
+		RestartService: a.takeRestart(machine, key)}
 	t, err := core.RemoteTerminal(ctx, machine, req)
 	if err != nil {
-		return nil, err
+		return nil, askRestart(err)
 	}
 	if core.OldCopy(e) {
 		if err := core.ReleaseOriginal(e.Session.Key, e.Departure.Operation); err != nil {
@@ -96,7 +98,7 @@ func (a *App) OpenOnMachine(machine, key string) (*OpenedDTO, error) {
 	if m, ok := a.snapshot().Module(k.Agent); ok {
 		name = m.Spec().Name
 	}
-	req := peer.TerminalRequest{Kind: peer.TerminalResume, Agent: k.Agent, Profile: k.Profile, Session: string(k.Session)}
+	req := peer.TerminalRequest{Kind: peer.TerminalResume, Agent: k.Agent, Profile: k.Profile, Session: string(k.Session), RestartService: a.takeRestart(machine, key)}
 	return a.remoteTab(machine, req, TabMeta{Kind: TabRemote, Agent: name, Machine: machine, Key: key}, name+" · "+machine)
 }
 
@@ -132,7 +134,7 @@ func (a *App) NewSessionOn(machine string, id agent.ID, profile, dir string) (*O
 		return a.sessionTab(c, app.Launch{Kind: termapp.KindSession, Run: c, Labels: termapp.Labels{Title: "New " + name + " session", Agent: name, Machine: app.LocalName()}},
 			TabMeta{Kind: TabSession, Agent: name, Machine: app.LocalName()}, "New "+name+" session", again)
 	}
-	req := peer.TerminalRequest{Kind: peer.TerminalNew, Agent: id, Profile: profile, Dir: dir}
+	req := peer.TerminalRequest{Kind: peer.TerminalNew, Agent: id, Profile: profile, Dir: dir, RestartService: a.takeRestart(machine, newSessionKey(id, profile))}
 	return a.remoteTab(machine, req, TabMeta{Kind: TabRemote, Agent: name, Machine: machine}, "New "+name+" session · "+machine)
 }
 
@@ -151,7 +153,9 @@ func (a *App) remoteTab(machine string, req peer.TerminalRequest, meta TabMeta, 
 	defer cancel()
 	t, err := core.RemoteTerminal(ctx, machine, req)
 	if err != nil {
-		return nil, err
+		// hopsesh there would restart the agent's background service: the window asks,
+		// and the request goes again with the yes (decision D2).
+		return nil, askRestart(err)
 	}
 	return a.attachTab(machine, t, meta, title)
 }

@@ -7,7 +7,7 @@
 import { refreshSelection } from "./sessions.js";
 import { changeDirDialog } from "./cd-dialog.js";
 import { role, removeBlock, restoreBlock, isOldCopy, askOldCopy, onContinueOld, destination, movedTo } from "./guard.js";
-import { go, api, state, sys, here, agentInfo, agentShort, agentHas, localAgents, appPlace, isAppPlace, words, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending } from "./core.js";
+import { go, api, state, sys, here, agentInfo, agentShort, agentHas, localAgents, appPlace, isAppPlace, words, cloudOf, cloudTitle, toast, fail, errText, cap, entries, count, ago, h, icon, ICONS, agentBadge, pending, onMachine } from "./core.js";
 import { returnActions, returnChooser, showMovementDestination } from "./returns.js";
 import { planFor, chooseTarget, bringLive } from "./plan.js";
 import { tabs, resume, showTerminal, moveToTerminal, openShell, associateShell, signIn } from "./term.js";
@@ -132,7 +132,7 @@ export async function continueOldCopy(e) {
   if (choice === "go") return showMovementDestination(e.departure, selectFn);
   if (choice !== "continue") return;
   if (e.machine !== here())
-    return pending(`Opening ${e.title} on ${e.machine}`, () => api("ContinueOriginalAnyway", e.machine, e.key).catch(fail), `remote:${key(e)}`);
+    return pending(`Opening ${e.title} on ${e.machine}`, () => onMachine(e, "ContinueOriginalAnyway").catch(fail), `remote:${key(e)}`);
   if (e.guard?.mode === "block" || e.guard?.mode === "advise") {
     try { await api("ReleaseOriginal", e.machine, e.key); } catch (err) { fail(err); return; }
   }
@@ -276,7 +276,7 @@ function localModel(e) {
     // A session on a machine with hopsesh in its login session continues right there (its
     // sign-in works there) and is worked in here.
     const there = { id: "continue-there", label: `Continue on ${e.machine}`, short: `Continue on ${e.machine}`, sub: "Runs there, with its files and sign-in; you work in it here",
-      run: () => pending(`Opening ${e.title} on ${e.machine}`, () => api("ContinueOnMachine", e.machine, e.key).catch(fail), `remote:${key(e)}`) };
+      run: () => pending(`Opening ${e.title} on ${e.machine}`, () => onMachine(e).catch(fail), `remote:${key(e)}`) };
     if (presence === "login" && agentInfo(e.agent)?.local) {
       m.primary = there;
       m.chevron = [bring];

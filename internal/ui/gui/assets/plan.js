@@ -1,6 +1,6 @@
 // The plan sheet (what a hop, continuation or send will do, with its choices), its
 // progress, and the Done screen.
-import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf, manyAccounts, ownerShown } from "./core.js";
+import { api, on, h, fill, view, state, screen, go, current, toast, fail, errText, cap, agentChip, here, $, count, sys, keys, cloudChip, cloudOf, manyAccounts, ownerShown, onMachine, asking } from "./core.js";
 import { openMenu, closeAll } from "./menu.js";
 import { undo } from "./activity.js";
 import { openResult, where as opensIn } from "./term.js";
@@ -73,7 +73,7 @@ export async function chooseTarget(e) {
     if (t.here) {
       sheet.close();
       if (t.local) return import("./actions.js").then((a) => a.resumeIn(e, t.tool === "app" ? "app" : a.defaultPlace(e)));
-      return api("ContinueOnMachine", e.machine, e.key).catch(fail);
+      return onMachine(e).catch(fail);
     }
     await planFor(e, { target: "", sendTo: t.local ? "" : t.machine, targetProfile: t.profile, launch: t.tool === "app" ? "app" : "" });
   };
@@ -111,7 +111,7 @@ export function bringLive(e) {
       h("div", { role: "note", class: "banner warn" }, `It's working on ${e.machine} right now (hopsesh there sees it). Bringing it takes a snapshot; whatever ${e.machine} writes after that stays only on ${e.machine}.`),
       h("div", { class: "choices" },
         h("button", { class: "btn choice", onclick: wait }, h("b", {}, "Wait until it's idle, then bring it"), h("span", { class: "muted" }, `hopsesh checks ${e.machine} until the turn ends.`)),
-        h("button", { class: "btn choice", onclick: () => { waiting = false; sheet.close(); api("ContinueOnMachine", e.machine, e.key).catch(fail); } }, h("b", {}, `Join it on ${e.machine} instead`), h("span", { class: "muted" }, "Shows it here when hopsesh runs it there; nothing moves.")),
+        h("button", { class: "btn choice", onclick: () => { waiting = false; sheet.close(); onMachine(e).catch(fail); } }, h("b", {}, `Join it on ${e.machine} instead`), h("span", { class: "muted" }, "Shows it here when hopsesh runs it there; nothing moves.")),
         h("button", { class: "btn choice", onclick: () => { waiting = false; planFor(e, { target: "" }); } }, h("b", {}, "Bring the snapshot now"), h("span", { class: "muted" }, `What ${e.machine} writes later stays there.`))),
       status),
     h("div", { class: "sheet-foot" }, h("span", { class: "spacer" }), h("button", { class: "btn", onclick: () => { waiting = false; sheet.close(); } }, "Cancel"))));
@@ -556,10 +556,10 @@ async function apply() {
     cur = null; // the plan stays for OpenResult
     state.stale = true;
     sheet.close();
-    if (c.plan.resumeHere) { await openResult((c.launch||opensIn())==='app'?'':(c.launch||opensIn())); return; }
+    if (c.plan.resumeHere) { await openResult((c.launch||opensIn())==='app'?'':(c.launch||opensIn()), d.agent || c.plan.agent); return; }
     c.opts.launch = c.launch;
     go("done", d, c.plan, c.opts);
-    if(!d.machine&&!d.noWork&&c.launch) await openResult(c.launch==='app'?'':c.launch);
+    if(!d.machine&&!d.noWork&&c.launch) await openResult(c.launch==='app'?'':c.launch, d.agent);
   } catch (err) {
     c.applying = false;
     problem(errText(err), { label: "Back to the plan", run: () => replan() });
@@ -723,8 +723,8 @@ function happened(d, p) {
 screen("done", (d, p, o) => {
   const where = d.machine ? `on ${d.machine}` : `on ${sys.here}`;
   const resultPlace=o.launch==='here'||o.launch==='terminal'?o.launch:opensIn();
-  const open = () => (d.inApp ? api("OpenResult", "").then(() => d.remoteControlInApp && watchRemote(here(), d.key, d.title)).catch(fail) : openResult(resultPlace));
-  const other = () => openResult(resultPlace === "terminal" ? "here" : "terminal");
+  const open = () => (d.inApp ? api("OpenResult", "").then(() => d.remoteControlInApp && watchRemote(here(), d.key, d.title)).catch(fail) : openResult(resultPlace, d.agent));
+  const other = () => openResult(resultPlace === "terminal" ? "here" : "terminal", d.agent);
   const copy = async () => { await api("CopyText", d.command); toast("Copied"); };
   const doUndo = async () => { if (await undo(d.journal, d.title)) go("sessions", true); };
   fill(view, h("div", { class: "page" }, h("div", { class: "page-in", style: "max-width:720px" },
@@ -734,13 +734,14 @@ screen("done", (d, p, o) => {
     d.continuationHint ? h("div", { class: "card continuation-hint", role: "status" }, h("div", { class: "dlg-body" }, d.continuationHint)) : null,
     h("div", { class: "card" }, h("div", { class: "dlg-body" },
       d.machine && d.remoteLogin && d.remoteKey ? h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;align-items:center" },
-        h("button", { class: "btn primary", onclick: async () => { try { await api("OpenOnMachine", d.machine, d.remoteKey); sheet.close(); } catch (e) { fail(e); } } }, `Open it on ${d.machine}, here`),
+        h("button", { class: "btn primary", onclick: async () => { try { if (await asking(d.agent, () => api("OpenOnMachine", d.machine, d.remoteKey), () => api("AllowServiceRestart", d.machine, d.remoteKey))) sheet.close(); } catch (e) { fail(e); } } }, `Open it on ${d.machine}, here`),
         h("span", { class: "muted", style: "font-size:12.5px" }, `It runs on ${d.machine}, in your login session there; you work in it here. Or run this there:`)) :
       d.machine ? h("b", {}, `Start it on ${d.machine}`) : h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" },
         h("button", { class: "btn primary big", id: "open", onclick: open }, d.inApp ? `Open in the ${d.agent} app` : resultPlace === "terminal" ? `Resume in ${sys.terminal}` : "Resume in hopsesh Terminal", h("span", { class: "kbd" }, "↩")),
         d.inApp ? null : h("button", { class: "btn big", onclick: other }, resultPlace === "terminal" ? "Resume in hopsesh Terminal" : `Resume in ${sys.terminal}`),
         h("button", { class: "btn big", onclick: copy }, "Copy the command")),
       h("div", { style: "display:flex;gap:8px;align-items:flex-start" }, h("div", { class: "term", style: "flex:1" }, d.command), d.machine ? h("button", { class: "btn", onclick: copy }, "Copy") : null),
+      d.restartsService ? h("span", { class: "warn", style: "font-size:12px" }, `Opening it now restarts ${d.agent}'s background service (see below); hopsesh asks before it does.`) : null,
       h("span", { class: "muted", style: "font-size:12px" }, d.noWork ? "Opens the existing session; no new conversation or briefing was written." : d.kind === "continue" ? "Hopsesh prepared the history and briefing. Import notices are written by Hopsesh, not by the destination agent."
         : `Its first message tells ${d.agent} where the session came from and asks it to check the repository and files before going on.`))),
     h("section", { class: "card" }, h("div", { class: "dlg-body" }, h("span", { class: "sec-h" }, "What happened"), happened(d, p),

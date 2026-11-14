@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/internal/core/peer"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -224,12 +225,19 @@ func exe() string {
 	return ""
 }
 
-// A request from another machine cannot ask to restart the agent's service: the refusal
-// says how to agree on this one. Other errors pass as they are.
+// A request from another machine that would restart the agent's service is refused with a
+// code, so hopsesh there asks and sends it again with the yes (an older one cannot ask: the
+// refusal says how to agree on this machine). Other errors pass as they are.
 func TestRemoteRestartSaysHowToAgree(t *testing.T) {
 	err := remoteRestart(fmt.Errorf("opening it: %w", agent.ErrRestartsService))
 	if !errors.Is(err, agent.ErrRestartsService) || !strings.Contains(err.Error(), "hopsesh open --restart-service") || !strings.Contains(err.Error(), LocalName()) {
 		t.Fatalf("%v", err)
+	}
+	// As the other machine reads it: the code survives the wire.
+	b, _ := json.Marshal(err)
+	var got peer.Error
+	if json.Unmarshal(b, &got) != nil || got.Code != peer.CodeRestartsService || !errors.Is(&got, agent.ErrRestartsService) {
+		t.Fatalf("on the wire: %s", b)
 	}
 	if other := errors.New("x"); remoteRestart(other) != other {
 		t.Fatal("another error was changed")

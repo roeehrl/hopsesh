@@ -3,7 +3,7 @@
 // you", the entry points' routing (In this window / In my terminal), and the quit
 // confirmation that lists the programs still running.
 import {showWorkspace} from "./terminal-workspace.js";
-import { api, on, h, state, toast, fail, sys, dialog, count, icon, ago, localAgents, words, ask, errText, RESTART } from "./core.js";
+import { api, on, h, state, toast, fail, sys, dialog, count, icon, ago, localAgents, words, errText, RESTART, askRestart } from "./core.js";
 
 export const tabs = new Map(); // id → the tab (TermTab)
 const revisions = new Map(); // retain removals so a delayed startup RPC cannot resurrect them
@@ -84,7 +84,7 @@ export async function resume(e, w = "") {
   try { r = await api("ResumeSession", e.machine, e.key, w); } catch (err) {
     const msg = errText(err);
     if (!msg.startsWith(RESTART)) { fail(err); return; }
-    const yes = await ask({ title: `Restart ${e.agentName || "the agent"}'s background service?`, body: msg.slice(RESTART.length), ok: "Restart it and open", danger: true });
+    const yes = await askRestart(e.agentName, msg, "open");
     if (!yes) return;
     try {
       await api("AllowServiceRestart", e.machine, e.key);
@@ -95,9 +95,19 @@ export async function resume(e, w = "") {
 }
 
 // openResult starts what a done screen offers (OpenResult), the same way.
-export async function openResult(w = "") {
+// A result whose opening would restart the agent's background service asks first (agent
+// names the agent in the question).
+export async function openResult(w = "", agent = "") {
   let r;
-  try { r = await api("OpenResult", w); } catch (err) { fail(err); return; }
+  try { r = await api("OpenResult", w); } catch (err) {
+    const msg = errText(err);
+    if (!msg.startsWith(RESTART)) { fail(err); return; }
+    if (!await askRestart(agent, msg, "open")) return;
+    try {
+      await api("AllowResultRestart");
+      r = await api("OpenResult", w);
+    } catch (err2) { fail(err2); return; }
+  }
   opened(r);
 }
 

@@ -103,3 +103,26 @@ func TestWorklessPlanAndResultExplainTheExistingSession(t *testing.T) {
 		t.Fatal(v)
 	}
 }
+
+// A session whose opening would restart its agent's background service (OpenCode's,
+// decision D2) is not opened by enter on the done screen: the screen asks first, and
+// anything but y leaves it.
+func TestDoneAsksBeforeRestartingTheService(t *testing.T) {
+	m := newModel(t)
+	m.mode = modeDone
+	m.plan = &move.Plan{Kind: move.KindMove, Title: "Fix it", Agent: "OpenCode", Placement: agent.Placement{Key: agent.SessionKey{Agent: "opencode", Session: "ses_1"}}}
+	m.result = &move.Result{Command: "opencode -s ses_1", RestartsService: true, Journal: "j1",
+		Warnings: []string{"before you resume it: OpenCode's background service runs 2.2.5, and the opencode program (2.3.0) is another version"}}
+	if v := m.View().Content; !strings.Contains(v, "runs 2.2.5") || !strings.Contains(v, "asks before restarting OpenCode's background service") {
+		t.Fatal(v)
+	}
+	if _, cmd := m.key("enter"); cmd != nil || m.exit != nil || !m.restartAsk {
+		t.Fatalf("enter opened it: %+v", m.exit)
+	}
+	if v := m.View().Content; !strings.Contains(v, "Restart OpenCode's background service and open it?") || !strings.Contains(v, "y: restart it and open") {
+		t.Fatal(v)
+	}
+	if _, cmd := m.key("n"); cmd != nil || m.exit != nil || m.restartAsk {
+		t.Fatalf("no opened it: %+v", m.exit)
+	}
+}

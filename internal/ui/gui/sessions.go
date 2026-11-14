@@ -1089,6 +1089,9 @@ type DoneDTO struct {
 	Notice     string   `json:"notice"`
 	Warnings   []string `json:"warnings"`
 	InApp      bool     `json:"inApp"` // it opens in the agent's desktop app
+	// RestartsService: opening it now would restart the agent's background service
+	// (decision D2), so OpenResult asks first (its error starts with restartAsk).
+	RestartsService bool `json:"restartsService,omitempty"`
 	// RemoteControlInApp: Remote Control was asked for, and the desktop app can't start
 	// it; Key is the session the window then checks.
 	RemoteControlInApp bool   `json:"remoteControlInApp,omitempty"`
@@ -1128,7 +1131,7 @@ func (a *App) Apply() (*DoneDTO, error) {
 	d := &DoneDTO{NoWork: p.NoWork, Kind: p.Kind, Title: p.Title, Agent: p.Agent, Command: res.Command, Files: res.Files, Bytes: move.Human(res.Bytes),
 		Secrets: res.Secrets.Total, Redacted: p.Options.Redact, Cloned: res.Cloned, Worktree: res.Worktree, Journal: res.Journal,
 		SourceHost: p.Source.Location, Stopped: res.Stopped, Pushed: res.Pushed, PushError: res.PushError, SyncNote: res.SyncNote,
-		Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App, RemoteControlInApp: p.RemoteControlInApp, Key: p.Placement.Key.String(),
+		Notice: res.Notice, Warnings: res.Warnings, InApp: p.Options.App, RestartsService: res.RestartsService, RemoteControlInApp: p.RemoteControlInApp, Key: p.Placement.Key.String(),
 		AuditDir: filepath.Join(config.StateDir(), "log"), ContinuationHint: p.ContinuationHint()}
 	if p.NoWork && p.SyncTo != nil && p.SyncTo.Title != "" {
 		d.Title = p.SyncTo.Title
@@ -1174,10 +1177,28 @@ func (a *App) OpenResult(where string) (*OpenedDTO, error) {
 	if p.Options.App {
 		return &OpenedDTO{Where: "app"}, start(p.Resume)
 	}
-	if res.Command == "" || len(res.Run.Argv) == 0 {
+	run := res.Run
+	if res.RestartsService {
+		// Opening it would restart the agent's background service: made again now, with
+		// the person's yes when the window asked (decision D2).
+		key := p.Placement.Key
+		e := app.Entry{Cached: true, Location: agent.MachineLocation(app.LocalName()), Machine: app.LocalName(), Agent: key.Agent, Session: agent.Summary{Key: key}}
+		a.mu.Lock()
+		inv := a.inv
+		a.mu.Unlock()
+		if inv == nil {
+			inv = &app.Inventory{}
+		}
+		c, err := a.snapshot().Resume(inv, e, a.resumeOptions(app.LocalName(), key.String(), p.ResumeOptions()))
+		if err != nil {
+			return nil, askRestart(err)
+		}
+		run = c
+	}
+	if res.Command == "" || len(run.Argv) == 0 {
 		return nil, errors.New("there is nothing to open")
 	}
-	l := app.Launch{Kind: termapp.KindSession, Run: res.Run, Key: p.Placement.Key,
+	l := app.Launch{Kind: termapp.KindSession, Run: run, Key: p.Placement.Key,
 		Labels: termapp.Labels{Title: p.Title, Agent: p.Agent, Machine: app.LocalName()}}
 	if p.Kind == move.KindFetch && res.Fetch != nil {
 		if res.Fetch.Outcome == move.FetchWaiting {
@@ -1202,7 +1223,20 @@ func (a *App) OpenResult(where string) (*OpenedDTO, error) {
 	case WhereTerminal:
 		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
 	}
-	return a.sessionTab(res.Run, l, TabMeta{Kind: TabSession, Agent: p.Agent, Machine: app.LocalName(), Key: key}, p.Title, a.resumeAgain(l.Key.Agent, app.LocalName(), key))
+	return a.sessionTab(run, l, TabMeta{Kind: TabSession, Agent: p.Agent, Machine: app.LocalName(), Key: key}, p.Title, a.resumeAgain(l.Key.Agent, app.LocalName(), key))
+}
+
+// AllowResultRestart is AllowServiceRestart for the session just moved or continued: the
+// next OpenResult opens it even though that restarts the agent's background service.
+func (a *App) AllowResultRestart() error {
+	a.mu.Lock()
+	p := a.plan
+	a.mu.Unlock()
+	if p == nil {
+		return errors.New("nothing was moved")
+	}
+	a.AllowServiceRestart(app.LocalName(), p.Placement.Key.String())
+	return nil
 }
 
 // bringTab runs a bring-back's command (claude --teleport, which saves the copy only once

@@ -88,6 +88,10 @@ type Result struct {
 	Run      agent.Command `json:"run"`
 	Notice   string        `json:"notice,omitempty"`
 	Warnings []string      `json:"warnings,omitempty"`
+	// RestartsService: Run is empty because resuming the session now would restart the
+	// agent's background service (agent.ErrRestartsService, decision D2): a user interface
+	// opens it only after asking.
+	RestartsService bool `json:"restartsService,omitempty"`
 	// Fetch is what a fetch from a cloud did.
 	Fetch *FetchResult `json:"fetch,omitempty"`
 	// Handoff is what a hand-off to a cloud did (also when a step failed).

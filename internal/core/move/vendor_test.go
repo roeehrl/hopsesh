@@ -3,6 +3,7 @@ package move
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -42,6 +43,17 @@ func TestFinishResume(t *testing.T) {
 	}
 	if !strings.Contains(res.Command, "opencode") || !strings.Contains(res.Command, "ses_1") || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "another version") {
 		t.Fatalf("a refused command: %q %v", res.Command, res.Warnings)
+	}
+	if res.RestartsService {
+		t.Fatal("another refusal was taken for a service restart")
+	}
+	// A refusal because it would restart the agent's background service is marked, so an
+	// interface asks before opening it (with the plan's options).
+	p = &Plan{Resume: planned, resumeOpts: agent.ResumeOptions{Prompt: "go on"}}
+	res = &Result{}
+	finishResume(context.Background(), p, Side{Module: resumer{err: fmt.Errorf("the service runs 2.2.5: %w", agent.ErrRestartsService)}}, nil, res)
+	if len(res.Run.Argv) != 0 || !res.RestartsService || p.ResumeOptions().Prompt != "go on" {
+		t.Fatalf("a restart: %+v %v", res, p.ResumeOptions())
 	}
 
 	// The desktop app's command is the module's own: not asked again.
