@@ -24,7 +24,8 @@ exec hopsesh skill --json
 ! stdout '"state": "modified"'
 ! grep 'my own note' $HOME/.claude/skills/hopsesh/SKILL.md
 stdout '"present": true'
-grep '"bin": "hopsesh"' $HOME/.config/opencode/.hopsesh/rules.json
+# The bin is plain hopsesh where the login shell finds it, else its full path (Windows).
+grep '"bin": "[^"]*hopsesh' $HOME/.config/opencode/.hopsesh/rules.json
 grep '"pull"' $HOME/.config/opencode/.hopsesh/rules.json
 
 exec hopsesh skill remove
