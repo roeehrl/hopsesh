@@ -113,6 +113,10 @@ type Entry struct {
 	// Keep (OpPushRef): the user chose to keep the branch (delete_branch = "never"), so undo
 	// leaves it where it is and says so.
 	Keep bool `json:"keep,omitempty"`
+	// Undoing (OpVendorSession): an undo deleted the session the operation created, or
+	// began importing again the one it set aside. An undo after one that did not finish
+	// skips such a deleted session, and finishes such a restore.
+	Undoing bool `json:"undoing,omitempty"`
 }
 
 // Journal is the undo record of one operation (a move, a continuation, a hand-off).
@@ -486,11 +490,17 @@ func vendorChanged(ctx context.Context, r Reach, e Entry, all []Entry) error {
 	if e.Key == nil || r.Sessions == nil {
 		return nil
 	}
+	if e.Undoing && e.Created {
+		return nil // an earlier undo deleted it
+	}
 	if !e.Created {
 		for _, o := range all {
 			if o.Op == OpVendorSession && o.Created && o.Machine == e.Machine && o.Key != nil && *o.Key == *e.Key {
 				return nil
 			}
+		}
+		if e.Undoing {
+			return nil // a restore an earlier undo began: undo tells it from other work
 		}
 		now, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
 		if err != nil || now == e.Stamp {
@@ -1221,8 +1231,12 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 	var problems, kept, left []string
 	var manual []Manual
 	// Backups of sessions set aside that were not imported again: the operation wrote them
-	// (OpCreate, before the delete), and they are the only copy left.
+	// (OpCreate, before the delete), and they are the only copy left. A backup is the file
+	// the entry names and the files beside it named after it (keptBackup).
 	keepBackup := map[string]bool{}
+	// Sessions the operation created whose delete did not happen in this undo: the session
+	// set aside at the same id is not put back over them.
+	notDeleted := map[string]bool{}
 	// Worktrees go first: a branch is only renamed or deleted once no worktree hopsesh made
 	// has it checked out.
 	for i := len(j.Entries) - 1; i >= 0; i-- {
@@ -1277,7 +1291,22 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 			}
 			continue
 		case OpVendorSession:
-			restored, note, err := undoVendorSession(ctx, r, e, force)
+			if e.Created && e.Undoing {
+				continue // an earlier undo deleted it
+			}
+			var restored bool
+			var note string
+			var err error
+			mark := func() error { return j.markUndoing(i) }
+			switch sk := e.Machine + "\x00" + sessionMark(e); {
+			case !e.Created && notDeleted[sk]:
+				err = errors.New("it is put back once the session this made at its id is deleted")
+			default:
+				restored, note, err = undoVendorSession(ctx, r, e, force, mark)
+				if e.Created && !restored {
+					notDeleted[sk] = true
+				}
+			}
 			if !e.Created && !restored && e.Backup != "" {
 				keepBackup[e.Machine+"\x00"+e.Backup] = true
 			}
@@ -1316,7 +1345,7 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 			problems = append(problems, fmt.Sprintf("%s on %s: %v", e.Path, e.Machine, err))
 			continue
 		}
-		if e.Op == OpCreate && keepBackup[e.Machine+"\x00"+e.Path] {
+		if e.Op == OpCreate && keptBackup(keepBackup, e.Machine, e.Path) {
 			continue
 		}
 		if e.Op == OpAdopt {
@@ -1346,15 +1375,53 @@ func (j *Journal) undo(ctx context.Context, r Reach, force bool, skip func(strin
 	return nil
 }
 
+// keptBackup reports whether path on machine is one of the backups undo keeps: the file a
+// set-aside entry names, or a file beside it named after it (<name>.<anything>, as a
+// module that backs up a session in several files writes them).
+func keptBackup(keep map[string]bool, machine, path string) bool {
+	if keep[machine+"\x00"+path] {
+		return true
+	}
+	for k := range keep {
+		m, backup, _ := strings.Cut(k, "\x00")
+		if m != machine {
+			continue
+		}
+		stem := backup
+		if i := strings.LastIndexByte(backup, '.'); i > strings.LastIndexAny(backup, `/\`) {
+			stem = backup[:i]
+		}
+		if strings.HasPrefix(path, stem+".") {
+			return true
+		}
+	}
+	return false
+}
+
+// markUndoing records that undo deleted entry i's session or began restoring it.
+func (j *Journal) markUndoing(i int) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.Entries[i].Undoing {
+		return nil
+	}
+	j.Entries[i].Undoing = true
+	return j.saveLocked()
+}
+
 // undoVendorSession deletes a session the operation created in an agent's database, at the
 // stamp Seal recorded (forced: at its stamp now), or puts back one it set aside. A created
-// session already gone is fine.
+// session already gone is fine. mark records, before a restore and after a delete, that
+// undo took that step (Entry.Undoing).
 //
-// A session set aside is imported again from its backup only when it is gone; one there
-// at the stamp it was set aside at was never deleted (or was put back), which is fine too.
-// One there with other work is left as it is: unforced that is a problem, forced it is
-// noted (left). restored says the session set aside is as it was, so its backup may go.
-func undoVendorSession(ctx context.Context, r Reach, e Entry, force bool) (restored bool, left string, err error) {
+// A session set aside is imported again from its backup when it is gone; one there at the
+// stamp it was set aside at was never deleted, which is fine too. One there at another
+// stamp may be one a restore began (an import gives a session a new stamp) or one with
+// other work: the restore, which leaves the backup's messages as they are and refuses
+// others (ErrDiverged), tells them apart. Other work is left as it is: unforced that is a
+// problem, forced it is noted (left). restored says the session set aside is as it was,
+// so its backup may go.
+func undoVendorSession(ctx context.Context, r Reach, e Entry, force bool, mark func() error) (restored bool, left string, err error) {
 	if e.Key == nil {
 		return true, "", nil
 	}
@@ -1365,12 +1432,20 @@ func undoVendorSession(ctx context.Context, r Reach, e Entry, force bool) (resto
 		now, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
 		switch {
 		case errors.Is(err, agent.ErrNotFound):
-			_, err = r.Sessions.Restore(ctx, e.Machine, *e.Key, e.Backup)
-			return err == nil, "", err
 		case err != nil:
 			return false, "", err
-		case now == e.Stamp:
+		case now == e.Stamp && !e.Undoing:
 			return true, "", nil
+		}
+		if err := mark(); err != nil {
+			return false, "", err
+		}
+		_, err = r.Sessions.Restore(ctx, e.Machine, *e.Key, e.Backup)
+		switch {
+		case err == nil:
+			return true, "", nil
+		case !errors.Is(err, agent.ErrDiverged):
+			return false, "", err
 		case force:
 			return false, fmt.Sprintf("the %s session %s holds other work than it held when it was set aside, so it stays as it is; its backup is %s", e.Key.Agent, e.Key.Session, e.Backup), nil
 		}
@@ -1381,11 +1456,11 @@ func undoVendorSession(ctx context.Context, r Reach, e Entry, force bool) (resto
 		now, err := r.Sessions.Stamp(ctx, e.Machine, *e.Key)
 		switch {
 		case errors.Is(err, agent.ErrNotFound):
-			return true, "", nil
+			return true, "", mark()
 		case force && errors.Is(err, agent.ErrNotInstalled):
 			// No database where the agent keeps it now: forced, there is nothing to delete
 			// here, which is said (it may be one the agent keeps elsewhere).
-			return true, fmt.Sprintf("the %s session %s was not deleted: %v", e.Key.Agent, e.Key.Session, err), nil
+			return true, fmt.Sprintf("the %s session %s was not deleted: %v", e.Key.Agent, e.Key.Session, err), mark()
 		case err != nil:
 			return false, "", err
 		}
@@ -1396,9 +1471,12 @@ func undoVendorSession(ctx context.Context, r Reach, e Entry, force bool) (resto
 	}
 	err = r.Sessions.Delete(ctx, e.Machine, *e.Key, expect)
 	if errors.Is(err, agent.ErrNotFound) {
-		return true, "", nil
+		err = nil
 	}
-	return err == nil, "", err
+	if err != nil {
+		return false, "", err
+	}
+	return true, "", mark()
 }
 
 // undoPushRef deletes a pushed ref while it still points at what was pushed; forced, at
