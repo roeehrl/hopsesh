@@ -34,7 +34,7 @@ func noServiceCD(dir string) error {
 	return fmt.Errorf("%w; type /cd %s in the session in OpenCode, or start OpenCode (the desktop app, or `opencode service start`), then try again", errNoService, dir)
 }
 
-// PlanChangeDir: OpenCode's background service moves the session (DirAgent); its anchor
+// PlanChangeDir has OpenCode's background service move the session (DirAgent); its anchor
 // stays where it is.
 func (m *Module) PlanChangeDir(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary, dir string) (agent.DirPlan, error) {
 	main := s.Path

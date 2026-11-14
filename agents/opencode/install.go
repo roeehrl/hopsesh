@@ -24,7 +24,7 @@ import (
 // keys of the whole database. The new ids are made from the old ones and the copy's id, so
 // running the install again (a recovery) makes the same ones.
 
-// InstallsViaVendor: OpenCode's import is the install.
+// InstallsViaVendor reports that OpenCode's import is the install.
 func (*Module) InstallsViaVendor() bool { return true }
 
 // placed is one session of a placed copy, as its import needs it.
