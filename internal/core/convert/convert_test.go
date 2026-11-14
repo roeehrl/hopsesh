@@ -198,3 +198,32 @@ func TestGeneratedContextDoesNotBecomeNewWork(t *testing.T) {
 		}
 	}
 }
+
+// A result whose call came in an earlier read (a subagent's answer that arrived after its
+// call was carried) is rendered on its own, with its coverage; one whose call is in the
+// same read is rendered once, with the call.
+func TestLoneResultIsRendered(t *testing.T) {
+	answer := []ir.Node{
+		{Kind: ir.KindToolResult, Actor: ir.User, Result: &ir.ToolResult{CallID: "c9", Status: ir.StatusCompleted, Output: "The subagent found FIG-3.\n"}},
+		{Kind: ir.KindMessage, Actor: ir.User, Text: "Thanks."},
+	}
+	ir.Chain(answer, "earlier")
+	res := Render(Request{Nodes: answer, From: "OpenCode", To: "Claude Code", Fidelity: History, Window: 272000})
+	if len(res.Items) < 1 || res.Items[0].Role != ir.RoleAgent || !strings.Contains(res.Items[0].Text, "result of an earlier call") ||
+		!strings.Contains(res.Items[0].Text, "FIG-3") {
+		t.Fatalf("the lone result is not rendered: %+v", res.Items)
+	}
+	covered := false
+	for _, id := range res.Items[0].Coverage {
+		covered = covered || id == answer[0].ID
+	}
+	if !covered {
+		t.Fatalf("the rendered result does not cover its node: %v", res.Items[0].Coverage)
+	}
+	full := Render(Request{Nodes: session(), From: "Claude Code", To: "Codex", Fidelity: History, Window: 272000})
+	for _, it := range full.Items {
+		if strings.Contains(it.Text, "result of an earlier call") {
+			t.Fatalf("a result rendered with its call was rendered again: %s", it.Text)
+		}
+	}
+}
