@@ -7,7 +7,8 @@
 // Git remotes point at github.com/acme/*; a global insteadOf maps them to local bare
 // repositories, so cloning works without a network. The demo machines are Linux
 // containers; the Windows screenshots in CI seed the laptop on Windows (-codex adds
-// Codex threads there, so both agents show).
+// Codex threads there, so both agents show; -opencode adds OpenCode sessions, in OpenCode's
+// database, made the way `opencode session import` makes them).
 package main
 
 import (
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakeopencode"
 )
 
 const version = "2.1.284"
@@ -31,11 +33,13 @@ var (
 	bareDir string // shared by both demo machines in demo/
 	now     = time.Now().UTC()
 	codex   *bool
+	ocode   *bool
 )
 
 func main() {
 	role := flag.String("role", "studio", "studio or laptop")
 	codex = flag.Bool("codex", false, "laptop: also write Codex threads")
+	ocode = flag.Bool("opencode", false, "laptop: also write OpenCode sessions")
 	flag.StringVar(&bareDir, "bare", envOr("DEMO_BARE", ""), "where the acme repositories live (default $DEMO_BARE, else /srv/git/acme; on Windows ~/demo-git/acme)")
 	flag.Parse()
 	home, _ = os.UserHomeDir()
@@ -120,6 +124,53 @@ func laptop() {
 		thread(api, "main", "Speed up the orders query", 30*time.Hour,
 			"the /v2/orders query is slow for big accounts, find out why", "internal/orders/query.go")
 	}
+	if *ocode {
+		openCodeSession(web, "Header: keyboard focus ring", 70*time.Minute,
+			"the header's menu button has no visible focus ring, fix it", "src/header/Header.css")
+		openCodeSession(api, "Retry webhooks with backoff", 3*24*time.Hour,
+			"failed webhook deliveries should retry with exponential backoff", "internal/webhooks/retry.go")
+	}
+}
+
+// openCodeSession writes one made-up OpenCode session into OpenCode's database
+// ($XDG_DATA_HOME/opencode/opencode.db, else ~/.local/share/opencode), through the
+// stand-in's import: a prompt, a reply that reads a file, and the end of the turn.
+func openCodeSession(cwd, title string, age time.Duration, prompt, file string) {
+	data := os.Getenv("XDG_DATA_HOME")
+	if data == "" {
+		data = filepath.Join(home, ".local", "share")
+	}
+	t0 := now.Add(-age - 20*time.Minute)
+	ms := func(d time.Duration) int64 { return t0.Add(d).UnixMilli() }
+	tokens := map[string]any{"input": 1200, "output": 180, "reasoning": 0, "cache": map[string]any{"read": 0, "write": 0}}
+	model := map[string]any{"id": "gpt-5.5", "providerID": "openai"}
+	full := filepath.ToSlash(filepath.Join(cwd, file))
+	transfer := map[string]any{
+		"info": map[string]any{"id": fakeopencode.SessionID(t0), "projectID": "global", "agent": "build", "model": model,
+			"cost": 0, "tokens": tokens, "outcome": "succeeded",
+			"time":  map[string]any{"created": ms(0), "updated": ms(10 * time.Minute), "busy": ms(time.Second), "idle": ms(10 * time.Minute)},
+			"title": title, "location": map[string]any{"directory": filepath.ToSlash(cwd)}},
+		"messages": []any{
+			map[string]any{"id": fakeopencode.MessageID(t0), "time": map[string]any{"created": ms(time.Second)}, "text": prompt, "files": []any{}, "type": "user"},
+			map[string]any{"id": fakeopencode.MessageID(t0), "time": map[string]any{"created": ms(2 * time.Second), "completed": ms(5 * time.Minute)},
+				"type": "assistant", "agent": "build", "model": model, "content": []any{
+					map[string]any{"type": "text", "text": "I'll read " + file + " first."},
+					map[string]any{"type": "tool", "id": "call_" + uuid()[:8], "name": "read",
+						"state": map[string]any{"status": "completed", "input": map[string]any{"path": full},
+							"content": []any{map[string]any{"type": "text", "text": "(file contents)"}}},
+						"time": map[string]any{"created": ms(time.Minute), "ran": ms(time.Minute), "completed": ms(2 * time.Minute)}},
+				}, "finish": "tool-calls", "cost": 0, "tokens": tokens},
+			map[string]any{"id": fakeopencode.MessageID(t0), "time": map[string]any{"created": ms(6 * time.Minute), "completed": ms(10 * time.Minute)},
+				"type": "assistant", "agent": "build", "model": model, "content": []any{
+					map[string]any{"type": "text", "text": "Done: I changed " + full + " and ran the tests."},
+				}, "finish": "stop", "cost": 0, "tokens": tokens},
+			map[string]any{"id": fakeopencode.MessageID(t0), "time": map[string]any{"created": ms(10 * time.Minute)}, "type": "idle", "outcome": "succeeded"},
+		},
+	}
+	b, err := json.Marshal(transfer)
+	must(err)
+	_, err = fakeopencode.Import(filepath.Join(data, "opencode", "opencode.db"), b, cwd, now.Add(-age))
+	must(err)
 }
 
 // thread writes one made-up Codex thread (a rollout and its name in the session index).

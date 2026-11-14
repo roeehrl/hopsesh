@@ -22,7 +22,10 @@ export default async function setup() {
   const env = JSON.parse(execFileSync("go", ["run", "./internal/devtools/webtest", "-home", home, "-prepare", "-world", laptop ? "empty" : "test"],
     { cwd: root, encoding: "utf8" }));
   if (laptop) Object.assign(env, laptopWorld(home, env, dirname(exe)));
-  const app = spawn(exe, [], { env: { ...process.env, ...env, HOPSESH_E2E_CDP_PORT: port }, stdio: "inherit" });
+  const appEnv: Record<string, string | undefined> = { ...process.env, ...env, HOPSESH_E2E_CDP_PORT: port };
+  // An empty value is one to unset (testkit.Env): OpenCode reads an empty OPENCODE_DB as set.
+  for (const [k, v] of Object.entries(env)) if (v === "") delete appEnv[k];
+  const app = spawn(exe, [], { env: appEnv, stdio: "inherit" });
   app.on("exit", (code) => { if (code) console.error(`hopsesh-app exited with ${code}`); });
   for (let i = 0; i < 120; i++) {
     try {

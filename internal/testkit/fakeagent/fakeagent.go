@@ -1,5 +1,5 @@
-// Package fakeagent is the stand-in Claude Code and Codex the tests (and the Windows
-// screenshots in CI) run in place of the real agents.
+// Package fakeagent is the stand-in Claude Code, Codex and OpenCode the tests (and the
+// Windows screenshots in CI) run in place of the real agents.
 package fakeagent
 
 import (
@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakeopencode"
 )
 
 // The stand-in agents: the programs hopsesh runs, answering the way the real ones do for
@@ -62,6 +63,13 @@ func Codex() int {
 		return code
 	}
 	return 0
+}
+
+// OpenCode is the stand-in OpenCode 2.3.0 (internal/testkit/fakeopencode): its database,
+// sessions, background service probe and the API calls hopsesh makes.
+func OpenCode() int {
+	dir, _ := os.Getwd()
+	return fakeopencode.Main(fakeopencode.Proc{Args: os.Args[1:], Dir: dir, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr})
 }
 
 // Vendor is the stand-in for a second-wave cloud's CLI (gh, jules, devin, amp), by the

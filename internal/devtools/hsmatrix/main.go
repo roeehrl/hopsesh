@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/roeehrl/hopsesh/internal/testkit"
 )
 
 func main() {
@@ -129,9 +131,11 @@ func runMain(args []string) int {
 		"CLAUDE_CONFIG_DIR": filepath.Join(work, "claude"), "CODEX_HOME": filepath.Join(work, "codex"),
 		"HSMATRIX_BASE": filepath.Join(work, "repos"), "HOPSESH_MACHINE": "here", "HOPSESH_TAILSCALE": "off",
 	}
-	for k, v := range env {
-		os.Setenv(k, v)
+	// This machine's home stays, so OpenCode's folders go into the work folder too.
+	for k, v := range testkit.OpenCodeEnv(filepath.Join(work, "opencode")) {
+		env[k] = v
 	}
+	testkit.Apply(env)
 	for _, d := range []string{env["HOPSESH_CONFIG_DIR"], env["CLAUDE_CONFIG_DIR"], filepath.Join(env["CODEX_HOME"], "sessions"), env["HSMATRIX_BASE"]} {
 		_ = os.MkdirAll(d, 0o755)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/testkit"
 )
 
 // A Claude Code session in a folder named by CLAUDE_CONFIG_DIR, with text in Japanese and
@@ -21,6 +22,7 @@ func TestScanListsSessionInConfiguredFolder(t *testing.T) {
 	work := t.TempDir()
 	proj := filepath.Join(work, "proj")
 	claudeDir := filepath.Join(work, "claude")
+	testkit.UnsetAgentEnv(t)
 	t.Setenv("HOME", work)
 	t.Setenv("USERPROFILE", work)
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
@@ -65,6 +67,7 @@ func TestUnreadableAccountsStillListSessions(t *testing.T) {
 	work := t.TempDir()
 	proj := filepath.Join(work, "proj")
 	claudeDir := filepath.Join(work, "claude")
+	testkit.UnsetAgentEnv(t)
 	t.Setenv("HOME", work)
 	t.Setenv("USERPROFILE", work)
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeDir)

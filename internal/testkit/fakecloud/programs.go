@@ -11,11 +11,12 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-// The version lines the stand-in claude and codex print for --version: the versions of
-// the agents' newest fixtures (agents/<id>/testdata/<version>).
+// The version lines the stand-in claude, codex and opencode print for --version: the
+// versions of the agents' newest fixtures (agents/<id>/testdata/<version>).
 const (
-	ClaudeVersionLine = "2.1.284 (Claude Code)"
-	CodexVersionLine  = "codex-cli 0.153.2"
+	ClaudeVersionLine   = "2.1.284 (Claude Code)"
+	CodexVersionLine    = "codex-cli 0.153.2"
+	OpenCodeVersionLine = "opencode v2.3.0" // internal/testkit/fakeopencode plays it
 )
 
 // Programs are the stand-in claude, codex, gh, jules, devin, amp and fakecloud for

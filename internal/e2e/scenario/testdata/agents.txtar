@@ -1,11 +1,15 @@
-# hopsesh finds both agents through the programs on the PATH and their data folders.
+# hopsesh finds the agents through the programs on the PATH and their data folders.
+mkdir $HOME/.local/share/opencode
 exec hopsesh agents --json
 stdout '"id": "claude"'
 stdout '"version": "2.1.284"'
 stdout '"id": "codex"'
 stdout '"version": "0.153.2"'
+stdout '"id": "opencode"'
+stdout '"version": "2.3.0"'
 grep '^claude --version' $WORK/agents.log
 grep '^codex --version' $WORK/agents.log
+grep '^opencode --version' $WORK/agents.log
 
 # Each module's Spec comes with it as data: its folders, and its clouds with the drift
 # watch list.

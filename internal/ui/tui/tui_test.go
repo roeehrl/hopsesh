@@ -22,9 +22,7 @@ import (
 func newModel(t *testing.T) *model {
 	t.Helper()
 	h := t.TempDir()
-	for k, v := range testkit.Env(h) {
-		t.Setenv(k, v)
-	}
+	testkit.Setenv(t, testkit.Env(h))
 	if err := testkit.DemoHome(h); err != nil {
 		t.Fatal(err)
 	}

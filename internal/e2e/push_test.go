@@ -17,6 +17,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
+	"github.com/roeehrl/hopsesh/internal/testkit"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -65,6 +66,7 @@ func (m machineHome) env() []string {
 
 func (m machineHome) writeConfig(t *testing.T, c config.Config) {
 	t.Helper()
+	testkit.UnsetAgentEnv(t)
 	for _, kv := range m.env() {
 		k, v, _ := strings.Cut(kv, "=")
 		t.Setenv(k, v)

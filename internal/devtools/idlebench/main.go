@@ -102,9 +102,7 @@ func main() {
 		must(os.MkdirAll(home, 0o700))
 	}
 	home, _ = filepath.EvalSymlinks(home)
-	for k, v := range testkit.Env(home) {
-		os.Setenv(k, v)
-	}
+	testkit.Apply(testkit.Env(home))
 	must(testkit.DemoHome(home))
 	target := must1(generate(home, *sessions, *large))
 	must(codexFork(home, *forkMB))

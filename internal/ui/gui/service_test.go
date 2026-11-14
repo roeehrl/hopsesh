@@ -18,6 +18,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/testkit"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -29,6 +30,7 @@ func home(t *testing.T) (repo string) {
 	t.Helper()
 	h := t.TempDir()
 	h, _ = filepath.EvalSymlinks(h)
+	testkit.UnsetAgentEnv(t)
 	t.Setenv("HOME", h)
 	t.Setenv("USERPROFILE", h) // the home folder on Windows
 	t.Setenv("HOPSESH_CONFIG_DIR", filepath.Join(h, "config"))

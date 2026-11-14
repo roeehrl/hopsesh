@@ -1,8 +1,8 @@
 # hopsesh test bundle
 
 A project that bundles or drives hopsesh can test against exactly the hopsesh it ships with
-this bundle: hopsesh's stand-in agents (programs that answer like Claude Code, Codex and the
-vendors' cloud CLIs, without a model, a login or a network), the agents' fixtures, the
+this bundle: hopsesh's stand-in agents (programs that answer like Claude Code, Codex,
+OpenCode and the vendors' cloud CLIs, without a model, a login or a network), the agents' fixtures, the
 specs of the compiled-in modules, and payloads other projects contributed.
 
 Every release publishes it as `hopsesh-testbundle-<version>.tar.gz`, with
@@ -34,17 +34,20 @@ hopsesh-testbundle-<version>/
                          the stand-in program, for darwin, linux and windows on amd64 and arm64
   <agent>/<agent version>/
     home/                hopsesh's own fixtures for that agent version: a Claude config
-                         folder (CLAUDE_CONFIG_DIR) or a CODEX_HOME, with made-up sessions
+                         folder (CLAUDE_CONFIG_DIR) or a CODEX_HOME, with made-up sessions;
+                         for OpenCode, the SQL its database is built from (schema.sql,
+                         data.sql) and the sessions as OpenCode exported them (export-*.json)
     hooks/<Event>/*.json contributed payloads (see below)
     registry/*.json
     notify/*.json
+    export/*.json
 ```
 
 `<agent>` is a module id (`claude`, `codex`, …) and `<agent version>` the agent's own version
 (`2.1.284`): payloads depend on the agent's version, the bundle as a whole on hopsesh's.
 
 **The stand-in program** plays whichever program it is named as. Copy or link it as `claude`,
-`codex`, `gh`, `jules`, `devin`, `amp` or `fakecloud` on a `PATH` of its own:
+`codex`, `opencode`, `gh`, `jules`, `devin`, `amp` or `fakecloud` on a `PATH` of its own:
 
 ```sh
 b=hopsesh-testbundle-$v
@@ -60,6 +63,21 @@ succeeds and prints nothing. The `home/` fixtures use `/home/u/git/demo` as the 
 folder; rewrite it to a real folder when you copy them (hopsesh's tests do the same).
 `home/` includes decoy credential files (`.credentials.json`, `auth.json`, a `*.key`) that
 hold no secret: hopsesh must never open them, and a test can check that a program doesn't.
+
+As `opencode` it plays OpenCode 2.3.0 with a SQLite database of its own, where OpenCode keeps
+it (`$XDG_DATA_HOME/opencode/opencode.db`, or `$OPENCODE_DB`): `--version`, `debug paths`,
+`service status`, `session list|export|import|delete`, `auth list --format json`, and the
+`opencode api` calls hopsesh makes (sessions: list, get, rename, delete, move, fork,
+interrupt, messages; `/api/session/active`, `/api/info`, `/api/plugin`). Its exports match
+the 2.3.0 exports captured in a sandbox byte for byte (sessions without media). Its import
+decodes the file with OpenCode 2.3.0's schemas: a wrong shape is `Bad Request`, members the
+schemas do not declare are dropped, `Session already exists` goes to standard error with
+exit status 0 when the id is taken, and a child without its parent is `Not Found`. A
+differential run against the real 2.3.0 matched it on the cases it covers; anything it does
+not cover (media in `blob`, events, `--sanitize`, rows from before 2.1) may differ. The
+background service is make-believe and stopped unless `$FAKE_OPENCODE_SERVICE` says
+otherwise; a command run without `--standalone`, or the TUI, "starts" it and logs that, so a
+test can check nothing did. It prints an error for anything else it is asked.
 
 ## Contributing payloads
 
@@ -77,6 +95,7 @@ testbundle/<agent>/<agent version>/<slot>/[<Event>/]<name>.json
 | `claude` | `registry/` | a running-session registry entry (`<config>/sessions/<pid>.json`), such as one with `waitingFor` | `claude-registry.schema.json` |
 | `codex` | `hooks/<Event>/` | JSON on hook command standard input, under its `hook_event_name` | `codex-hook.schema.json` |
 | `codex` | `notify/` | the JSON Codex passes to its `notify` program | `codex-notify.schema.json` |
+| `opencode` | `export/` | a session as `opencode session export <id>` prints it; OpenCode 2.3.0's schemas must decode it without dropping a member, and it must import into the stand-in and export again unchanged | `opencode-transfer.schema.json` |
 
 The rules:
 

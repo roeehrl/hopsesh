@@ -47,9 +47,7 @@ func cloudModel(t *testing.T) (*model, fakecloud.Session) {
 	h := t.TempDir()
 	h, _ = filepath.EvalSymlinks(h)
 	bin := filepath.Join(h, "bin")
-	for k, v := range testkit.Env(h) {
-		t.Setenv(k, v)
-	}
+	testkit.Setenv(t, testkit.Env(h))
 	gitConfig := filepath.Join(h, "gitconfig")
 	for k, v := range map[string]string{"PATH": bin + ":" + os.Getenv("PATH"), "FAKE_CLOUD_DIR": filepath.Join(h, "cloud"), "FAKE_CLOUD_FAIL": "", "FAKE_CLAUDE_SAYS": "ok",
 		"GIT_CONFIG_GLOBAL": gitConfig, "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "Sam Doe", "GIT_AUTHOR_EMAIL": "sam@example.com",

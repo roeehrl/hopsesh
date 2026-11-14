@@ -16,9 +16,7 @@ import (
 // hopsesh cd does: the same session (its id), not a copy.
 func TestPullToOnThisMachineChangesTheFolder(t *testing.T) {
 	home := t.TempDir()
-	for k, v := range testkit.Env(home) {
-		t.Setenv(k, v)
-	}
+	testkit.Setenv(t, testkit.Env(home))
 	if err := testkit.DemoHome(home); err != nil {
 		t.Fatal(err)
 	}
