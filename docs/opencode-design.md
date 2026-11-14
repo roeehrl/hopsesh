@@ -64,11 +64,11 @@ N/P = not possible; ✗ = intentionally not done.
 | List sessions (local + remote) | Full | Full | **Full** | `session_v2` ⋈ `project`. Child sessions (`parent_id`) are counted as Subagents and not listed, as Codex skips subagent threads. Archived sessions are a Kind. Remote: §3.3. |
 | Preview / last prompt / title | Full | Full | **Full** | Last *n* settled messages with `session_part` merged (F5). TitleSource: OpenCode has no custom-vs-generated flag; report Generated, Untitled when the title matches OpenCode's untitled fallback, and Custom when hopsesh set it (recorded in the sidecar). |
 | Rename | Full | Full | **Full** | `opencode api PATCH /api/session/{id}` `{title}`. OpenCode generates titles only while a session is untitled, so a rename sticks. |
-| Live / busy detection | Full | Full | **Partial** | Signals: busy columns, `time_suspended` (a claimed turn that resumes on service restart), `GET /api/session/active` (meaning UNVERIFIED), TUI processes with `-s <id>`. An idle TUI opened from the picker or with `-c`, or a desktop window showing the session, cannot be seen. The move preview warns about this. |
+| Live / busy detection | Full | Full | **Partial** | Signals: the execution claim `time_suspended` (set when any turn starts, kept when the service shuts down mid-turn, F22), `time_busy` after `time_idle` (2.2.2+), and `GET /api/session/active` (the service's running turns, source-verified), asked only when a row has a turn in flight. With the service stopped a claimed turn is either running in a `--standalone` window or suspended; nothing tells which. An idle TUI or a desktop window showing the session cannot be seen; TUI processes are not listed (the Host has no process listing). The move preview warns about this. |
 | Stop | Full | Partial (never kills app) | **Partial** | `POST /api/session/{id}/interrupt`. Never SIGTERM the service. A TUI attached to the service is only a client, so it is not signalled (except a `--standalone` TUI hopsesh launched itself). `ErrSharedServer` semantics as for Codex. |
 | Move to another machine | Full | Full | **Full** (with stated losses) | Export (parent + children) → JSONL bundle → `session import --directory <cwd>` on the target. Lost: `/undo` snapshots, fork fields, instruction state, slug, job rows, session-level times, archived state. Shown in the move preview. |
 | Path rewrite | Full | Full | **Full** | The existing JSONL rewriter runs over the bundle. `project_id`, directory and slug are recomputed by import. |
-| Repo / worktree setup | Full | Full | **Full** | Generic core. OpenCode-managed worktrees under `{data}/worktree/<pid6>/…` (or `worktree.directory`) declared in `Spec.Worktrees`. |
+| Repo / worktree setup | Full | Full | **Full** | Generic core. OpenCode creates its worktrees outside the repository, under `{data}/worktree/<project id, 6 chars>/…` (or `worktree.directory`), so `Spec.Worktrees` (folders inside a repository that git status ignores) does not apply. |
 | Change dir in place (`cd`) | Full | Full | **Full** | `api POST /api/session/{id}/move {directory}`. The move is queued and applied at a step boundary; hopsesh confirms by waiting for a `location-switched` message. In-session hint: `/cd <dir>`. Note the agent itself can move its session with the `session_move` tool. |
 | Resume / continue command | Full | Full | **Full** | `<bin> [<dir>] -s <id> [--prompt …]`, where `<bin>` matches the running service's version (§3.4, D2). Printed only after hopsesh confirms the session exists, because `-s` creates an empty session for an unknown id. |
 | Fork on resume | Full | Full | **Partial** | No `--fork` for the full TUI. Pre-fork with `api POST …/fork`, then resume the child (D5). CapFork only after the sandbox check of fork message ids. |
@@ -122,7 +122,7 @@ Abbreviations:
 | F19 | Instructions: `AGENTS.md` (global `{config}/AGENTS.md` plus walk-up). v2 does not read `CLAUDE.md`. | docs `instructions.mdx:42` | verified |
 | F20 | Credentials live in the DB (`credential.value` is plain JSON text; also `account`, `control_account`, `account_state`). `{config}/opencode.json` may hold plaintext provider keys (it does here). `auth list --format json` prints `{id,name,connections:[{type:"credential",id,label,method,status}\|{type:"env",name}]}`, no secret values. | `src:core/src/credential/sql.ts:5-14`; `handlers/auth/list.ts`; `schema/src/connection.ts` | verified |
 | F21 | Desktop: `/Applications/OpenCode.app`, bundle `ai.opencode.desktop`, scheme `opencode://`. Stages its CLI at `~/Library/Application Support/ai.opencode.desktop/cli/<ver>-<arch>/opencode-cli`. `opencode://` URLs are forwarded to the renderer but nothing consumes a session link. UI state in `drafts.sqlite`. | `local:`; `src:desktop/src/renderer/startup/deep-links.ts` | verified |
-| F22 | Session turns in flight when the service dies stay claimed (`time_suspended`) and resume automatically when the service restarts (`resume_attempts`). | `src:core/src/session/store.ts:240-277` | source-verified |
+| F22 | `time_suspended` is the execution claim: set when a turn starts (in any process, in the transaction of `Execution.Started`, which also sets `time_busy` from 2.2.2), released when it ends (with `time_idle`). A service shutdown keeps the claim and records no idle, and the next service start resumes the turn (`resume_attempts`); a process that dies keeps it too. So a claimed row is a running turn or a suspended one. `time_compacting` is not written by 2.3.0. `GET /api/session/active` lists the "foreground Session drains currently owned by this OpenCode process" (running turns, not attached clients). | `src:core/src/session/{store.ts:240-277,execution.ts:75-81,140-158,projector.ts:847,1064}`; `protocol/src/groups/session.ts:225` | source-verified |
 | F23 | Usage: `session_v2.cost`, `tokens_*`; per-step tokens on assistant messages; `opencode stats --json`. Session info `model` is an optional `Model.Ref` (`{}` fails decoding); `projectID` is required but recomputed. No title-source flag. | `src:packages/schema/src/session.ts:32-63`; `session/title.ts:38-42`; `runner/llm.ts:202` | verified |
 | F24 | Storage history: JSON files before 1.2.0; SQLite with 1.x tables from 1.2.0; 2.x adds `session_v2` and copies once (`kv` `migration.v1-v2`). `native` replaced the replay field in 2.1.0. | `src:…/v1-migration.bun.ts:541-765`; `CHANGELOG.md` v2.1.0 | verified |
 | F25 | Migration cadence: 59 migrations; by month Jun 17, Aug 8, Sep 2, Oct 11; none since 2026-10-30 (`20261030054400_job`). | `$S/db2` copy; tag and dev | verified |
@@ -131,11 +131,16 @@ Abbreviations:
 
 **Version constraints**
 - **Minimum: OpenCode 2.1.0** for both the binary and the **running service** (the plugin, import and
-  API calls run in the service). Read side decodes both pre- and post-2.1 replay fields anyway.
+  API calls run in the service). The read side upgrades rows written before 2.1 as OpenCode does
+  (`SessionLegacy.message/part`: `state`/`providerState` → `native`, `providerResultState` merged into
+  the tool's `native`, `recent` → `metadata.recent`, `providerContext` → `native.messages`).
+- `session_part` (2.2.1) and `session_v2.time_busy` (2.2.2) are read when the database has them; a
+  database last opened by 2.1.x or 2.2.0 has neither.
 - `Spec.Tested = ["2.2", "2.3"]`; the 2.1.0 floor is declared as a drift floor with its source file.
 - **Schema gate (read side):** at open, check `PRAGMA table_info` for every table and column the module
   reads (`schema.go` manifest). Missing column → list nothing, show "OpenCode schema not recognised
-  (latest migration X)". Extra migrations are allowed, logged, and flagged by the drift watcher.
+  (latest migration X)". Extra migrations are allowed, logged, and flagged by the drift watcher. Every
+  read goes through the gate; its verdict is kept per database and latest migration id.
 - **Cross-version moves:** a newer export imported into an older service fails on unknown message
   types. Gate a move on target service version (`GET /api/info`, or the standalone binary's version)
   ≥ the source session's `version`.
@@ -154,7 +159,7 @@ Abbreviations:
 | File | Contents |
 |---|---|
 | `opencode.go` | `Module`; `Spec()`; `Detect`; `List`; `Bundle`; `PlanMove`; `Verify`; `Resume`; `SessionWatchPaths`. |
-| `spec.go` | • ID `opencode`, Name "OpenCode", Vendor "Anomaly" (verify the legal name), Stability `Experimental`, Tested.<br>• Binaries: `opencode` (VersionArgs `--version`).<br>• Roots: `data`, `config`, `state`, and on macOS `desktop` (`~/Library/Application Support/ai.opencode.desktop`) (§3.2). Main root: `data`.<br>• Secrets: `{state}/service*.json`, `{config}/service.json`, `{data}/auth.json`, `{config}/opencode.json`, `{config}/opencode.jsonc`, `{data}/opencode*.db*` (so no file path, bundle copy or peer package can copy the DB; SQL access is separate, §3.3).<br>• `LoginEnv`: `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `OPENCODE_CONFIG_DIR`, `OPENCODE_DB` (GUI started from Finder).<br>• `Tools` (feeds the briefing's tool names).<br>• Instructions `["AGENTS.md"]`; GlobalInstructions `{config}/AGENTS.md`.<br>• Worktrees: the OpenCode-managed worktree dir.<br>• Kinds `["archived"]`.<br>• TerminalEnv `OPENCODE_SESSION_ID`.<br>• `Icon.Apps`: `/Applications/OpenCode.app`. `DesktopScheme: "opencode"` (detection only, D11).<br>• `Accounts`: `RootEnv` (multi-var, §3.7), `Unset` (provider key variables, `OPENCODE_DB`, `OPENCODE_PASSWORD`, `OPENCODE_SERVER_PASSWORD`, `OPENCODE_SERVER*`), `Login` `opencode auth login`, `LoginElsewhere` text. Exact `auth login` syntax taken from the `--help` snapshot.<br>• `SQLFiles` `{data}/opencode*.db` and `{db}`; `SQLTables` allowlist and `SQLDenied` (§3.3).<br>• Features: CapFork only after verification; no CapApp. |
+| `spec.go` | • ID `opencode`, Name "OpenCode", Vendor "Anomaly" (verify the legal name), Stability `Experimental`, Tested.<br>• Binaries: `opencode` (VersionArgs `--version`).<br>• Roots: `data`, `config`, `state`, and on macOS `desktop` (`~/Library/Application Support/ai.opencode.desktop`) (§3.2). Main root: `data`.<br>• Secrets: `{state}/service*.json`, `{config}/service.json`, `{data}/auth.json`, `{config}/opencode.json`, `{config}/opencode.jsonc`, `{config}/config.json` (the legacy global config), `{data}/opencode*.db*` (so no file path, bundle copy or peer package can copy the DB; SQL access is separate, §3.3).<br>• `LoginEnv`: `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `OPENCODE_CONFIG_DIR`, `OPENCODE_DB` (GUI started from Finder).<br>• `Tools` (feeds the briefing's tool names).<br>• Instructions `["AGENTS.md"]`; GlobalInstructions `{config}/AGENTS.md`.<br>• Worktrees: none (OpenCode's are outside the repository).<br>• Kinds `["archived"]`.<br>• TerminalEnv `OPENCODE_SESSION_ID`.<br>• `Icon.Apps`: `/Applications/OpenCode.app`. `DesktopScheme: "opencode"` (detection only, D11).<br>• `Accounts`: `RootEnv` (multi-var, §3.7), `Unset` (provider key variables, `OPENCODE_DB`, `OPENCODE_PASSWORD`, `OPENCODE_SERVER_PASSWORD`, `OPENCODE_SERVER*`), `Login` `opencode auth login`, `LoginElsewhere` text. Exact `auth login` syntax taken from the `--help` snapshot.<br>• `SQLFiles` `{data}/opencode*.db` and `{db}`; `SQLTables` allowlist and `SQLDenied` (§3.3).<br>• Features: CapFork only after verification; no CapApp. |
 | `paths.go` | Resolves roots and the DB file (F2, F3); picks the channel DB. |
 | `service.go` | `serviceState(h)`: `opencode service status` → URL or stopped; `GET /api/info` → version. `execArgs(...)` adds `--standalone` when stopped (and the binary-version check from §2), and sets `OPENCODE_DISABLE_AUTOUPDATE=1`. `resumeBinary()` (§3.4). |
 | `schema.go` | Required-column manifest; `checkSchema(db)`; latest migration id. |
@@ -166,7 +171,7 @@ Abbreviations:
 | `export.go` | `Materialize`: export of the parent and each child turned into **JSONL** (line 1 = `{"kind":"info",…}`, then one line per message). Local: built from SQL (same projection as export, checked by a parity test). Remote: `session export`. Inverse `jsonlToTransfer`. |
 | `install.go` | `AfterInstall` (runs before lineage, §3.5): JSONL → transfer JSON in `{data}/hopsesh/opencode/tmp/`; keep-both id remap; set children's `info.parentID` from the source `parent_id` (child exports may lack it, UNVERIFIED); `session import <file> --directory <cwd>` parent first, then children. Success only when stdout contains `Imported session: <id>` (exit code is 0 on conflict). On "already exists" with a re-sync intended: export a backup to `{data}/hopsesh/opencode/backup/<id>-<ts>.json`, stamp-check, `session delete`, import. Idempotent (re-run during recovery finds the session and returns). |
 | `store.go` | `SessionStore` (§3.5): `Stamp`, `Delete` (stamp-guarded), `Restore(backup)`. |
-| `live.go` | `Live` (busy columns, `time_suspended`, `/api/session/active` when the service is up, TUI argv via `Procs.Commands`) and `Stop` (interrupt). |
+| `live.go` | `Live` (the execution claim and busy columns; `/api/session/active` when the service is up and a row has a turn in flight) and `Stop` (interrupt). |
 | `preview.go` | `Preview` via `agent.BuildPreview`; `Rename` via `api PATCH`. |
 | `reader.go` | `Read` → `ir.Segment` (§4). Works from SQL rows or from the JSONL file at `Summary.Path`. |
 | `writer.go` | `Profile`, `Write` (§4). |
@@ -265,7 +270,7 @@ fallback and the source of truth in a parity test (§7).
 - **Before any Exec** that would auto-start the service, `opencode service status`. If it prints
   `stopped`, pass `--standalone`. There is a race if the service starts between the probe and the call;
   both then write through SQLite locking and import is one transaction, so the result is still correct.
-- **Exec uses the PATH `opencode`.** Subcommands reuse a service of another version (`mismatch:"ignore"`),
+- **Exec uses the probed `opencode`** (the confined Host runs the binary Detect found). Subcommands reuse a service of another version (`mismatch:"ignore"`),
   so no version matching is needed for Exec. API features used are gated on the service version from
   `GET /api/info`.
 - **No `--server`.** It needs the service password, which hopsesh does not read.
@@ -273,7 +278,8 @@ fallback and the source of truth in a parity test (§7).
   the PATH `opencode` if it matches; else `/Applications/OpenCode.app/Contents/Resources/opencode-cli`
   or a staged desktop CLI (`{desktop}/cli/<ver>-<arch>/opencode-cli`, version read from the directory
   name, no exec) of that version. If none matches, apply D2. If the service is stopped, any binary
-  works. Check during PR 2 that the core accepts an absolute binary path in a resume argv.
+  works; if `service status` fails, the resume is refused (the service may be running). The core
+  runs an absolute program path as it is (`app.resolveProgram`).
 - **hopsesh-owned terminal tabs** follow D3 (`internal/ui/gui/terminal_binding.go` gets a module
   capability `OwnedTabArgs`: Codex `--no-daemon`, OpenCode none under the recommendation).
 
@@ -346,7 +352,8 @@ session-level times, archived state. Shown in the move preview.
 **Moves are refused** while the session is Live, including `time_suspended` set (it will resume on the
 next service start, F22).
 
-**Watch paths:** `{data}/opencode.db-wal`, `{data}/opencode.db`, `{data}/hopsesh/opencode/`.
+**Watch paths:** the database Detect chose (`{data}/opencode.db`, `OPENCODE_DB`'s, or another
+channel's `opencode-<channel>.db`) and its `-wal`, and `{data}/hopsesh/opencode/`.
 
 ### 3.6 Skills and instructions
 - Nothing to install: OpenCode reads `~/.agents/skills` and `~/.claude/skills` (F18).
@@ -785,6 +792,79 @@ packages and undo through it.
 - PR 11 (append into an existing session): the continue path reads an expected destination by its
   key (`Copies`), but appending and its rollback are not exercised with a virtual target yet.
 
+**Left by PR 2 for later PRs.** `agents/opencode` now lists, previews, reads (SQL, JSON lines
+and the API tier), renames, detects live turns, stops them, probes accounts and capacity, and is
+registered. Fixtures are the 2.3.0 sandbox capture plus `testdata/synthetic/` (part rows with
+inline content, unsettled messages, an unknown type, an attachment, a skill, and fake credential
+rows that tests prove are never read).
+- Resume: a new optional `agent.HostResumer` (`ResumeOn`) checks the session exists and picks a
+  program of the running service's version (PATH, the desktop's bundled `opencode-cli` with its
+  `.version` file, or a staged `{desktop}/cli/<ver>-<arch>/opencode-cli`). `app.Resume` uses it
+  for sessions on this machine. Commands made at plan time (moves, continues) still come from the
+  pure `Resume` with the PATH `opencode`: PR 4/5 should resolve the printed command after the
+  import. D2 is a refusal with an explanation (`restartError`); "ask, then resume anyway" needs a
+  confirmation in the user interfaces and a `ResumeOptions` field (PR 7/8).
+- Moves: `Verify` refuses every move (`ErrUnsupported`) until PR 4 adds the import
+  (`VendorInstaller`), `SessionStore`, children import and keep-both id remapping. `PlanMove`
+  already places the main file and `sessions/<id>.children/<child>.jsonl`, with the §3.8 policy.
+  Not expressible as a `RewritePolicy`: stripping `native` from content items and dropping
+  `compaction.native` for another account (only reasoning items are dropped); `uri` is not
+  protected (a `media:` ref holds no path).
+- Materialize leaves out the session's `permissions`: its column is named like the denied
+  `permission` table, which `CheckSQLQuery` refuses to mention. PR 4 decides (export for moves,
+  or a narrower rule).
+- API tier: `List` leaves `Size` 0 (counts need an export per session), `SessionStamp` exports.
+  `GET /api/session` is paged by `cursor.next` (tested with a fake over three pages).
+- Reader: a subagent's answer arrives as a `synthetic` message and is skipped like all
+  synthetic messages; the child's reply is not folded into the `subagent` tool result (PR 5).
+  Tool inputs are re-encoded with sorted keys, because the export and the database order keys
+  differently and a node id covers the input bytes.
+- The reader's file mode is used only where nothing runs (Exec fails: a peer's package); a
+  machine without SQL reads OpenCode's export first, since an anchor hopsesh wrote may be
+  stale. PR 4's reads of staged files need a file-only entry (`decodeJSONL`).
+- `Summary.Size` counts messages. `Entry.SizeUnit` says so, `ls` and `show` print "24 messages",
+  and byte totals leave them out. The GUI shows no per-session size yet (PR 8, if wanted).
+- Live: TUI processes (`-s <id>`) are not detected: the Host lists no processes, and asking for
+  the holders of `opencode.db` would flock the database.
+- TitleSource is never "custom": a hopsesh rename is not recorded yet (sidecar, PR 4).
+- Account: providers configured only in `opencode.json` are not listed by `auth list`, so a
+  working local-model setup reads "no provider signed in" (PR 7).
+- No `desktop` root: roots are writable, and the staged CLIs are only read, by path.
+  `TerminalEnv` cannot hold `OPENCODE_SESSION_ID` (it takes `NAME=value`); resume commands unset
+  it instead, as Claude's unset its session markers.
+- Tests that use `testkit.Env` find the real `opencode` through its absolute `Candidates` (as
+  they find a real `codex`), so they may run `opencode --version`, `service status` or
+  `auth list --standalone` under the test's home. `testkit.Env` now empties the `XDG_*` and
+  `OPENCODE_*` variables; OpenCode reads an empty `XDG_STATE_HOME` (`??`) as a relative folder,
+  so PR 3's stand-in should unset them instead.
+- Drift: a minimal `agentWatch["opencode"]` (docs, releases, help, code paths, formats, the
+  2.1.0 floor in `service.go`); PR 9 adds migration ids, the OpenAPI hash, the plugin API and the
+  desktop app entry. The docs URLs assume the `dev` branch.
+- Sandbox finding: OpenCode mints a session id up to a few hundred milliseconds before the row's
+  `time_created`.
+- After review: every read goes through the schema gate (cached per database and migration id);
+  `session_part` and `time_busy` are optional, so 2.1.x and 2.2.0 databases read; rows written before
+  2.1 are upgraded as `SessionLegacy` does; `Live` reads the execution claim and asks the service
+  only for rows with a turn in flight; a failed `service status` refuses a resume; a missing program
+  (exit 126/127) is "did not run", and only "Session not found" or an HTTP 404 on a session is
+  `ErrNotFound`; `ContextCapacity` falls back where the database cannot be read and counts from a
+  compaction newer than the last reply; the catalog is read from `models-dev:v2:catalog` or a custom
+  source's `models-dev:v2:catalog:<sha1>`; channel databases are watched; the SQL allowlist is the
+  five tables read.
+- PR 4: `Materialize` keeps stored `media:` refs (user `FileRef`, tool `ToolFileRef`) where
+  OpenCode's export hydrates them from `blob`, which is not allowlisted: it matches the export only
+  for sessions without media. Decide with `permissions` (above) whether moves use the export.
+- API tier: `List` also leaves the prompts and the OpenCode version empty (an untitled session stays
+  untitled there); prompts would need an export per session.
+- Reader: a user `!cmd` shell that settles after a later message shifts the settled indexes, so a
+  cursor taken in between may read as `ErrDiverged` (not reproduced; a full re-read recovers).
+- PR 7: `Live` sets no PID, `Procs` or `App` (Codex sets all three); the GUI's `terminalEnv` matches
+  a program's base name, so a resume through the desktop's `opencode-cli` shows that name in its tab
+  title (no other effect: OpenCode has no `TerminalEnv`).
+- PR 9: the agenttest suite has no subtests yet for Previewer, LiveDetector, Stopper, AccountProber,
+  ContextSizer, Renamer, HostResumer or SessionWatchProvider, and plan-move-identity checks only the
+  first session; the drift entry has no real-agent `Tests` pattern until real-agent tests exist.
+
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
 
@@ -794,7 +874,18 @@ one-line PR after D10's condition is met.
 2. **Service restart by a resume.** The TUI replaces a service of another version (F13). Mitigation:
    version-matched resume binary, D2 prompt, checklist steps 2–3.
 3. **Auto-start of the service** by subcommands. Mitigation: `service status` probe and `--standalone`;
-   the probe/start race is harmless (§3.4).
+   the probe/start race is harmless (§3.4). The opposite race is not: a call made without
+   `--standalone` because the probe said "running" starts the service again if it stopped in between
+   (`ServerConnection.resolve` → `Service.ensure`). Reads keep such calls rare: `Live` asks
+   `/api/session/active` only when a row has a turn in flight. `service status` also prints "stopped"
+   for a registered service that is starting, unhealthy or of an incompatible build; hopsesh cannot
+   tell those apart without reading the registration, which it never does.
+13. **`--standalone` is not free of side effects.** Every server process runs OpenCode's schedules
+   (`Schedule.Service.run`; `server/src/process.ts`): a standalone server may take the schedule lease
+   in `kv`, fire due schedules when `experimental.schedules` is on, wake sessions, and run a newer
+   binary's migrations on the database. It never starts the service (restart continuity is
+   service-only). Mitigation: as few standalone calls as possible (the account probe, writes, and
+   reads where SQL is unavailable).
 4. **Protection is weaker than Claude/Codex:** tools are blocked, prompts are not; a rejected tool is
    an error the model may route around; fail-open hides hook failures. Mitigations: notice entry,
    permission deny, cache-miss check after restarts, failure counter shown by HookTrust.
@@ -814,7 +905,6 @@ one-line PR after D10's condition is met.
 - `Plugin.define` and hooks on a 2.1/2.2 service: sandbox with a 2.2.7 standalone binary.
 - Hot reload of plugin directories: sandbox, watch `GET /api/plugin`.
 - `permission.hook` deny/allow/ask in practice: sandbox shell call.
-- Meaning of `GET /api/session/active` (attached vs busy): sandbox with an idle TUI.
 - Fork message-id behaviour: sandbox `api POST …/fork`.
 - Whether child exports carry `parentID` (checked exports show none): export a session with a subagent.
 - Skill dedup across two roots: sandbox with the same skill in both.
@@ -822,7 +912,6 @@ one-line PR after D10's condition is met.
 - Idle-message necessity on import: sandbox import without idles.
 - Standalone server of an older binary on a newer DB: sandbox.
 - Exact `auth login` syntax: `--help` snapshot.
-- Absolute binary path accepted in a resume argv by the core: read during PR 2.
 - Windows install and runtime.
 
 **Non-goals**

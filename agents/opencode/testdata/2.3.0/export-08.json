@@ -1,0 +1,229 @@
+{
+  "info": {
+    "id": "ses_e29a68618ffeNZMsiCtTC4JoKV",
+    "fork": {
+      "sessionID": "ses_e29a88c86ffeoU3BQ4jmST24T2",
+      "boundary": {
+        "type": "before",
+        "messageID": "msg_1d6579dae001EtgMTrA47usaHf"
+      }
+    },
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1794597550604,
+      "updated": 1794597596479,
+      "archived": 1794597596479
+    },
+    "title": "file tools (fork #1)",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d6597a0c001iAvdzkaY8q0hr6_5",
+      "time": {
+        "created": 1794597418171
+      },
+      "text": "Using the glob, grep and read tools (not the shell): find *.go files, grep for 'greet', and read main.go. Reply 'ok' when done.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d6597a0c001iAvdzkaY8q0hr6_6",
+      "time": {
+        "created": 1794597418176,
+        "firstToken": 1794597418523,
+        "streamed": 1794597420348,
+        "completed": 1794597420385
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user is asking to find *.go files using glob, search for \"greet\" with grep, and read main.go — not via the shell. These are three independent calls. The paths for glob and grep default to the current working directory. Reading main.go requires knowing the path — probably ./main.go in the working directory. The three calls are independent, so they can run in parallel (even if main.go doesn't exist, that's fine).\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597418524,
+            "completed": 1794597420339
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n\n\n"
+        },
+        {
+          "type": "tool",
+          "id": "call_289b63b9",
+          "name": "glob",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "pattern": "**/*.go"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "/home/u/git/demo/main.go"
+              }
+            ],
+            "metadata": {
+              "count": 1,
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597420330,
+            "ran": 1794597420341,
+            "completed": 1794597420375
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_227e0afc",
+          "name": "grep",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "pattern": "greet"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Found 2 matches\n/home/u/git/demo/main.go:\n  Line 5: func greet(name string) string {\n\n  Line 10: \tfmt.Println(greet(\"world\"))\n"
+              }
+            ],
+            "metadata": {
+              "matches": 2,
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597420332,
+            "ran": 1794597420342,
+            "completed": 1794597420377
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_0de681b6",
+          "name": "read",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "path": "main.go"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Read file main.go, lines 1-11\n1: package main\n2: \n3: import \"fmt\"\n4: \n5: func greet(name string) string {\n6: \treturn \"hello, \" + name\n7: }\n8: \n9: func main() {\n10: \tfmt.Println(greet(\"world\"))\n11: }"
+              }
+            ],
+            "metadata": {
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597420333,
+            "ran": 1794597420345,
+            "completed": 1794597420354
+          }
+        }
+      ],
+      "snapshot": {
+        "start": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "end": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "files": []
+      },
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0,
+      "tokens": {
+        "input": 43,
+        "output": 80,
+        "reasoning": 94,
+        "cache": {
+          "read": 8722,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d6597a0c001iAvdzkaY8q0hr6_26",
+      "time": {
+        "created": 1794597420390,
+        "firstToken": 1794597421316,
+        "streamed": 1794597422530,
+        "completed": 1794597422538
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nDone. I'll reply with \"ok\".\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597421317,
+            "completed": 1794597422528
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\nok\n\n- **glob**: one `*.go` file — `main.go`\n- **grep 'greet'**: 2 matches in `main.go` (lines 5, 10 — the `greet` function definition and its call)\n- **read main.go**: a small Go program whose `greet(name)` returns `\"hello, \" + name` and `main` prints `greet(\"world\")`"
+        }
+      ],
+      "snapshot": {
+        "start": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "end": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 440,
+        "output": 92,
+        "reasoning": 11,
+        "cache": {
+          "read": 8760,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d6597a0c001iAvdzkaY8q0hr6_34",
+      "time": {
+        "created": 1794597422540
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

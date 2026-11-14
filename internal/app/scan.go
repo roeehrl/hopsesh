@@ -135,6 +135,9 @@ type Entry struct {
 	// Original is the session a cloud session was handed off from ("machine:agent/id").
 	Original string                `json:"original,omitempty"`
 	Profile  *agent.RuntimeProfile `json:"profile,omitempty"`
+	// SizeUnit is what Session.Size counts: "" for bytes, SizeMessages for an agent that
+	// keeps its sessions in a database (agent.VirtualSessions).
+	SizeUnit string `json:"sizeUnit,omitempty"`
 }
 
 // Inventory is the result of a scan.
@@ -515,7 +518,7 @@ func (a *App) scanMachine(ctx context.Context, hm *host.Machine, dest string, o 
 					sum.Key.Profile = in.ProfileID()
 					batchMu.Lock()
 					defer batchMu.Unlock()
-					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Session: withRecords(m.records, in.Main(), a.withLedger(hm.Local, in.Main(), sum)), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
+					batch = append(batch, Entry{Cached: true, Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, SizeUnit: a.sizeUnit(spec.ID), Session: withRecords(m.records, in.Main(), a.withLedger(hm.Local, in.Main(), sum)), Profile: in.Profile, Live: agent.LiveInfo{State: agent.Unknown}})
 					if firstBatch || len(batch) >= 25 {
 						partial := *m
 						partial.Agents = append([]AgentState(nil), m.Agents...)
@@ -899,7 +902,7 @@ func listedEntries(ctx context.Context, hm *host.Machine, fsys host.FS, mod agen
 			lv.State = agent.Unknown
 		}
 		nativeOnly := manifests[i] != nil && !persistedFamilies[manifests[i].Family]
-		out = append(out, Entry{NativeRelationship: nativeOnly, ObservedAt: time.Now().UTC(), Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, Profile: st.Install.Profile, Session: s, Live: lv, Lineage: manifests[i], LineageError: problems[i], CanArchiveLineage: unsupported[i]})
+		out = append(out, Entry{NativeRelationship: nativeOnly, ObservedAt: time.Now().UTC(), Location: agent.MachineLocation(hm.Name), Machine: hm.Name, Agent: spec.ID, AgentName: spec.Name, SizeUnit: sizeUnitOf(mod), Profile: st.Install.Profile, Session: s, Live: lv, Lineage: manifests[i], LineageError: problems[i], CanArchiveLineage: unsupported[i]})
 	}
 	return out
 }

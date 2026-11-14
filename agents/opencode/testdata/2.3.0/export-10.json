@@ -1,0 +1,236 @@
+{
+  "info": {
+    "id": "ses_e29a5465fffek5VRD43HVvlx4P",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 148,
+      "output": 32,
+      "reasoning": 56,
+      "cache": {
+        "read": 26281,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1794597632589,
+      "updated": 1794597637681,
+      "busy": 1794597636734,
+      "idle": 1794597637683
+    },
+    "title": "part rows",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65aba5c0018THNF06z4OjnGQ",
+      "time": {
+        "created": 1794597632699
+      },
+      "text": "Use the read tool to read README.md, then reply with its title line only.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65ababf0017nSGW9xn2eUKfR",
+      "time": {
+        "created": 1794597632705,
+        "firstToken": 1794597633392,
+        "streamed": 1794597634867,
+        "completed": 1794597634880
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nI'm going to read the file.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597633393,
+            "completed": 1794597634863
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n"
+        },
+        {
+          "type": "tool",
+          "id": "call_e5a1887b",
+          "name": "read",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "path": "README.md"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Read file README.md, lines 1-3\n1: # demo\n2: \n3: A tiny demo project."
+              }
+            ],
+            "metadata": {
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597634852,
+            "ran": 1794597634866,
+            "completed": 1794597634872
+          }
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0,
+      "tokens": {
+        "input": 24,
+        "output": 25,
+        "reasoning": 10,
+        "cache": {
+          "read": 8722,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65ac3450016ZJ4olxpW343xy",
+      "time": {
+        "created": 1794597634887,
+        "firstToken": 1794597635588,
+        "streamed": 1794597636149,
+        "completed": 1794597636159
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user asked me to reply with only the title line.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597635590,
+            "completed": 1794597636145
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n# demo"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 82,
+        "output": 3,
+        "reasoning": 14,
+        "cache": {
+          "read": 8741,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65ac841001HOK1M8URN8zGv3",
+      "time": {
+        "created": 1794597636161
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_1d65aca0f001iZAkJD7Ui7ITmd",
+      "time": {
+        "created": 1794597636738
+      },
+      "text": "Now reply with the single word inline.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65aca87001zJpgc6u0txmfAc",
+      "time": {
+        "created": 1794597636745,
+        "firstToken": 1794597637211,
+        "streamed": 1794597637672,
+        "completed": 1794597637681
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user is asking for \"one word inline\" — probably meaning something inline code. The title was \"demo\". I'll reply with `demo`.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597637213,
+            "completed": 1794597637668
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n`demo`"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 42,
+        "output": 4,
+        "reasoning": 32,
+        "cache": {
+          "read": 8818,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65ace33001Hez3PtcUKBo7QL",
+      "time": {
+        "created": 1794597637683
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

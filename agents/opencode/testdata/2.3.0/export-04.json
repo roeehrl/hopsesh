@@ -1,0 +1,238 @@
+{
+  "info": {
+    "id": "ses_e29a8385effeUhBGvRVeVFrDLo",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 457,
+      "output": 157,
+      "reasoning": 89,
+      "cache": {
+        "read": 26458,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1794597439442,
+      "updated": 1794597449675,
+      "busy": 1794597439540,
+      "idle": 1794597449678
+    },
+    "title": "subagent",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d657c7e90017GXpfr1VefUc9H",
+      "time": {
+        "created": 1794597439545
+      },
+      "text": "Use the subagent tool to start one subagent with the prompt 'Reply with the single word pong. Do not use any tools.' Then tell me what it answered.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d657c83e0019d19OfxHc8TDXP",
+      "time": {
+        "created": 1794597439552,
+        "firstToken": 1794597439897,
+        "streamed": 1794597440776,
+        "completed": 1794597440799
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nI'm starting to think through what subagent I should use for this task.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597439898,
+            "completed": 1794597440773
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n"
+        },
+        {
+          "type": "tool",
+          "id": "call_443df49f",
+          "name": "subagent",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "agent": "general",
+              "description": "Reply pong",
+              "prompt": "Reply with the single word pong. Do not use any tools."
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "The subagent is working in the background (sessionID: ses_e29a832f5ffebHEWUP5fBLspvU). You will receive a <subagent> message when it goes idle, and again after each later round of work.\nDO NOT sleep, poll, proactively check on its progress, or duplicate this subagent's work.\nWork on non-overlapping tasks, or briefly tell the user what you launched and end your response.\nTo send it follow-ups or change its instructions while it runs, call subagent again with this sessionID."
+              }
+            ],
+            "metadata": {
+              "sessionID": "ses_e29a832f5ffebHEWUP5fBLspvU",
+              "status": "running",
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597440763,
+            "ran": 1794597440775,
+            "completed": 1794597440782
+          }
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0,
+      "tokens": {
+        "input": 41,
+        "output": 63,
+        "reasoning": 18,
+        "cache": {
+          "read": 8722,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d657cd24001bNjTNSoiDZtNN0",
+      "time": {
+        "created": 1794597440805,
+        "firstToken": 1794597445847,
+        "streamed": 1794597448206,
+        "completed": 1794597448214
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nI've launched a background subagent that will notify me when it's done, so I'll wait for that message to arrive. Since the instructions say not to poll, I'll just let the user know I've started the process and wait for the response to come through.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597445847,
+            "completed": 1794597448205
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\nI've launched a subagent (session `ses_e29a832f5ffebHEWUP5fBLspvU`) with your exact prompt: *\"Reply with the single word pong. Do not use any tools.\"*\n\nIt runs in the background and I'll report its answer back to you as soon as it finishes."
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 225,
+        "output": 73,
+        "reasoning": 57,
+        "cache": {
+          "read": 8758,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d657cd0e001Ap3YjB25b3AHpN",
+      "metadata": {
+        "source": "subagent",
+        "childID": "ses_e29a832f5ffebHEWUP5fBLspvU",
+        "agent": "General",
+        "state": "completed"
+      },
+      "time": {
+        "created": 1794597448217
+      },
+      "text": "<subagent sessionID=\"ses_e29a832f5ffebHEWUP5fBLspvU\" state=\"completed\" description=\"Reply pong\">\n\n\npong\n</subagent>",
+      "description": "Reply pong",
+      "type": "synthetic"
+    },
+    {
+      "id": "msg_1d657ea1b001HdeG4wdnoZgAw1",
+      "time": {
+        "created": 1794597448220,
+        "firstToken": 1794597448839,
+        "streamed": 1794597449667,
+        "completed": 1794597449675
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe subagent has finished its task and returned the result.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597448840,
+            "completed": 1794597449665
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\nThe subagent answered: **pong** — exactly the single word requested, with no tools used."
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 191,
+        "output": 21,
+        "reasoning": 14,
+        "cache": {
+          "read": 8978,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d657efce001aI68utLrbY67Hg",
+      "time": {
+        "created": 1794597449678
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

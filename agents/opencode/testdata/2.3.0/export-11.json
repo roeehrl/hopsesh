@@ -1,0 +1,160 @@
+{
+  "info": {
+    "id": "ses_e29a3ffd0ffeHandMadePartRow",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1794598000000,
+      "updated": 1794597722774
+    },
+    "title": "imported by hand with part_rows on",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65d0000001HandMadePrt001",
+      "time": {
+        "created": 1794598001000
+      },
+      "text": "Check the repo and read main.go.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65d0000002HandMadePrt002",
+      "time": {
+        "created": 1794598002000,
+        "completed": 1794598003000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "I will look at the repo first.",
+          "time": {
+            "created": 1794598002001,
+            "completed": 1794598002002
+          }
+        },
+        {
+          "type": "text",
+          "text": "Looking at the repo."
+        },
+        {
+          "type": "tool",
+          "id": "call_hand0001",
+          "name": "shell",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "git status --short"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": " M main.go\n"
+              }
+            ],
+            "metadata": {
+              "status": "completed",
+              "truncated": false,
+              "exit": 0
+            }
+          },
+          "time": {
+            "created": 1794598002100,
+            "ran": 1794598002101,
+            "completed": 1794598002200
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_hand0002",
+          "name": "read",
+          "executed": false,
+          "state": {
+            "status": "error",
+            "input": {
+              "path": "missing.go"
+            },
+            "error": {
+              "type": "unknown",
+              "message": "File not found: missing.go"
+            }
+          },
+          "time": {
+            "created": 1794598002300,
+            "ran": 1794598002301,
+            "completed": 1794598002400
+          }
+        }
+      ],
+      "finish": "tool-calls",
+      "cost": 0,
+      "tokens": {
+        "input": 10,
+        "output": 5,
+        "reasoning": 2,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65d0000003HandMadePrt003",
+      "time": {
+        "created": 1794598004000,
+        "completed": 1794598005000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "main.go is modified and missing.go does not exist."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 12,
+        "output": 9,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65d0000004HandMadePrt004",
+      "time": {
+        "created": 1794598005001
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

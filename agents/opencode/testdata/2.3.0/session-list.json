@@ -1,0 +1,90 @@
+[
+  {
+    "id": "ses_e29a3ffd0ffeHandMadePartRow",
+    "title": "imported by hand with part_rows on",
+    "updated": 1794597722774,
+    "created": 1794598000000,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29a3ffe0ffeHandMadeViaCli0",
+    "title": "imported by hand via cli",
+    "updated": 1794597714048,
+    "created": 1794598000000,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29a40000ffeHandMadeImport",
+    "title": "imported by hand",
+    "updated": 1794597704901,
+    "created": 1794598000000,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29a5465fffek5VRD43HVvlx4P",
+    "title": "part rows",
+    "updated": 1794597637681,
+    "created": 1794597632589,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29a68618ffeNZMsiCtTC4JoKV",
+    "title": "file tools (fork #1)",
+    "updated": 1794597596479,
+    "created": 1794597550604,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29a5d62effecLvjFnmTVDXAQ5",
+    "title": "archived at start",
+    "updated": 1794597596250,
+    "created": 1794597595652,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29a69ba5ffeH6q8sHMV3Anqbz",
+    "title": "file tools (fork #1)",
+    "updated": 1794597589093,
+    "created": 1794597545086,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29aa1ec8ffes7x6RCUekHyBbf",
+    "title": "renamed by api",
+    "updated": 1794597524919,
+    "created": 1794597315015,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29a7bdf0ffefEVrCCay4aaALo",
+    "title": "long session",
+    "updated": 1794597517670,
+    "created": 1794597470786,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29a8385effeUhBGvRVeVFrDLo",
+    "title": "subagent",
+    "updated": 1794597449675,
+    "created": 1794597439442,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  },
+  {
+    "id": "ses_e29a88c86ffeoU3BQ4jmST24T2",
+    "title": "file tools",
+    "updated": 1794597433808,
+    "created": 1794597418028,
+    "projectId": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "directory": "/home/u/git/demo"
+  }
+]

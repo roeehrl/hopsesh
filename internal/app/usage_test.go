@@ -24,3 +24,27 @@ func TestUsage(t *testing.T) {
 		}
 	}
 }
+
+// An agent that counts messages (OpenCode) is never added up or shown as bytes.
+func TestUsageMessages(t *testing.T) {
+	msgs := Entry{Machine: "a", Location: agent.MachineLocation("a"), Agent: "opencode", AgentName: "OpenCode", SizeUnit: SizeMessages, Session: agent.Summary{Size: 24}}
+	bytes := Entry{Machine: "a", Location: agent.MachineLocation("a"), Agent: "claude", AgentName: "Claude Code", Session: agent.Summary{Size: 2048}}
+	inv := &Inventory{Entries: []Entry{msgs, bytes}}
+	for _, u := range inv.Usage("a") {
+		if u.Agent == "opencode" && (u.Bytes != 0 || u.Sessions != 1) {
+			t.Fatalf("OpenCode usage counted its messages as bytes: %+v", u)
+		}
+	}
+	one := msgs
+	one.Session.Size = 1
+	none := msgs
+	none.Session.Size = 0
+	for _, c := range []struct {
+		e    Entry
+		want string
+	}{{msgs, "24 messages"}, {one, "1 message"}, {none, ""}, {bytes, "2 KB"}} {
+		if got := EntrySize(c.e); got != c.want {
+			t.Errorf("EntrySize(%s, %d) = %q, want %q", c.e.Agent, c.e.Session.Size, got, c.want)
+		}
+	}
+}

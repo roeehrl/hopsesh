@@ -159,7 +159,9 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 				}
 				var size int64
 				for _, it := range g.Items {
-					size += it.Entry.Session.Size
+					if it.Entry.SizeUnit == "" {
+						size += it.Entry.Session.Size
+					}
 				}
 				if size > 0 {
 					head += "  " + app.HumanBytes(size)
@@ -173,7 +175,7 @@ shows the cloud sessions only, with the local sessions their vendor mirrors.`,
 					}
 					e := it.Entry
 					s := e.Session
-					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), r.movementStatus(e), ago(s.LastActivity), sizeCell(s.Size), shortID(s.Key.Session), truncate(s.CWD, 44))
+					fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Machine, e.AgentName, truncate(s.Title, 40), r.movementStatus(e), ago(s.LastActivity), app.EntrySize(e), shortID(s.Key.Session), truncate(s.CWD, 44))
 					if e.Profile != nil {
 						fmt.Fprintf(tw, "  \t\t  %s\t\t\t\t\n", app.OwnerLine(logins.OwnerOf(e), e.Profile))
 					}
@@ -374,7 +376,7 @@ func showCmd() *cobra.Command {
 			}
 			r.printf("  directory    %s\n", s.CWD)
 			r.printf("  last prompt  “%s”\n", s.LastPrompt)
-			r.printf("  size         %s", app.HumanBytes(s.Size))
+			r.printf("  size         %s", app.EntrySize(e))
 			if s.Subagents > 0 {
 				r.printf(", %d subagent(s)", s.Subagents)
 			}
@@ -479,9 +481,7 @@ its clouds with their fidelity, needs and the upstream changes the drift check w
 					case rw.Install.Present:
 						here = "data only"
 					}
-					for _, p := range rw.Install.Roots {
-						folder = p
-					}
+					folder = rw.Install.Main() // an agent with several folders shows its main one
 				}
 				if !rw.Enabled {
 					here += " (disabled)"
@@ -557,14 +557,6 @@ func (r *run) movementStatus(e app.Entry) string {
 		return "previously " + s
 	}
 	return s
-}
-
-// sizeCell is a session's size in a listing ("" when its agent does not say).
-func sizeCell(n int64) string {
-	if n <= 0 {
-		return ""
-	}
-	return app.HumanBytes(n)
 }
 
 // printUsage says how much each agent's sessions take on each machine the listing read.

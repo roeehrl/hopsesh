@@ -30,7 +30,9 @@ func (inv *Inventory) Usage(machine string) []AgentUsage {
 			by[e.Agent] = u
 		}
 		u.Sessions++
-		u.Bytes += e.Session.Size
+		if e.SizeUnit == "" {
+			u.Bytes += e.Session.Size
+		}
 	}
 	for _, u := range by {
 		out = append(out, *u)
@@ -42,6 +44,37 @@ func (inv *Inventory) Usage(machine string) []AgentUsage {
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+// SizeMessages is Entry.SizeUnit when Session.Size counts settled messages, not bytes.
+const SizeMessages = "messages"
+
+// sizeUnit is Entry.SizeUnit for an agent's sessions.
+func (a *App) sizeUnit(id agent.ID) string {
+	m, _ := a.Module(id)
+	return sizeUnitOf(m)
+}
+
+func sizeUnitOf(m agent.Module) string {
+	if m != nil && agent.IsVirtual(m) {
+		return SizeMessages
+	}
+	return ""
+}
+
+// EntrySize is an entry's session size as people read it: "812 KB", or "24 messages"
+// for an agent that counts messages. It is "" when the size is unknown.
+func EntrySize(e Entry) string {
+	n := e.Session.Size
+	switch {
+	case n <= 0:
+		return ""
+	case e.SizeUnit == SizeMessages && n == 1:
+		return "1 message"
+	case e.SizeUnit == SizeMessages:
+		return fmt.Sprintf("%d messages", n)
+	}
+	return HumanBytes(n)
 }
 
 // HumanBytes is n as people read a file size: 812 KB, 3.4 MB, 9.8 GB.

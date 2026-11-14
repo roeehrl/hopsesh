@@ -79,6 +79,13 @@ func (a *App) Resume(inv *Inventory, e Entry, o agent.ResumeOptions) (agent.Comm
 		return agent.Command{}, err
 	}
 	p := agent.Placement{Key: e.Session.Key, SourceID: e.Session.Key.Session, CWD: e.Session.CWD, Location: m.Name}
+	if hr, ok := mod.(agent.HostResumer); ok && !o.App {
+		h, err := m.host.For(ctx, mod.Spec(), in, nil)
+		if err != nil {
+			return agent.Command{}, err
+		}
+		return hr.ResumeOn(ctx, h, in, e.Session.Key, p, o)
+	}
 	return mod.Resume(in, e.Session.Key, p, o), nil
 }
 

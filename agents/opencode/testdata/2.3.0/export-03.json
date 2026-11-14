@@ -1,0 +1,406 @@
+{
+  "info": {
+    "id": "ses_e29a88c86ffeoU3BQ4jmST24T2",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 800,
+      "output": 304,
+      "reasoning": 131,
+      "cache": {
+        "read": 36028,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1794597418028,
+      "updated": 1794597433808,
+      "busy": 1794597428766,
+      "idle": 1794597433810
+    },
+    "title": "file tools",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d6577448001VG7tCbMV9SACyY",
+      "time": {
+        "created": 1794597418171
+      },
+      "text": "Using the glob, grep and read tools (not the shell): find *.go files, grep for 'greet', and read main.go. Reply 'ok' when done.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65774be001sFESKK0asqO7qK",
+      "time": {
+        "created": 1794597418176,
+        "firstToken": 1794597418523,
+        "streamed": 1794597420348,
+        "completed": 1794597420385
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nThe user is asking to find *.go files using glob, search for \"greet\" with grep, and read main.go — not via the shell. These are three independent calls. The paths for glob and grep default to the current working directory. Reading main.go requires knowing the path — probably ./main.go in the working directory. The three calls are independent, so they can run in parallel (even if main.go doesn't exist, that's fine).\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597418524,
+            "completed": 1794597420339
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n\n\n"
+        },
+        {
+          "type": "tool",
+          "id": "call_289b63b9",
+          "name": "glob",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "pattern": "**/*.go"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "/home/u/git/demo/main.go"
+              }
+            ],
+            "metadata": {
+              "count": 1,
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597420330,
+            "ran": 1794597420341,
+            "completed": 1794597420375
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_227e0afc",
+          "name": "grep",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "pattern": "greet"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Found 2 matches\n/home/u/git/demo/main.go:\n  Line 5: func greet(name string) string {\n\n  Line 10: \tfmt.Println(greet(\"world\"))\n"
+              }
+            ],
+            "metadata": {
+              "matches": 2,
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597420332,
+            "ran": 1794597420342,
+            "completed": 1794597420377
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_0de681b6",
+          "name": "read",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "path": "main.go"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Read file main.go, lines 1-11\n1: package main\n2: \n3: import \"fmt\"\n4: \n5: func greet(name string) string {\n6: \treturn \"hello, \" + name\n7: }\n8: \n9: func main() {\n10: \tfmt.Println(greet(\"world\"))\n11: }"
+              }
+            ],
+            "metadata": {
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597420333,
+            "ran": 1794597420345,
+            "completed": 1794597420354
+          }
+        }
+      ],
+      "snapshot": {
+        "start": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "end": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "files": []
+      },
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0,
+      "tokens": {
+        "input": 43,
+        "output": 80,
+        "reasoning": 94,
+        "cache": {
+          "read": 8722,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d6577d64001MucT2l1l8HIb4r",
+      "time": {
+        "created": 1794597420390,
+        "firstToken": 1794597421316,
+        "streamed": 1794597422530,
+        "completed": 1794597422538
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nDone. I'll reply with \"ok\".\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597421317,
+            "completed": 1794597422528
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\nok\n\n- **glob**: one `*.go` file — `main.go`\n- **grep 'greet'**: 2 matches in `main.go` (lines 5, 10 — the `greet` function definition and its call)\n- **read main.go**: a small Go program whose `greet(name)` returns `\"hello, \" + name` and `main` prints `greet(\"world\")`"
+        }
+      ],
+      "snapshot": {
+        "start": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "end": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 440,
+        "output": 92,
+        "reasoning": 11,
+        "cache": {
+          "read": 8760,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65785cc0017Nn4mH50461V9j",
+      "time": {
+        "created": 1794597422540
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_1d6579dae001EtgMTrA47usaHf",
+      "time": {
+        "created": 1794597428770
+      },
+      "text": "In this repo, use the edit tool to change \"hello, \" to \"hi, \" in main.go, and use the write tool to create farewell.txt containing the word bye. Reply 'ok'.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d6579e260011nwwx4G7sU9YxW",
+      "time": {
+        "created": 1794597428777,
+        "firstToken": 1794597429369,
+        "streamed": 1794597431037,
+        "completed": 1794597431105
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nTwo independent tool calls: edit and write. Execute in parallel.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597429370,
+            "completed": 1794597431029
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\n\n"
+        },
+        {
+          "type": "tool",
+          "id": "call_f963eb2a",
+          "name": "edit",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "path": "main.go",
+              "oldString": "\treturn \"hello, \" + name",
+              "newString": "\treturn \"hi, \" + name"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Edited main.go (1 replacement)"
+              }
+            ],
+            "metadata": {
+              "files": [
+                {
+                  "file": "main.go",
+                  "patch": "Index: main.go\n===================================================================\n--- main.go\n+++ main.go\n@@ -2,9 +2,9 @@\n \n import \"fmt\"\n \n func greet(name string) string {\n-\treturn \"hello, \" + name\n+\treturn \"hi, \" + name\n }\n \n func main() {\n \tfmt.Println(greet(\"world\"))\n",
+                  "status": "modified",
+                  "additions": 1,
+                  "deletions": 1
+                }
+              ],
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597431017,
+            "ran": 1794597431032,
+            "completed": 1794597431041
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_28aa7b47",
+          "name": "write",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "path": "farewell.txt",
+              "content": "bye"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "Created file successfully: farewell.txt"
+              }
+            ],
+            "metadata": {
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1794597431025,
+            "ran": 1794597431034,
+            "completed": 1794597431040
+          }
+        }
+      ],
+      "snapshot": {
+        "start": "8a295d73f39a4c6babe2dd1accfc8bcb1f898737",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": [
+          "farewell.txt",
+          "main.go"
+        ]
+      },
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0,
+      "tokens": {
+        "input": 161,
+        "output": 102,
+        "reasoning": 15,
+        "cache": {
+          "read": 9195,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d657a745001OU26qMtncCqZnR",
+      "time": {
+        "created": 1794597431111,
+        "firstToken": 1794597432342,
+        "streamed": 1794597433799,
+        "completed": 1794597433808
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "\nDone. I'll reply with 'ok'.\n",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1794597432344,
+            "completed": 1794597433797
+          }
+        },
+        {
+          "type": "text",
+          "text": "\n\nok\n\n- Edited `main.go`: `\"hello, \"` → `\"hi, \"`\n- Created `farewell.txt` containing `bye`"
+        }
+      ],
+      "snapshot": {
+        "start": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "end": "2564bc03e8967e70d658649a2b9d8b655702d20f",
+        "files": []
+      },
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 156,
+        "output": 30,
+        "reasoning": 11,
+        "cache": {
+          "read": 9351,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d657b1d2001DNHBG07zfUVY1B",
+      "time": {
+        "created": 1794597433810
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}
