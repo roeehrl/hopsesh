@@ -69,6 +69,37 @@ exec hopsesh ls --host local --agent opencode --json
 ! stdout 'Account work'
 stdout 'imported by hand'
 
+# Protection in a folder: notices install puts the plugin in each folder's own config,
+# its argv naming the folder. The default folder's original, continued into Work, is
+# blocked; the Work copy runs. Continued in Claude Code in turn, the Work copy is the
+# stale one: the notice hook finds its lineage in Work's data folder.
+exec hopsesh notices install --agent opencode
+exists $HOME/.config/opencode/plugins/hopsesh/config.json
+exists $HOME/.hopsesh/accounts/opencode/work/config/plugins/hopsesh/index.js
+grep '"--profile",\s*"'$ACCOUNT_ID'"' $HOME/.hopsesh/accounts/opencode/work/config/plugins/hopsesh/config.json
+result-session move.json
+env FAKE_OPENCODE_TOOL='git commit -am wip'
+cd repo
+exec opencode run -s ses_e29a40000ffeHandMadeImport --standalone 'commit it'
+stderr 'Error: Blocked by hopsesh'
+env XDG_DATA_HOME=$HOME/.hopsesh/accounts/opencode/work/data XDG_STATE_HOME=$HOME/.hopsesh/accounts/opencode/work/state OPENCODE_CONFIG_DIR=$HOME/.hopsesh/accounts/opencode/work/config
+exec opencode run -s $RETURN_ID --standalone 'commit it'
+stderr '^\$ git commit -am wip$'
+! stderr 'Blocked'
+cd $WORK
+env XDG_DATA_HOME= XDG_STATE_HOME= OPENCODE_CONFIG_DIR= FAKE_OPENCODE_TOOL=
+exec hopsesh pull opencode/$RETURN_ID --in claude --yes --json
+stdout '"kind": "continue"'
+# (Without the scan's notes, so the hook finds the lineage from the session id alone.)
+rm $HOME/hopsesh-state/movement
+env FAKE_OPENCODE_TOOL='git commit -am wip'
+env XDG_DATA_HOME=$HOME/.hopsesh/accounts/opencode/work/data XDG_STATE_HOME=$HOME/.hopsesh/accounts/opencode/work/state OPENCODE_CONFIG_DIR=$HOME/.hopsesh/accounts/opencode/work/config
+cd repo
+exec opencode run -s $RETURN_ID --standalone 'commit it'
+stderr 'Error: Blocked by hopsesh\. .*Claude Code'
+cd $WORK
+env XDG_DATA_HOME= XDG_STATE_HOME= OPENCODE_CONFIG_DIR= FAKE_OPENCODE_TOOL=
+
 # Nothing started, stopped or moved the default folder's service, which ran all along.
 exists $HOME/.local/state/opencode/fake-service
 ! grep 'started the background service' $WORK/agents.log
