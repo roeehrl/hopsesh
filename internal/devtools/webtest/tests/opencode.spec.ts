@@ -214,9 +214,15 @@ test("continuing into OpenCode whose service would restart: the done screen asks
   await expect(page.getByRole("heading", { name: "“Find the codeword” is prepared for OpenCode" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Opening it now restarts OpenCode's background service")).toBeVisible();
   await expect(page.getByText(/Before you resume it: OpenCode's background service runs 2\.2\.5/)).toBeVisible();
-  await page.locator("#open").click();
+  // Applying opens the result where the plan said, which asks first; "Resume" asks again.
   const ask = page.locator("#dlg");
-  await expect(ask.getByRole("heading", { name: "Restart OpenCode's background service?" })).toBeVisible({ timeout: 30_000 });
+  const asked = ask.getByRole("heading", { name: "Restart OpenCode's background service?" });
+  await expect(asked).toBeVisible({ timeout: 30_000 });
+  await ask.getByRole("button", { name: "Cancel" }).click();
+  await expect(ask).toBeHidden();
+  expect(await tabs(page)).toHaveLength(0);
+  await page.locator("#open").click();
+  await expect(asked).toBeVisible({ timeout: 30_000 });
   await ask.getByRole("button", { name: "Restart it and open" }).click();
   await expect.poll(async () => (await tabs(page)).map((t) => t.command)).toEqual([expect.stringMatching(/^opencode -s ses_/)]);
 });
