@@ -529,4 +529,16 @@ func TestWriteChecksTheImportingService(t *testing.T) {
 	if _, ok := fh.Get(anchorOf(fh, in, agent.SessionID(req.SessionID))); ok {
 		t.Error("the transfer was written before the check")
 	}
+	// A recovery of an interrupted write is checked the same way.
+	if _, err := m.RecoverWrite(ctx, h, in, req); !errors.Is(err, agent.ErrUnsupported) || !strings.Contains(err.Error(), "background service") {
+		t.Fatalf("a 2.0 service imported a recovered write: %v", err)
+	}
+	for _, c := range f.commands() {
+		if strings.HasPrefix(c, "session import") {
+			t.Fatalf("ran %s", c)
+		}
+	}
+	if _, ok := fh.Get(anchorOf(fh, in, agent.SessionID(req.SessionID))); ok {
+		t.Error("the recovery placed the transfer before the check")
+	}
 }

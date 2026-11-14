@@ -407,12 +407,19 @@ func TestCapacityStableAcrossCatalogRefresh(t *testing.T) {
 	if after, err := m.ContextCapacity(ctx, h, in, s); err != nil || after != before {
 		t.Errorf("a refreshed catalog changed the capacity: %+v, then %+v (%v)", before, after, err)
 	}
+	// Another window for the model is another capacity.
+	if err := fh.ExecSQL(dbPath, fmt.Sprintf(`UPDATE kv SET value = replace(value, ':%d', ':%d') WHERE key = 'models-dev:v2:catalog'`, before.Window, before.Window+1)); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := m.ContextCapacity(ctx, h, in, s); err != nil || after.Window != before.Window+1 || after.ConfigHash == before.ConfigHash {
+		t.Errorf("a new window kept the hash: %+v, then %+v (%v)", before, after, err)
+	}
 
 	empty, _ := newMachine(t, setup{noDB: true})
 	m, h, in = open(t, empty)
 	none, err := m.ContextCapacity(ctx, h, in, nil)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || none.ConfigHash != "" {
+		t.Fatalf("the fallback window: %+v %v", none, err)
 	}
 	empty.LoadSQL(t, dbPath, filepath.Join(fixture, "schema.sql"))
 	if made, err := m.ContextCapacity(ctx, h, in, nil); err != nil || made != none {

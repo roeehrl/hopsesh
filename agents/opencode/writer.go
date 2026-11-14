@@ -120,16 +120,17 @@ func (m *Module) RecoverWrite(ctx context.Context, h agent.Host, in agent.Instal
 	if err != nil {
 		return ir.WriteResult{}, err
 	}
+	// As for Write, the service that would import it is checked before anything is placed.
+	svc, err := writerService(ctx, h, in)
+	if err != nil {
+		return ir.WriteResult{}, err
+	}
 	if placed == nil {
 		if err := h.FS().WriteFile(anchor, w.body, 0o600); err != nil {
 			return ir.WriteResult{}, err
 		}
 	} else if !bytes.Equal(placed, w.body) {
 		return ir.WriteResult{}, fmt.Errorf("%w: %s is not the session the interrupted write placed", agent.ErrDiverged, anchor)
-	}
-	svc, err := writerService(ctx, h, in)
-	if err != nil {
-		return ir.WriteResult{}, err
 	}
 	return m.importWritten(ctx, h, in, svc, req, w)
 }

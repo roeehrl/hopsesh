@@ -186,6 +186,23 @@ func TestPrepareAccount(t *testing.T) {
 	if _, err := m.PrepareAccount(ctx, h, def, agent.AccountPrep{}); err == nil {
 		t.Error("prepared the default folder")
 	}
+	// The default folder is refused as such, even with its folders and variables inside.
+	def.Profile = &agent.RuntimeProfile{ID: "d", Default: true, Root: acct}
+	if _, err := m.PrepareAccount(ctx, h, def, agent.AccountPrep{}); err == nil || !strings.Contains(err.Error(), "account folder it made") {
+		t.Errorf("prepared a default folder: %v", err)
+	}
+	// Commands without the folder's state and config variables would reach the default
+	// service (stopping it and moving it to the new port).
+	novars := in
+	novars.Accounts = nil
+	if _, err := m.PrepareAccount(ctx, h, novars, agent.AccountPrep{}); err == nil || !strings.Contains(err.Error(), "does not set") {
+		t.Errorf("prepared with no folder variables: %v", err)
+	}
+	nostate := in
+	nostate.Accounts = &agent.ProfileSpec{RootVars: []agent.ProfileVar{{Env: "XDG_DATA_HOME", Sub: "data"}, {Env: "OPENCODE_CONFIG_DIR", Sub: "config"}}}
+	if _, err := m.PrepareAccount(ctx, h, nostate, agent.AccountPrep{}); err == nil || !strings.Contains(err.Error(), "XDG_STATE_HOME") {
+		t.Errorf("prepared with the default state folder's variable: %v", err)
+	}
 	other := in
 	other.Roots = map[string]string{rootData: acct + "/data/opencode", rootConfig: acct + "/config", rootState: home + "/.local/state/opencode"}
 	if _, err := m.PrepareAccount(ctx, h, other, agent.AccountPrep{}); err == nil {
