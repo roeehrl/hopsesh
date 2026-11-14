@@ -397,15 +397,20 @@ func TestGuardReadsTheHook(t *testing.T) {
 	}
 }
 
-// A plugin the agent loads (OpenCode's) reads as a plugin: one the agent does not load is
-// not hopsesh's to set up again (its own config or a policy removes it), an older
-// hopsesh's copy is offered for update, and checks that failed and let a call through are
-// counted.
+// A plugin the agent loads (OpenCode's) reads as a plugin: one the agent leaves out is
+// not hopsesh's to set up again (its own config or a policy removes it), one that failed
+// to load is, an older hopsesh's copy is offered for update, and checks that failed and
+// let a call through are counted.
 func TestPluginHookChecks(t *testing.T) {
 	h := MovementHookStatus{Agent: "opencode", Supported: true, Installed: true, Enabled: true, Plugin: true,
-		Trust: &agent.HookTrust{State: agent.HookMissing, Detail: "OpenCode doesn't load the hopsesh plugin", Fix: "Take the entry out"}}
+		Trust: &agent.HookTrust{State: agent.HookMissing, Detail: "OpenCode doesn't load the hopsesh plugin", Fix: "Take the entry out", Excluded: true}}
 	if c := hookCheck(h, "OpenCode"); c.State != CheckWarn || c.Text != "installed, not loaded by OpenCode" || c.Fix != "" || !strings.Contains(c.Reason, "Take the entry out") {
 		t.Fatalf("not loaded: %+v", c)
+	}
+	failed := h
+	failed.Trust = &agent.HookTrust{State: agent.HookMissing, Detail: "OpenCode could not load the hopsesh plugin: no id", Fix: "Install hopsesh's hooks again."}
+	if c := hookCheck(failed, "OpenCode"); c.State != CheckWarn || c.Text != "installed, not loaded by OpenCode" || c.Fix != FixHooks || !strings.Contains(c.Reason, "could not load") {
+		t.Fatalf("failed to load (installing again may help): %+v", c)
 	}
 	h.Outdated = true
 	if c := hookCheck(h, "OpenCode"); c.Fix != FixHooks {

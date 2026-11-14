@@ -8,7 +8,8 @@
 // another version than the program, so opening a session would restart it; opencode=
 // outdated: every protection hook installed, hopsesh's plugin with one of its files an
 // older hopsesh's; opencode=removed: installed, the service running, and OpenCode's own
-// config removing hopsesh's plugin).
+// config removing hopsesh's plugin; opencode=failed: installed, the service running, and
+// the plugin failing to load).
 //
 // It also has stand-in Claude Code and Codex clouds and a Copilot cloud agent:
 // this program, run as claude, codex or gh, is the stand-in claude, codex or gh; the demo
@@ -441,14 +442,15 @@ func main() {
 		if oc := r.URL.Query().Get("opencode"); oc != "" {
 			// OpenCode's background service: running (the program's version), or restart
 			// (running another version than any opencode here, so opening a session would
-			// restart it: decision D2). outdated and removed: every protection hook is
-			// installed (with the protection world's command), and one of the plugin's files
-			// is an older hopsesh's, or OpenCode's config removes the plugin.
+			// restart it: decision D2). outdated, removed and failed: every protection hook
+			// is installed (with the protection world's command), and one of the plugin's
+			// files is an older hopsesh's, OpenCode's config removes the plugin, or the
+			// plugin fails to load.
 			if err := openCodeWorld(h, oc); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			if oc == "outdated" || oc == "removed" {
+			if oc == "outdated" || oc == "removed" || oc == "failed" {
 				// Every agent's protection hook, hopsesh's plugin among them.
 				mu.RLock()
 				app := svc
@@ -462,12 +464,17 @@ func main() {
 					return
 				}
 				var err error
-				if oc == "outdated" {
+				switch oc {
+				case "outdated":
 					f := filepath.Join(h, ".config", "opencode", "plugins", "hopsesh", "index.js")
 					var b []byte
 					if b, err = os.ReadFile(f); err == nil {
 						err = os.WriteFile(f, append(b, []byte("// an older hopsesh's plugin\n")...), 0o600)
 					}
+				case "failed":
+					// A server entry without a plugin definition, which OpenCode loads before
+					// index.js and fails on; hopsesh's own files are this version's.
+					err = os.WriteFile(filepath.Join(h, ".config", "opencode", "plugins", "hopsesh", "server.js"), []byte("export default {}\n"), 0o600)
 				}
 				if err == nil {
 					_, err = app.HookHealth(true) // the install's own check read the folder before
@@ -984,7 +991,7 @@ func voiceWorld(h string) error {
 const restartVersion = "2.2.5"
 
 // openCodeWorld sets up the stand-in OpenCode's background service (running, restart) or
-// the command hopsesh's hooks run (outdated, removed: the reset then installs them).
+// the command hopsesh's hooks run (outdated, removed, failed: the reset then installs them).
 func openCodeWorld(h, mode string) error {
 	switch mode {
 	case "running":
@@ -1001,6 +1008,9 @@ func openCodeWorld(h, mode string) error {
 		os.Setenv("FAKE_OPENCODE_SERVICE_VERSION", restartVersion)
 	case "outdated":
 		return protectionWorld(h, "blocked")
+	case "failed":
+		os.Setenv("FAKE_OPENCODE_SERVICE", "running")
+		return protectionWorld(h, "blocked")
 	case "removed":
 		// The service runs, and OpenCode's own config removes hopsesh's plugin.
 		os.Setenv("FAKE_OPENCODE_SERVICE", "running")
@@ -1013,7 +1023,7 @@ func openCodeWorld(h, mode string) error {
 		}
 		return protectionWorld(h, "blocked")
 	default:
-		return fmt.Errorf("opencode is running, restart, outdated or removed, not %q", mode)
+		return fmt.Errorf("opencode is running, restart, outdated, removed or failed, not %q", mode)
 	}
 	return nil
 }

@@ -62,10 +62,11 @@ function hookRow(x, r, name) {
   if (!x.installed) return { ...base, todo: true, note: "not set up" };
   if (t === "needs-review") return { ...base, wait: true, review: true, note: "installed · waiting for your approval in " + app };
   if (t === "disabled") return { ...base, wait: true, review: true, note: "installed · turned off in " + app };
-  // A plugin the agent doesn't load: its own config or a policy removes it, which setting
-  // up again doesn't change (an out-of-date copy is replaced, which may).
-  if (t === "missing" && x.plugin && !x.outdated) return { ...base, wait: true, unloaded: true, note: "installed · not loaded by " + app, detail: x.trust.detail };
-  if (t === "missing") return { ...base, todo: true, note: "not seen by " + app };
+  // A plugin the agent leaves out: its own config or a policy removes it, which setting up
+  // again doesn't change (an out-of-date copy is replaced, which may). One that failed to
+  // load, or another plugin of its name, is set up again.
+  if (t === "missing" && x.trust.excluded && !x.outdated) return { ...base, wait: true, unloaded: true, note: "installed · not loaded by " + app, detail: x.trust.detail };
+  if (t === "missing") return { ...base, todo: true, note: x.plugin ? "installed · not loaded by " + app : "not seen by " + app, detail: x.plugin ? x.trust.detail : "" };
   if (x.outdated) return { ...base, todo: true, outdated: true, note: "installed · out of date (an older hopsesh's)" };
   if (t === "unknown") return { ...base, ok: true, note: agentInfo(x.agent)?.hookReview ? "set up (approval not checked)" : x.plugin ? "set up (not confirmed loaded yet)" : "set up (not checked yet)", detail: x.plugin ? x.trust.detail : "" };
   if (x.trust?.failures) return { ...base, ok: true, note: `set up · ${x.trust.failures} failed check${x.trust.failures === 1 ? "" : "s"}`, detail: x.trust.detail };

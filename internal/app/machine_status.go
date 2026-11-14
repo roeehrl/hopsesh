@@ -784,13 +784,18 @@ func hookCheck(h MovementHookStatus, name string) Check {
 		// Turned off by the agent, or protection of originals is off in hopsesh there (no
 		// reason): either way it blocks nothing.
 		return Check{State: CheckWarn, Text: "installed, turned off", Reason: nonEmptyStr(h.Reason, "protection of originals is off in hopsesh there")}
-	case h.Trust != nil && h.Trust.State == agent.HookMissing && h.Plugin && !h.Outdated:
-		// The agent does not load the plugin: its own config or a policy removes it, which
-		// installing again does not change, so there is nothing for hopsesh to set up.
+	case h.Trust != nil && h.Trust.State == agent.HookMissing && h.Trust.Excluded && !h.Outdated:
+		// The agent leaves the plugin out: its own config or a policy removes it (or it
+		// has not reloaded it yet), which installing again does not change, so there is
+		// nothing for hopsesh to set up. One that failed to load is installed again below.
 		return Check{State: CheckWarn, Text: "installed, not loaded by " + name, Reason: strings.TrimSpace(nonEmptyStr(h.Trust.Detail, name+" doesn't load it") + " " + h.Trust.Fix)}
 	case h.Trust != nil && h.Trust.State == agent.HookMissing:
 		// Installed, but the agent does not run it (it does not list it, or did not load it).
-		return Check{State: CheckWarn, Text: "installed, not running in " + name, Reason: nonEmptyStr(h.Trust.Detail, name+" doesn't run it"), Fix: FixHooks}
+		text := "installed, not running in " + name
+		if h.Plugin {
+			text = "installed, not loaded by " + name
+		}
+		return Check{State: CheckWarn, Text: text, Reason: strings.TrimSpace(nonEmptyStr(h.Trust.Detail, name+" doesn't run it") + " " + h.Trust.Fix), Fix: FixHooks}
 	case h.Outdated:
 		// An older hopsesh's plugin (or an edited one) still runs; installing replaces it.
 		return Check{State: CheckWarn, Text: "installed, out of date", Reason: "the plugin's files are an older hopsesh's (or edited); setting up the hooks again replaces them", Fix: FixHooks}
