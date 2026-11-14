@@ -8,7 +8,7 @@ mkdir $HOME/.local/share/opencode
 
 exec hopsesh pull 11111111-2222-4333-8444-555555555555 --in opencode --yes --json
 stdout '"kind": "continue"'
-stdout '"argv": \[\s+"opencode",\s+"-s",\s+"ses_'
+stdout '"argv": \[\s+"[^"]*opencode",\s+"-s",\s+"ses_'
 cp stdout pull.json
 result-session pull.json
 grep -count=1 '^opencode session import .*hopsesh.opencode.tmp.ses_.*\.json --directory .*proj --standalone$' $WORK/agents.log

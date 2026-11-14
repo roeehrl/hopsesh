@@ -1,0 +1,61 @@
+[
+  {
+    "id": "anthropic",
+    "name": "Anthropic",
+    "connections": [
+      {
+        "type": "credential",
+        "id": "cred_1d65b0000001HandMadeCred1",
+        "label": "alice@example.com work key",
+        "method": "key"
+      }
+    ]
+  },
+  {
+    "id": "openai",
+    "name": "OpenAI",
+    "connections": [
+      {
+        "type": "env",
+        "name": "OPENAI_API_KEY"
+      }
+    ]
+  },
+  {
+    "id": "github-copilot",
+    "name": "GitHub Copilot",
+    "connections": [
+      {
+        "type": "credential",
+        "id": "cred_1d65b0000002HandMadeCred2",
+        "label": "alice",
+        "method": "oauth",
+        "status": {
+          "status": "needs_auth",
+          "message": "Sign in to GitHub Copilot again",
+          "url": "https://github.com/login/device"
+        }
+      }
+    ]
+  },
+  {
+    "id": "google",
+    "name": "Google",
+    "connections": [
+      {
+        "type": "credential",
+        "id": "cred_1d65b0000003HandMadeCred3",
+        "label": "personal",
+        "method": "oauth",
+        "status": {
+          "status": "needs_auth",
+          "message": "Reconnect Google"
+        }
+      },
+      {
+        "type": "env",
+        "name": "GEMINI_API_KEY"
+      }
+    ]
+  }
+]

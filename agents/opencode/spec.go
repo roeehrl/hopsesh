@@ -43,6 +43,30 @@ var sqlTables = []string{"session_v2", "session_message", "session_part", "kv", 
 // sqlDenied hold credentials, accounts and permission grants: never read.
 var sqlDenied = []string{"credential", "account", "control_account", "account_state", "permission", "workspace"}
 
+// accounts are OpenCode's account folders (profiles): each keeps its own data (the
+// database, so its sessions and sign-ins), state (the background service's registration)
+// and config folders, as data/, state/ and config/ inside it. OPENCODE_CONFIG_DIR is set
+// instead of XDG_CONFIG_HOME, so the tools OpenCode runs keep their own config; the
+// database is pinned too, since an OPENCODE_DB of the shell would name the default
+// folder's. The default folder keeps the machine's variables. Each folder hopsesh makes
+// gets its own service port (PrepareAccount). Sign-ins are OpenCode's own (`opencode auth
+// login`), per provider; nothing is inherited from the default folder but a few display
+// settings of cli.json (opencode.json may hold provider keys, so it is never read).
+// Provider keys in the shell (OPENAI_API_KEY, …) reach every folder, as they reach
+// OpenCode itself; the server passwords do not.
+var accounts = &agent.ProfileSpec{
+	RootVars: []agent.ProfileVar{
+		{Env: "XDG_DATA_HOME", Sub: "data"},
+		{Env: "XDG_STATE_HOME", Sub: "state"},
+		{Env: "OPENCODE_CONFIG_DIR", Sub: "config"},
+		{Env: "OPENCODE_DB", Sub: "data/opencode/opencode.db"},
+	},
+	Unset: []string{"OPENCODE_PASSWORD", "OPENCODE_SERVER_PASSWORD"},
+	Login: []string{"auth", "login"},
+	Inherit: map[string][]string{"{config}/cli.json": {"theme.name", "theme.mode", "mouse", "animations", "leader.timeout",
+		"scroll.speed", "scroll.acceleration", "cursor.style", "cursor.blinking"}},
+}
+
 // Spec declares OpenCode 2.x.
 func (*Module) Spec() agent.Spec {
 	return agent.Spec{
@@ -54,6 +78,7 @@ func (*Module) Spec() agent.Spec {
 		DesktopScheme: "opencode",
 		// A provider is not a person: sessions resume under whatever OpenCode is signed in to.
 		ResumeAcrossAccounts: true,
+		Accounts:             accounts,
 		Binaries: []agent.Binary{{
 			Name: binName,
 			Candidates: map[string][]string{

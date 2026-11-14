@@ -44,7 +44,7 @@ func TestProfileReviewCoverage(t *testing.T) {
 		}
 		watch := agentWatch[spec.ID].Watch
 		grep := regexp.MustCompile(watch.Grep)
-		for _, env := range spec.Accounts.RootEnv {
+		for _, env := range spec.Accounts.Vars() {
 			if !grep.MatchString(env) {
 				t.Errorf("%s: root %s absent from upstream change filter", spec.ID, env)
 			}
