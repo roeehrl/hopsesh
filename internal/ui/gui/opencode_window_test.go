@@ -74,3 +74,26 @@ func TestContinuedIntoOpenCodeAsksToOpen(t *testing.T) {
 		t.Fatal("the yes held twice")
 	}
 }
+
+// A tab names the agent's program by the agent's own name, also when the desktop app's
+// copy of it runs (OpenCode's opencode-cli); another program by its file name.
+func TestTabProgramNames(t *testing.T) {
+	a, _, _ := openCodeWindow(t, "")
+	for argv0, want := range map[string]string{
+		"/Applications/OpenCode.app/Contents/Resources/opencode-cli":            "opencode",
+		"/home/u/.local/share/ai.opencode.desktop/cli/2.2.7-arm64/opencode-cli": "opencode",
+		"opencode":        "opencode",
+		"/usr/bin/claude": "claude",
+		"/bin/zsh":        "zsh",
+	} {
+		if got := a.programName(argv0); got != want {
+			t.Errorf("%s: %q, want %q", argv0, got, want)
+		}
+	}
+	if m, _ := a.programOf("/bin/zsh"); m != nil {
+		t.Errorf("zsh is %s's", m.Spec().ID)
+	}
+	if got := displayCommand(append([]string{a.programName("/x/opencode-cli")}, "-s", "ses_1")); got != "opencode -s ses_1" {
+		t.Errorf("the command: %q", got)
+	}
+}

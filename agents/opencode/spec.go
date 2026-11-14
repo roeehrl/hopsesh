@@ -110,7 +110,7 @@ func (*Module) Spec() agent.Spec {
 			"darwin": {"/Applications/OpenCode.app", "~/Applications/OpenCode.app"},
 		}},
 		// One desktop process serves every session, through the same background service.
-		Desktop: &agent.Desktop{Tool: "OpenCode desktop", Product: "OpenCode", Shared: true},
+		Desktop: &agent.Desktop{Tool: "OpenCode desktop", Product: "OpenCode desktop", Shared: true},
 		Kinds: []agent.SessionKind{
 			{ID: kindArchived, Name: "Archived sessions", Note: "Sessions archived in OpenCode, which its own lists leave out."},
 		},

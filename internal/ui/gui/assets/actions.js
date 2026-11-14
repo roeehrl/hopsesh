@@ -41,6 +41,8 @@ export function placeName(p, e) {
     const a = agentInfo(p.kind.slice(0, -4)), name = a?.appName || a?.short || p.kind.slice(0, -4);
     return a?.desktop?.shared ? `${liveOf(e || {}).app || name} desktop` : `${name} app`;
   }
+  // A terminal inside another agent's desktop app (OpenCode desktop's terminal panel).
+  if (p.in) return agentInfo(p.in)?.appName || agentShort(p.in);
   return e?.app ? `${e.app} app` : "Unknown window";
 }
 
@@ -238,7 +240,8 @@ function localModel(e) {
         m.primary = { id: "resume:" + d.id, label: `Resume in ${d.name}`, short: "Resume", run: () => resumeIn(e, d.id) };
         m.chevron = ps.filter((p) => p !== d).map((p) => resumeItem(p));
         m.chevronLabel = "Resume elsewhere";
-        m.caption = "Its window could not be identified. If it is still open somewhere, close it there first: two copies writing one session can interleave.";
+        m.caption = first.in ? `It runs in a terminal inside ${placeName(first, e)}, which hopsesh can't show. If you resume it elsewhere, close it there first: two copies writing one session can interleave.`
+          : "Its window could not be identified. If it is still open somewhere, close it there first: two copies writing one session can interleave.";
       }
       else if (isAppPlace(first.kind)) m.caption = e.canApp ? "Opens this conversation in the desktop app" : e.appWhy;
     } else if ((e.departure || e.movement)?.machine && (e.departure || e.movement)?.key) {

@@ -117,7 +117,7 @@ function agents() {
       h("div", { class: "set-row" },
         agentBadge(a.id, a.name),
         title(a.name, a.version ? `${a.version}${a.runtime === "app" ? " (built into the desktop app)" : ""} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
-        a.stability === "experimental" ? h("span", { class: "chip st-warn" }, "experimental") : null,
+        a.stability === "experimental" ? h("span", { class: "chip st-warn", title: `hopsesh's ${a.name} support is new: some of what it does is checked only against the versions it was tested with` }, "experimental") : null,
         h("button", { class: "switch", role: "switch", "aria-checked": a.enabled ? "true" : "false", "aria-label": `${a.name} on`,
           onclick: () => set(!a.enabled, a.remoteControl, a.import, a.enabled ? `${a.name} is off` : `${a.name} is on`) })),
       h("div", { style: "display:flex;gap:5px;flex-wrap:wrap" }, caps.filter((c) => !c.startsWith("cloud-")).map((c) => CAPS[c] || c).sort().map((c) => h("span", { class: "cap" }, c))),
@@ -194,8 +194,8 @@ function terminal() {
       state.info?.desktopManaged ? h("div",{class:"set-row"},title("When the main window closes", "Desktop presence controls keeping the app running. Quitting always asks before ending active terminal programs."),h("button",{class:"btn",onclick:()=>go("settings","desktop")},"Desktop presence…")) : sw("keepTabs", "Keep tabs when the window closes", "Used when Desktop presence has no explicit close preference. Closing the window hides it while programs keep running. Quitting hopsesh ends every program in its tabs; hopsesh asks first. For work that must outlive hopsesh, use Open in my terminal."),
       sw("closeEnded", "Close a tab when its program ends", "When it ends well (a hand-off's step once hopsesh has its link). A program that failed keeps its tab, so you can read why."),
       sw("notify", "Tell me when a program waits for me", sys.mac
-        ? "A notification when a tab you can't see waits for your answer. hopsesh writes the text; it never shows what the program printed. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications); hopsesh never changes Claude Code's settings for you."
-        : "The terminal's taskbar button flashes when a tab you can't see waits for your answer. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications).")),
+        ? "A notification when a tab you can't see waits for your answer. hopsesh writes the text; it never shows what the program printed. A program says it's waiting by ringing the terminal's bell or sending a notification; Claude Code does so only if you turn on its terminal bell (/config → Notifications), and hopsesh never changes an agent's settings for you."
+        : "The terminal's taskbar button flashes when a tab you can't see waits for your answer. A program says it's waiting by ringing the terminal's bell or sending a notification; Claude Code does so only if you turn on its terminal bell (/config → Notifications).")),
     card(h("span", { class: "sec-h" }, "Look"),
       h("div", { class: "set-row" }, title("Font", `Fonts with box-drawing characters draw ${words(agentNames())} best. Empty: the system's monospace font.`),
         h("input", { class: "field", "aria-label": "Font", list: "term-fonts", value: ts.font, placeholder: sys.mac ? "SF Mono" : sys.win ? "Cascadia Mono" : "monospace", onchange: (e) => setTerm({ font: e.target.value.trim() }) }),

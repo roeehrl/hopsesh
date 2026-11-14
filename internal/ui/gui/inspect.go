@@ -266,6 +266,9 @@ type PlaceDTO struct {
 	App     string `json:"app,omitempty"` // its name for people ("VS Code")
 	Count   int    `json:"count"`
 	Waiting bool   `json:"waiting,omitempty"`
+	// In is the agent whose desktop app runs it, for an unknown place inside another
+	// agent's app (a terminal panel of OpenCode desktop): "Running in OpenCode".
+	In string `json:"in,omitempty"`
 }
 
 // LiveDTO is how a session on this machine runs now.
@@ -374,16 +377,17 @@ func placesOf(li agent.LiveInfo, t presence.Table, self int, kind presence.Kind)
 	if len(procs) == 0 && li.PID > 0 {
 		procs = []agent.LiveProc{{PID: li.PID, App: li.App, Waiting: strings.HasPrefix(li.Status, "waiting")}}
 	}
-	add := func(kind, appLabel string, waiting bool) {
+	addIn := func(kind, appLabel, in string, waiting bool) {
 		for i := range out {
-			if out[i].Kind == kind && out[i].App == appLabel {
+			if out[i].Kind == kind && out[i].App == appLabel && out[i].In == in {
 				out[i].Count++
 				out[i].Waiting = out[i].Waiting || waiting
 				return
 			}
 		}
-		out = append(out, PlaceDTO{Kind: kind, App: appLabel, Count: 1, Waiting: waiting})
+		out = append(out, PlaceDTO{Kind: kind, App: appLabel, Count: 1, Waiting: waiting, In: in})
 	}
+	add := func(kind, appLabel string, waiting bool) { addIn(kind, appLabel, "", waiting) }
 	if len(procs) == 0 {
 		if li.App {
 			add(string(kind), "", strings.HasPrefix(li.Status, "waiting"))
@@ -417,10 +421,12 @@ func placesOf(li agent.LiveInfo, t presence.Table, self int, kind presence.Kind)
 		if h.Kind == presence.KindHopsesh {
 			continue // a tab of the hopsesh Terminal window: the window counts its tabs
 		}
-		if _, ok := h.Kind.AppAgent(); ok && h.Kind != kind {
+		if other, ok := h.Kind.AppAgent(); ok && h.Kind != kind {
 			// Another agent's desktop app (a terminal panel of OpenCode's runs this one):
-			// showing the place would open this agent's own app, so it is not claimed.
-			h = presence.Host{Kind: presence.KindUnknown}
+			// showing the place would open this agent's own app, so it is not claimed;
+			// the window says which app it runs in.
+			addIn(string(presence.KindUnknown), "", other, p.Waiting)
+			continue
 		}
 		add(string(h.Kind), h.App, p.Waiting)
 	}

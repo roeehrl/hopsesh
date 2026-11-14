@@ -93,15 +93,31 @@ func tabTitle(parts ...string) string {
 // terminalEnv are the variables the module whose program argv0 is wants in hopsesh's
 // tabs (agent.Spec.TerminalEnv).
 func (a *App) terminalEnv(argv0 string) []string {
-	base := strings.TrimSuffix(strings.ToLower(filepath.Base(argv0)), ".exe")
+	if m, _ := a.programOf(argv0); m != nil {
+		return m.Spec().TerminalEnv
+	}
+	return nil
+}
+
+// programOf is the module whose program argv0 runs, and the program's name as people know
+// it: an agent's own name also for a copy its desktop app ships under another name
+// (OpenCode's opencode-cli). Another program is its file name (module nil).
+func (a *App) programOf(argv0 string) (agent.Module, string) {
+	base := strings.TrimSuffix(filepath.Base(argv0), ".exe")
 	for _, m := range a.snapshot().Modules() {
 		for _, b := range m.Spec().Binaries {
-			if strings.EqualFold(b.Name, base) {
-				return m.Spec().TerminalEnv
+			if strings.EqualFold(b.Name, base) || strings.HasPrefix(strings.ToLower(base), strings.ToLower(b.Name)+"-") {
+				return m, b.Name
 			}
 		}
 	}
-	return nil
+	return nil, base
+}
+
+// programName is argv0's program as a tab names it (programOf).
+func (a *App) programName(argv0 string) string {
+	_, name := a.programOf(argv0)
+	return name
 }
 
 // tabSpec is a tab for a command: its program found for a tab (app.TabArgv: PATH, the
@@ -241,7 +257,7 @@ func (a *App) sessionTab(c agent.Command, l app.Launch, meta TabMeta, title stri
 	owned := meta
 	specOf := func(c agent.Command) (pty.Spec, error) {
 		c = a.ownedSessionCommand(c, owned)
-		return a.tabSpec(c, tabTitle(title, strings.TrimSuffix(filepath.Base(c.Argv[0]), ".exe")))
+		return a.tabSpec(c, tabTitle(title, a.programName(c.Argv[0])))
 	}
 	var respec func() (pty.Spec, error)
 	external := func(id string) error { return a.moveOut(id, l) }
@@ -264,14 +280,14 @@ func (a *App) sessionTab(c agent.Command, l app.Launch, meta TabMeta, title stri
 		}
 	}
 	c = a.ownedSessionCommand(c, meta)
-	spec, err := a.tabSpec(c, tabTitle(title, strings.TrimSuffix(filepath.Base(c.Argv[0]), ".exe")))
+	spec, err := a.tabSpec(c, tabTitle(title, a.programName(c.Argv[0])))
 	if err == nil && a.Terms == nil {
 		err = errors.New("no terminal")
 	}
 	var info pty.Info
 	if err == nil {
 		if meta.Command == "" {
-			meta.Command = displayCommand(c.Argv)
+			meta.Command = displayCommand(append([]string{a.programName(c.Argv[0])}, c.Argv[1:]...))
 		}
 		meta.External, meta.Rerun = true, true
 		meta.LaunchedKey = meta.Key

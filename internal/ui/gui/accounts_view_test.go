@@ -114,7 +114,7 @@ func TestAccountsViewOpenCodeFolders(t *testing.T) {
 	if !term.Installed || term.Version != "OpenCode 2.3.0" || len(term.SignIns) != 2 {
 		t.Fatalf("terminal cell: %+v", term)
 	}
-	if !desk.Installed || desk.Version != "OpenCode 2.2.7, running OpenCode 2.2.7" || desk.Note != "same sign-in as the terminal" || len(desk.SignIns) != 1 {
+	if !desk.Installed || desk.Version != "OpenCode desktop 2.2.7, running OpenCode 2.2.7" || desk.Note != "same sign-in as the terminal" || len(desk.SignIns) != 1 {
 		t.Fatalf("desktop cell: %+v", desk)
 	}
 	folders := map[string]FolderDTO{}
@@ -122,7 +122,7 @@ func TestAccountsViewOpenCodeFolders(t *testing.T) {
 		folders[f.Profile] = f
 	}
 	d, w := folders["oc-default"], folders["oc-work"]
-	if d.Name != "default" || !d.SignedIn || d.Tools != "Terminal and OpenCode share one sign-in (signed in)" {
+	if d.Name != "default" || !d.SignedIn || d.Tools != "Terminal and OpenCode desktop share one sign-in (signed in)" {
 		t.Fatalf("default folder: %+v", d)
 	}
 	if w.Name != "Work" || w.SignedIn || w.Default || w.Tools != "Terminal only (not signed in)" || w.Port != 49375 || d.Port != 0 {
