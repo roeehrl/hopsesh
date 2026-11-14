@@ -84,7 +84,8 @@ func (r *run) plugins(workdir string) []plugin {
 	}
 	var out []plugin
 	for _, p := range found {
-		if denied(policies, "plugin.use", p.dir) {
+		// Patterns are written with "/" (OpenCode names a plugin by its file URL).
+		if denied(policies, "plugin.use", filepath.ToSlash(p.dir)) {
 			continue // blocked: not listed at all
 		}
 		removed := false
