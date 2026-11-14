@@ -76,13 +76,17 @@ func (r sqlReader) capacity(ctx context.Context, s *agent.Summary, c *ir.Capacit
 		}
 	}
 	c.Model = model.String()
-	digest, window, err := r.catalogWindow(ctx, model)
+	_, window, err := r.catalogWindow(ctx, model)
 	if err != nil {
 		return err
 	}
-	c.ConfigHash = fmt.Sprintf("%x", sha256.Sum256([]byte(c.Model+"\x00"+digest)))
+	// The hash names what the window came from, the model and its window, and not the
+	// catalog's digest: every OpenCode server refreshes the catalog (a private one the
+	// account check runs between a plan and its apply, too), which must not make a plan
+	// stale when the window is the same.
 	if window > 0 {
 		c.Window, c.Source = window, "models.dev catalog cached by OpenCode"
+		c.ConfigHash = fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d", c.Model, window))))
 	}
 	return nil
 }
