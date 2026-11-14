@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -251,11 +252,10 @@ func (a *App) hookOn(ctx context.Context, m *Machine, key agent.SessionKey) Chec
 		return Check{State: CheckUnknown, Text: "not checked", Reason: err.Error()}
 	}
 	bin := nonEmptyStr(m.host.Facts.Binaries[host.Hopsesh.Name].Path, "hopsesh")
-	f := hi.MovementHooks(h, in, bin).File
-	if f == nil {
-		return Check{State: CheckOff, Text: "not supported"}
+	if c, ok := remoteHooks(fsys, h.Path(), hi.MovementHooks(h, in, bin), agent.ApprovesHooks(mod)); ok {
+		return c
 	}
-	return remoteHook(fsys, f, isTrustReporter(mod))
+	return Check{State: CheckOff, Text: "not supported"}
 }
 
 // atLeast compares hopsesh versions; a development build counts as the newest.
@@ -782,20 +782,18 @@ func hookCheck(h MovementHookStatus, name string) Check {
 		// Turned off by the agent, or protection of originals is off in hopsesh there (no
 		// reason): either way it blocks nothing.
 		return Check{State: CheckWarn, Text: "installed, turned off", Reason: nonEmptyStr(h.Reason, "protection of originals is off in hopsesh there")}
+	case h.Trust != nil && h.Trust.State == agent.HookMissing:
+		// Installed, but the agent does not run it (it does not list it, or did not load it).
+		return Check{State: CheckWarn, Text: "installed, not running in " + name, Reason: nonEmptyStr(h.Trust.Detail, name+" doesn't run it"), Fix: FixHooks}
 	case h.Trust != nil && h.Trust.State == agent.HookTrusted:
 		return Check{State: CheckOK, Text: "installed · trusted"}
 	}
 	return Check{State: CheckOK, Text: "installed"}
 }
 
-// trustAtLogin is the text of an installed hook whose agent decides by its own approval
-// whether it runs (agent.HookTrustReporter), read over SSH where that approval is unknown.
+// trustAtLogin is the text of an installed hook whose agent decides by the user's approval
+// whether it runs (agent.HookApprover), read over SSH where that approval is unknown.
 const trustAtLogin = "installed · trust checked at login"
-
-func isTrustReporter(mod agent.Module) bool {
-	_, ok := mod.(agent.HookTrustReporter)
-	return ok
-}
 
 // skillCheck is a skill copy's state.
 func skillCheck(state, installed string) Check {
@@ -843,8 +841,8 @@ func (a *App) fileSetups(ctx context.Context, hm *host.Machine, m *Machine) []Ag
 			continue
 		}
 		if hi, ok := mod.(agent.MovementHookIntegrator); ok {
-			if f := hi.MovementHooks(h, in, bin).File; f != nil {
-				as.Hook = remoteHook(fsys, f, isTrustReporter(mod))
+			if c, ok := remoteHooks(fsys, h.Path(), hi.MovementHooks(h, in, bin), agent.ApprovesHooks(mod)); ok {
+				as.Hook = c
 			}
 		}
 		if ig, ok := mod.(agent.Integrator); ok {
@@ -856,6 +854,60 @@ func (a *App) fileSetups(ctx context.Context, hm *host.Machine, m *Machine) []Ag
 	}
 	return out
 }
+
+// remoteHooks reads an agent's hook file or hook folder over SSH (false: it takes neither).
+func remoteHooks(fsys host.FS, pa agent.Path, hi agent.HookIntegration, approves bool) (Check, bool) {
+	switch {
+	case hi.File != nil:
+		return remoteHook(fsys, hi.File, approves), true
+	case hi.Dir != nil:
+		return remoteHookDir(fsys, pa, hi.Dir, approves), true
+	}
+	return Check{}, false
+}
+
+// remoteHookDir reads a hook folder (an agent plugin) over SSH, as remoteHook a file.
+func remoteHookDir(fsys host.FS, pa agent.Path, d *agent.HookDir, approves bool) Check {
+	files, err := agent.ReadHookDir(readOnlyHookDirFS{fsys}, pa, d)
+	switch {
+	case err != nil:
+		return Check{State: CheckUnknown, Text: "not checked", Reason: err.Error()}
+	case len(files) == 0:
+		return Check{State: CheckOff, Text: "not installed", Reason: "originals moved from here aren't blocked or warned", Fix: FixHooks}
+	}
+	installed := d.Has != nil && d.Has(files)
+	if d.Runs != nil {
+		prog, ok := d.Runs(files)
+		if ok {
+			if _, err := fsys.Stat(prog); err != nil {
+				return Check{State: CheckError, Text: "broken", Reason: "it runs " + tildePath(prog) + ", which isn't there", Fix: FixHooks}
+			}
+		}
+		installed = ok
+	}
+	switch {
+	case !installed:
+		return Check{State: CheckOff, Text: "not installed", Reason: "originals moved from here aren't blocked or warned", Fix: FixHooks}
+	case approves:
+		return Check{State: CheckOK, Text: trustAtLogin}
+	}
+	// A config there can still remove the plugin: only its own agent says whether it loads.
+	return Check{State: CheckOK, Text: "installed", Reason: "whether the agent loads it isn't checked from here (hopsesh notices status there says)"}
+}
+
+// readOnlyHookDirFS reads a hook folder through a machine's FS; nothing is written.
+type readOnlyHookDirFS struct{ host.FS }
+
+func (f readOnlyHookDirFS) ReadDir(p string) ([]fs.FileInfo, error) { return f.FS.ReadDir(p) }
+func (f readOnlyHookDirFS) ReadFile(p string, limit int64) ([]byte, error) {
+	return f.FS.ReadFile(p, limit)
+}
+func (readOnlyHookDirFS) WriteFile(string, []byte, fs.FileMode) error { return errReadOnlyHooks }
+func (readOnlyHookDirFS) MkdirAll(string) error                       { return errReadOnlyHooks }
+func (readOnlyHookDirFS) Rename(string, string) error                 { return errReadOnlyHooks }
+func (readOnlyHookDirFS) RemoveAll(string) error                      { return errReadOnlyHooks }
+
+var errReadOnlyHooks = errors.New("hooks are only read here")
 
 // remoteHook reads one hook file over SSH.
 func remoteHook(fsys host.FS, f *agent.HookFile, trust bool) Check {

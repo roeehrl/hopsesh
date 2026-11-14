@@ -36,7 +36,8 @@ const minVersion = "2.1.0"
 var iconSVG string
 
 // sqlTables are the tables the module reads, and no more. kv is read only for the
-// models.dev catalog key, migration only for its latest id.
+// models.dev catalog key and the hopsesh plugin's failure count, migration only for its
+// latest id.
 var sqlTables = []string{"session_v2", "session_message", "session_part", "kv", "migration"}
 
 // sqlDenied hold credentials, accounts and permission grants: never read.

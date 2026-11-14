@@ -1,0 +1,153 @@
+# OpenCode's hopsesh plugin calls the notice hook with {"session_id","directory","event"}
+# and reads one JSON verdict back: {"block":false} when there is nothing to say, so it can
+# tell an answer from a hook that failed (which prints nothing). A session hopsesh
+# continued elsewhere is blocked on any event, with hopsesh's reason (OpenCode cannot
+# refuse a prompt, so the plugin refuses its tool calls). Malformed calls fail open and
+# print nothing, and nothing runs OpenCode.
+git-repo proj https://github.com/example/proj.git
+mkdir $HOME/.local/share/opencode
+exec opencode session import a.json --directory $WORK/proj --standalone
+stdout '^Imported session: ses_e29a40000ffeProtectedOrig0$'
+
+stdin prompt.json
+exec hopsesh notice-hook --agent opencode --profile ''
+stdout '^\{"block":false\}$'
+! stderr .
+stdin start.json
+exec hopsesh notice-hook --agent opencode
+stdout '^\{"block":false\}$'
+
+# Only the plugin's calls are answered: Claude Code's JSON, a bad session, an event the
+# plugin never sends or a folder too long to be one fail open, silently.
+stdin claude.json
+exec hopsesh notice-hook --agent opencode
+! stdout .
+! stderr .
+stdin malformed.json
+exec hopsesh notice-hook --agent opencode
+! stdout .
+stdin missing-session.json
+exec hopsesh notice-hook --agent opencode
+! stdout .
+stdin invalid-session.json
+exec hopsesh notice-hook --agent opencode
+! stdout .
+stdin wrong-event.json
+exec hopsesh notice-hook --agent opencode
+! stdout .
+stdin long-directory.json
+exec hopsesh notice-hook --agent opencode
+! stdout .
+
+# Continued in Claude Code, the OpenCode session is the stale original: blocked, with
+# the reason the plugin shows for every refused tool call, on a prompt and on the events
+# after which a copy may have moved.
+exec hopsesh pull opencode/ses_e29a40000ffeProtectedOrig0 --in claude --yes --json
+stdout '"kind": "continue"'
+stdin prompt.json
+exec hopsesh notice-hook --agent opencode --profile ''
+stdout '^\{"block":true,"reason":"Blocked by hopsesh\. .*Claude Code.*hopsesh unblock ses_e29a40000ffeProtectedOrig0'
+! stdout context
+stdin start.json
+exec hopsesh notice-hook --agent opencode --profile ''
+stdout '^\{"block":true,"reason":"Blocked by hopsesh\. '
+
+# Unblocked by the user: no verdict against it, but the notice that it moved.
+exec hopsesh unblock opencode/ses_e29a40000ffeProtectedOrig0 --yes
+stdin prompt.json
+exec hopsesh notice-hook --agent opencode --profile ''
+stdout '^\{"block":false'
+! stdout '"block":true'
+
+! grep '^opencode (run|api)' $WORK/agents.log
+
+-- prompt.json --
+{"session_id":"ses_e29a40000ffeProtectedOrig0","directory":"/home/u/git/proj","event":"UserPromptSubmit"}
+-- start.json --
+{"session_id":"ses_e29a40000ffeProtectedOrig0","directory":"/home/u/git/proj","event":"SessionStart"}
+-- claude.json --
+{"hook_event_name":"UserPromptSubmit","session_id":"ses_e29a40000ffeProtectedOrig0","transcript_path":"/home/u/x.jsonl"}
+-- malformed.json --
+{"session_id":
+-- missing-session.json --
+{"event":"UserPromptSubmit","directory":"/home/u"}
+-- invalid-session.json --
+{"session_id":"ses_bad\u0000id","event":"UserPromptSubmit"}
+-- wrong-event.json --
+{"session_id":"ses_e29a40000ffeProtectedOrig0","event":"PreToolUse"}
+-- long-directory.json --
+{"session_id":"ses_e29a40000ffeProtectedOrig0","event":"UserPromptSubmit","directory":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}
+-- a.json --
+{
+  "info": {
+    "id": "ses_e29a40000ffeProtectedOrig0",
+    "projectID": "global",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1794598000000,
+      "updated": 1794598005000
+    },
+    "title": "fix the parser",
+    "location": {
+      "directory": "/home/u/git/proj"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65b0000001ProtectMsg0001",
+      "time": {
+        "created": 1794598001000
+      },
+      "text": "Fix the parser in main.go.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65b0000002ProtectMsg0002",
+      "time": {
+        "created": 1794598002000,
+        "completed": 1794598003000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "The parser is fixed."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 10,
+        "output": 5,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65b0000003ProtectMsg0003",
+      "time": {
+        "created": 1794598003001
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

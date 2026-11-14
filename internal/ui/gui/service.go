@@ -216,7 +216,7 @@ func agentFacts(m agent.Module, goos string) AgentFacts {
 	if f.Local && agent.Has(m, agent.CapAccount) {
 		f.Tools = accountTools(s)
 	}
-	_, f.HookReview = m.(agent.HookTrustReporter)
+	f.HookReview = agent.ApprovesHooks(m)
 	if rc, ok := m.(agent.RemoteControlTyper); ok {
 		f.RemoteControlTyped = rc.RemoteControlInSession()
 	}

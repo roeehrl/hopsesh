@@ -20,8 +20,9 @@
 // $FAKE_OPENCODE_SERVICE_VERSION (the running service's, default the program's),
 // $FAKE_OPENCODE_ACTIVE (session ids with a turn running in the background service,
 // comma-separated; their rows claim the turn, and a private server lists none), and
-// $FAKE_OPENCODE_AUTH (what `auth list --format json` prints, default []), and
-// $FAKE_OPENCODE_FAIL ("session import", for example: that command fails, changing
+// $FAKE_OPENCODE_AUTH (what `auth list --format json` prints, default []),
+// $FAKE_OPENCODE_TOOL (the shell command a `run -s <id>` turn's model calls: the turn plays
+// hopsesh's plugin, plugin.go), and $FAKE_OPENCODE_FAIL ("session import", for example: that command fails, changing
 // nothing, as a program that died would).
 package fakeopencode
 
@@ -240,7 +241,12 @@ func (r *run) tui(args []string) int {
 }
 
 // runPrompt plays `opencode run` and `mini`, which need a model: it says so and exits 0.
+// With $FAKE_OPENCODE_TOOL, `run -s <id>` plays a turn whose model makes that one shell
+// call (plugin.go).
 func (r *run) runPrompt() int {
+	if tool := r.getenv("FAKE_OPENCODE_TOOL"); tool != "" && r.resume != "" {
+		return r.turn(tool)
+	}
 	if r.resume != "" {
 		fmt.Fprintf(r.Stdout, "opencode (stand-in): would open %s\n", r.resume)
 	}

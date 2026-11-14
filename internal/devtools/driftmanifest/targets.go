@@ -214,14 +214,14 @@ var agentWatch = map[agent.ID]target{
 	},
 	"opencode": {
 		Group:    "local",
-		Surface:  "OpenCode 2.x's SQLite database read through an allowlist of tables (session_v2, session_message, session_part, kv's models.dev catalog, migration; never credential, account, control_account, account_state, permission or workspace) behind a column gate, the settled-message filter and part-row merge of `opencode session export`, the shared background service (`opencode service status`, `--standalone` when it is stopped, never started, stopped or restarted by hopsesh), `opencode api` (GET /api/session, /api/session/active, /api/info; PATCH /api/session/<id>; POST /api/session/<id>/interrupt), `opencode auth list --format json`, `opencode -s <id>` with a program of the service's version (the desktop app's bundled or staged CLI), OpenCode's ses_/msg_ ids, XDG data, config and state folders, OPENCODE_DB and AGENTS.md",
+		Surface:  "OpenCode 2.x's SQLite database read through an allowlist of tables (session_v2, session_message, session_part, kv's models.dev catalog, migration; never credential, account, control_account, account_state, permission or workspace) behind a column gate, the settled-message filter and part-row merge of `opencode session export`, the shared background service (`opencode service status`, `--standalone` when it is stopped, never started, stopped or restarted by hopsesh), `opencode api` (GET /api/session, /api/session/active, /api/info, /api/plugin; PATCH /api/session/<id>; POST /api/session/<id>/interrupt), `opencode auth list --format json`, `opencode -s <id>` with a program of the service's version (the desktop app's bundled or staged CLI), OpenCode's ses_/msg_ ids, XDG data, config and state folders, OPENCODE_DB and AGENTS.md, and hopsesh's protection plugin in {config}/plugins/hopsesh: a folder plugin through Plugin.define (tool execute.before, permission evaluate and session prompt hooks, session.created/moved/forked events, session.get, instruction entries) whose failure count hopsesh reads from the plugin's storage in kv",
 		Priority: "high",
 		Latest:   latest{From: "npm", Ref: "@opencode/cli"},
 		Package:  "@opencode/cli",
 		Watch: watch{
 			Docs:  prefixed("https://raw.githubusercontent.com/anomalyco/opencode/dev/services/site/src/docs/content/", ".mdx", []string{"index", "config", "instructions", "skills", "tools", "permissions", "plugins", "compaction", "migrate-v1", "troubleshooting"}),
 			Feeds: []feed{{Kind: "releases", Repo: "anomalyco/opencode", Tag: "v"}},
-			Grep:  `session|session_v2|session_message|session_part|migration|export|import|transfer|settled|part_rows|service|standalone|serve|mismatch|api/session|interrupt|active|auth|credential|account|XDG_DATA_HOME|XDG_CONFIG_HOME|XDG_STATE_HOME|OPENCODE_CONFIG_DIR|OPENCODE_DB|desktop|opencode-cli|archiv|fork|subagent|parent|title|AGENTS\.md|deprecat|remov|rename|breaking`,
+			Grep:  `session|session_v2|session_message|session_part|migration|export|import|transfer|settled|part_rows|service|standalone|serve|mismatch|api/session|interrupt|active|auth|credential|account|XDG_DATA_HOME|XDG_CONFIG_HOME|XDG_STATE_HOME|OPENCODE_CONFIG_DIR|OPENCODE_DB|desktop|opencode-cli|archiv|fork|subagent|parent|title|AGENTS\.md|plugin|instruction|permission|deprecat|remov|rename|breaking`,
 			Help: [][]string{{"opencode", "--help"}, {"opencode", "service", "status", "--help"}, {"opencode", "api", "--help"}, {"opencode", "auth", "list", "--help"},
 				{"opencode", "session", "export", "--help"}, {"opencode", "session", "import", "--help"}, {"opencode", "session", "list", "--help"}, {"opencode", "session", "delete", "--help"}},
 			Relies: []string{"--session", "--prompt", "--standalone", "service status", "api", "auth list", "--format", "session export", "--version"},
@@ -231,7 +231,9 @@ var agentWatch = map[agent.ID]target{
 					"packages/schema/src/session.ts", "packages/schema/src/session-message.ts", "packages/schema/src/identifier.ts", "packages/cli/src/database-path.ts",
 					"packages/client/src/effect/service.ts", "packages/cli/src/commands/handlers/service/status.ts", "packages/cli/src/commands/handlers/auth/list.ts",
 					"packages/util/src/session-title-fallback.ts", "packages/util/src/global-roots.ts",
-					"packages/schema/src/session-legacy.ts", "packages/core/src/session/execution.ts", "packages/core/src/models-dev.ts"},
+					"packages/schema/src/session-legacy.ts", "packages/core/src/session/execution.ts", "packages/core/src/models-dev.ts",
+					"packages/core/src/plugin/supervisor.ts", "packages/core/src/plugin/host.ts", "packages/core/src/plugin/source-directory.ts", "packages/core/src/config/plugin/source.ts",
+					"packages/plugin/src/promise/adapter.ts", "packages/schema/src/session-event.ts"},
 				Canaries: []string{"session_v2", "session_part", "isSettled", "withParts", "time_suspended", "fork_boundary", "SessionAlreadyProjected", "mismatch", "OPENCODE_DB", "isExactRootFallback",
 					"providerResultState", "providerContext", "claimOnCommit", "models-dev:v2:catalog"},
 			},
@@ -243,6 +245,7 @@ var agentWatch = map[agent.ID]target{
 		},
 		Floors: []floor{
 			{Version: "2.1.0", Gates: "every OpenCode command and API call hopsesh makes, and the session_v2 tables it reads", Source: "agents/opencode/service.go", Relies: []string{"--standalone", "service status", "api", "session export"}},
+			{Version: "2.2.7", Gates: "the protection plugin: a folder plugin through Plugin.define (tool, permission and session hooks, session events, instruction entries, plugin storage) and GET /api/plugin", Source: "agents/opencode/hooks.go", Relies: []string{"api"}},
 		},
 	},
 }

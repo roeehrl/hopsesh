@@ -49,7 +49,7 @@ func (r *run) api(args []string) int {
 		loc := obj()
 		loc.set("directory", str(r.workdir()))
 		v.set("location", loc)
-		v.set("data", arr())
+		v.set("data", r.pluginList())
 		return r.ok(v)
 	case method == "GET" && u.Path == "/api/session":
 		return r.sessionPage(db, q)

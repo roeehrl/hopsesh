@@ -8,7 +8,13 @@ import (
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
-var _ agent.HookTrustReporter = (*Module)(nil)
+var (
+	_ agent.HookTrustReporter = (*Module)(nil)
+	_ agent.HookApprover      = (*Module)(nil)
+)
+
+// ApprovesHooks marks Codex: it runs a new or changed hook only after the user trusts it there.
+func (*Module) ApprovesHooks() {}
 
 // HookTrust asks Codex (app-server hooks/list) whether it trusts the hopsesh hooks.
 // Codex records trust against a hash of each hook definition and skips untrusted or

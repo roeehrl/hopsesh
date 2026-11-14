@@ -1,0 +1,250 @@
+# hopsesh protects OpenCode sessions with a plugin it installs whole in OpenCode's config
+# folder (OpenCode has no command hooks). The plugin asks hopsesh's notice hook about each
+# session and refuses the tool calls of one hopsesh continued elsewhere, with hopsesh's
+# reason; other sessions run theirs. hopsesh asks only OpenCode's running service whether
+# it loaded the plugin (an OpenCode config can remove it, a policy can deny it), never a
+# private server, and never reads OpenCode's config. Here the stand-in OpenCode plays the
+# plugin's part of a turn (no model; the command is not run).
+git-repo proj https://github.com/example/proj.git
+mkdir $HOME/.local/share/opencode
+exec opencode session import a.json --directory $WORK/proj --standalone
+exec opencode session import b.json --directory $WORK/proj --standalone
+
+exec hopsesh notices install --agent opencode
+stdout 'opencode profile="": installed; trust not verified'
+stdout 'opencode.plugins.hopsesh'
+exists $HOME/.config/opencode/plugins/hopsesh/index.js
+exists $HOME/.config/opencode/plugins/hopsesh/hopsesh.js
+exists $HOME/.config/opencode/plugins/hopsesh/package.json
+grep '"notice-hook",' $HOME/.config/opencode/plugins/hopsesh/config.json
+grep '"--agent",\s*"opencode"' $HOME/.config/opencode/plugins/hopsesh/config.json
+! exists $HOME/.config/opencode/.hopsesh/.hopsesh.hopsesh-new
+! exists $HOME/.config/opencode/.hopsesh/.hopsesh.hopsesh-old
+
+# With the service stopped nothing tells whether it loads; running, its list says so.
+exec hopsesh notices status --agent opencode --json
+stdout '"installed": true'
+stdout '"state": "unknown"'
+env FAKE_OPENCODE_SERVICE=running
+exec hopsesh notices status --agent opencode --json
+stdout '"state": "trusted"'
+env FAKE_OPENCODE_SERVICE=
+! grep '^opencode api --standalone GET /api/plugin' $WORK/agents.log
+
+# Continued in Claude Code, the OpenCode session is the stale original: its tool calls
+# fail with hopsesh's reason. The other session's run.
+exec hopsesh pull opencode/ses_e29a40000ffeProtectedOrig0 --in claude --yes --json
+! stdout '"unprotected": true'
+env FAKE_OPENCODE_TOOL='git commit -am wip'
+exec opencode run -s ses_e29a40000ffeProtectedOrig0 --standalone 'commit it'
+stderr '^✗ git commit -am wip failed$'
+stderr '^Error: Blocked by hopsesh\. .*Claude Code.*hopsesh unblock ses_e29a40000ffeProtectedOrig0'
+exec opencode run -s ses_e29a3ff00ffeUntouchedSess0 --standalone 'commit it'
+stderr '^\$ git commit -am wip$'
+! stderr 'Blocked'
+
+# The user continues the original anyway: its tools run again.
+exec hopsesh unblock opencode/ses_e29a40000ffeProtectedOrig0 --yes
+exec opencode run -s ses_e29a40000ffeProtectedOrig0 --standalone 'commit it'
+stderr '^\$ git commit -am wip$'
+exec hopsesh unblock opencode/ses_e29a40000ffeProtectedOrig0 --restore --yes
+exec opencode run -s ses_e29a40000ffeProtectedOrig0 --standalone 'commit it'
+stderr 'Error: Blocked by hopsesh'
+
+# An OpenCode config that removes the plugin, or a policy that denies plugins: it does
+# not load, so nothing is blocked, and hopsesh says it isn't running. A prefix of other
+# ids leaves it.
+env FAKE_OPENCODE_SERVICE=running
+cp remove-hopsesh.json $HOME/.config/opencode/opencode.json
+exec opencode run -s ses_e29a40000ffeProtectedOrig0 'commit it'
+stderr '^\$ git commit -am wip$'
+exec hopsesh notices status --agent opencode --json
+stdout '"state": "missing"'
+stdout '-hopsesh'
+exec hopsesh notices status --agent opencode
+stdout 'NOT RUNNING: not seen by the agent'
+stdout 'doesn.t load the hopsesh plugin'
+stdout 'Take the entry that removes hopsesh'
+cp remove-all.json $HOME/.config/opencode/opencode.json
+exec hopsesh notices status --agent opencode --json
+stdout '"state": "missing"'
+cp remove-prefix.json $HOME/.config/opencode/opencode.json
+exec hopsesh notices status --agent opencode --json
+stdout '"state": "trusted"'
+cp deny-plugins.json $HOME/.config/opencode/opencode.json
+exec hopsesh notices status --agent opencode --json
+stdout '"state": "missing"'
+exec opencode run -s ses_e29a40000ffeProtectedOrig0 'commit it'
+! stderr 'Blocked'
+# Installed while the service runs, the plugin may not be loaded yet (OpenCode reloads a
+# changed plugin folder on its own): hopsesh does not blame the config at once.
+exec hopsesh notices remove --agent opencode
+exec hopsesh notices install --agent opencode
+stdout 'installed; trust not verified'
+stdout 'hopsesh just installed the plugin'
+rm $HOME/.config/opencode/opencode.json
+env FAKE_OPENCODE_SERVICE=
+
+# Removed, the folder is gone and the original runs its tools.
+exec hopsesh notices remove --agent opencode
+stdout 'absent'
+! exists $HOME/.config/opencode/plugins/hopsesh
+exec opencode run -s ses_e29a40000ffeProtectedOrig0 --standalone 'commit it'
+stderr '^\$ git commit -am wip$'
+
+-- remove-hopsesh.json --
+{"plugins":["-hopsesh"]}
+-- remove-all.json --
+{"plugins":["-*"]}
+-- remove-prefix.json --
+{"plugins":["-hop.*"]}
+-- deny-plugins.json --
+{"policies":[{"action":"plugin.use","resource":"*","effect":"deny"}]}
+-- a.json --
+{
+  "info": {
+    "id": "ses_e29a40000ffeProtectedOrig0",
+    "projectID": "global",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1794598000000,
+      "updated": 1794598005000
+    },
+    "title": "fix the parser",
+    "location": {
+      "directory": "/home/u/git/proj"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65b0000001ProtectMsg0001",
+      "time": {
+        "created": 1794598001000
+      },
+      "text": "Fix the parser in main.go.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65b0000002ProtectMsg0002",
+      "time": {
+        "created": 1794598002000,
+        "completed": 1794598003000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "The parser is fixed."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 10,
+        "output": 5,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65b0000003ProtectMsg0003",
+      "time": {
+        "created": 1794598003001
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}
+-- b.json --
+{
+  "info": {
+    "id": "ses_e29a3ff00ffeUntouchedSess0",
+    "projectID": "global",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1794597000000,
+      "updated": 1794597005000
+    },
+    "title": "read the notes",
+    "location": {
+      "directory": "/home/u/git/proj"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65b0000001UntouchMsg0001",
+      "time": {
+        "created": 1794597001000
+      },
+      "text": "Read notes.txt.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65b0000002UntouchMsg0002",
+      "time": {
+        "created": 1794597002000,
+        "completed": 1794597003000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "notes.txt lists three tasks."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 10,
+        "output": 5,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65b0000003UntouchMsg0003",
+      "time": {
+        "created": 1794597003001
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}
