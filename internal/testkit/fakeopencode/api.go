@@ -131,7 +131,7 @@ func data(v *value) *value {
 }
 
 func (r *run) ok(v *value) int {
-	r.Stdout.Write(append(v.compact(), '\n'))
+	_, _ = r.Stdout.Write(append(v.compact(), '\n'))
 	return 0
 }
 
@@ -147,7 +147,7 @@ var statusText = map[int]string{400: "Bad Request", 404: "Not Found", 500: "Inte
 
 func (r *run) status(code int, body *value) int {
 	if body != nil {
-		r.Stdout.Write(append(body.compact(), '\n'))
+		_, _ = r.Stdout.Write(append(body.compact(), '\n'))
 	}
 	fmt.Fprintf(r.Stderr, "HTTP %d %s\n", code, statusText[code])
 	return 1

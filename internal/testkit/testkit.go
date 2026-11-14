@@ -158,9 +158,9 @@ func DemoHome(h string) error {
 	return demoOpenCode(filepath.Join(h, ".local", "share", "opencode", "opencode.db"), demo)
 }
 
-// The OpenCode sessions of the demo home, from the 2.3.0 sandbox capture: a short one, one
-// with a subagent (its child session is counted, not listed) and one whose reply is in
-// session_part rows.
+// DemoOpenCode are the OpenCode sessions of the demo home, from the 2.3.0 sandbox capture:
+// a short one, one with a subagent (its child session is counted, not listed) and one whose
+// reply is in session_part rows.
 var DemoOpenCode = []string{
 	"ses_e29aa1ec8ffes7x6RCUekHyBbf", // "renamed by api"
 	"ses_e29a8385effeUhBGvRVeVFrDLo", // "subagent", with the child ses_e29a832f5ffebHEWUP5fBLspvU
