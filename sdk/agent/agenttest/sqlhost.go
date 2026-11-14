@@ -139,7 +139,7 @@ func (s fakeSQL) Batch(ctx context.Context, db string, stmts []agent.Statement) 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	budget := agent.NewSQLBudget()
 	var out []agent.Rows
 	for _, st := range stmts {
