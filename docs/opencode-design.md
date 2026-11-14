@@ -374,6 +374,9 @@ channel's `opencode-<channel>.db`) and its `-wal`, and `{data}/hopsesh/opencode/
   default one runs (port 49374).
 - `Inherit` gains a JSON copier; copying `opencode.json` (holds keys) only with consent.
 - The desktop app uses only the default profile.
+- As built in PR 7 (its note in §8 has the reasons): `OPENCODE_DB` is pinned too, provider key
+  variables are not unset, the port is set by a module capability (`AccountPreparer`) when hopsesh
+  makes a folder, and only `cli.json`'s display settings are inherited (`opencode.json` is not read).
 
 ### 3.8 Rewrite policy (`sanitize.go`)
 - **Protect keys:** `native`, `id`, `callID`, `call_id`, `hash`, `uri` (when it starts with `media:`),
@@ -1428,6 +1431,126 @@ left:
   was answered by the guard itself). Also checked there: `notices remove` with nothing installed
   wrote no `.hopsesh` folder, and a `plugins/hopsesh` folder without hopsesh's `config.json`
   was neither replaced nor removed.
+
+**Left by PR 7 for later PRs.** OpenCode now has account folders (`Spec.Accounts`), as Claude
+Code and Codex do: `hopsesh accounts add opencode <name>` makes
+`~/.hopsesh/accounts/opencode/<name>` with `data/`, `state/` and `config/` inside, scans list
+every folder's sessions under its profile, a session is taken into another folder (or a Claude
+Code or Codex session continued into one) through OpenCode's import with the folder's
+variables, and the TUI's account picker and the window's Accounts screen show OpenCode's folders
+with nothing OpenCode-specific in them. Done here from the earlier notes: PR 1a's (an added
+folder's main root is inside it; the notice-hook resolver and the hook installer now find it
+there, and the drift test reads `ProfileSpec.Vars()`), PR 0's (OpenCode's process rules in
+`presence.go`), PR 2's and PR 5's D2 items (below), PR 5's write check (below), and PR 6's (a
+folder's own config gets its own plugin, its argv naming the folder). Decisions and what is left:
+- **Variables.** `RootVars`: `XDG_DATA_HOME=<folder>/data`, `XDG_STATE_HOME=<folder>/state`,
+  `OPENCODE_CONFIG_DIR=<folder>/config` (§3.7: child tools keep their own config) and
+  `OPENCODE_DB=<folder>/data/opencode/opencode.db`, so an `OPENCODE_DB` in the shell cannot point an
+  added folder at the default database; the default folder keeps the machine's variables
+  (`OPENCODE_DB` included). `Unset`: `OPENCODE_PASSWORD`, `OPENCODE_SERVER_PASSWORD`, in every
+  folder. Not as §3.1 planned: provider key variables (`OPENAI_API_KEY`, …) are **not** unset.
+  `Unset` applies to the default folder too, and OpenCode lists such a variable as a sign-in
+  (`{"type":"env"}`), so unsetting it would sign the default folder out of a provider when hopsesh
+  resumes it; a key in the shell reaches every folder, as it reaches OpenCode itself. The cache
+  folder is shared. `XDG_DATA_HOME`/`XDG_STATE_HOME` reach the tools OpenCode runs (risk 8).
+- **Ports (D8).** `agent.AccountPreparer` (SDK): the app hands a folder it has just made to the
+  module, which runs `opencode service set port <n>` with the folder's variables and reads it
+  back with `service get port`; `RuntimeProfile.Port` records it, and `accounts list` and the
+  TUI show it. `n` is the first port after OpenCode's default (49374; 28894 on Windows) that no
+  folder on the machine was given and nothing listens on (127.0.0.1). OpenCode's `service set
+  port` stops the service registered in the state folder first (source:
+  `services/service-config.ts`), so the module refuses the default folder, a folder whose data,
+  state or config folder is not inside it, variables that do not name the folder, and a state
+  folder with a `service*.json`; nothing else runs it. A folder the module cannot set up is
+  removed (it was empty) and not registered. Left: a folder adopted with `accounts add --root`
+  (an existing OpenCode folder) keeps its own settings and gets no port; a remote folder made
+  through hopsesh there is set up there. The port is not re-checked later (a folder's service
+  that cannot bind shows only in OpenCode).
+- **Inherit.** Only `{config}/cli.json`'s display settings (theme name and mode, mouse,
+  animations, leader timeout, scroll, cursor), never a plugin's options; `opencode.json` (which
+  may hold provider keys) is not read, so §3.7's "with consent" copier is not built: a new folder
+  signs in with `opencode auth login`. A consented copy of `opencode.json` is left for later.
+- **Account probe (D7).** `auth list --format json` is read for provider ids and names and each
+  connection's kind and problem only (never a label, a credential id or a variable's name). A
+  provider whose every connection asks to sign in again (`status.status: "needs_auth"`) is not
+  signed in and is named ("sign in again to …"). The label for none says providers set up only in
+  `opencode.json` are not listed (PR 2's note). The sandbox's list is `[]`; the shapes with
+  connections are a hand-made fixture (`testdata/synthetic/auth-list.json`) from
+  `packages/schema/src/connection.ts`. `Account.Key` stays empty, so the core's profile boundary
+  (the same for every agent) makes a session taken into another folder of the machine a
+  continuation (a new session with the portable conversation; the original stays), as for
+  Claude Code and Codex. Nothing in an OpenCode session is bound to a sign-in, so a native move
+  between folders (same id, every message) would be possible: left for a later PR (the core
+  decides by profile, not by module).
+- **D2, ask before a restart.** A resume refused because it would restart the shared service is
+  `agent.ErrRestartsService`; `ResumeOptions.RestartService` (set only after the person agrees)
+  resumes it with the PATH `opencode`. `hopsesh open` asks on a terminal (`--yes` does not answer
+  it) or takes `--restart-service`; the window asks (`term.js`, from the `restart-service: `
+  prefix `ResumeSession` puts on the error) and records the yes with `AllowServiceRestart` for that
+  session's next resume within two minutes. Left: the TUI opens sessions through plans, whose
+  refused command stays shown but not runnable (PR 4); its own confirmation, and the window's
+  copy for the question, are PR 8. Fork on resume (D5) is still not done.
+- **A write through a running service of another version** (PR 5's note): it asks nothing (a
+  write never restarts the service; subcommands reuse a service of any version). `Write` and
+  `RecoverWrite` refuse when the running service is older than 2.1.0 (the writer's message types),
+  before anything is placed.
+- **Capacity (found by the real-binary check).** The capacity's hash named the cached models.dev
+  catalog's digest, which every OpenCode server refreshes; with folders, the account check before
+  an apply runs a private server, which also makes a new folder's database, so a continuation into
+  a folder failed with "destination capacity changed since planning". The hash now names the
+  model and its window (none for the fallback window), for every folder.
+- **Plugin per folder.** `notices install` puts the plugin in each folder's
+  `config/plugins/hopsesh`, its argv naming the folder; the default folder's plugin installed
+  before hopsesh registered the folder (its argv names no profile) still reads installed. The
+  same mismatch exists for Claude Code's and Codex's hook files installed before the first scan
+  (they then read "absent" until installed again): not changed here.
+- **Presence and desktop.** `presence.go` knows `OpenCode` and `OpenCode Helper…` (macOS) as
+  OpenCode desktop; `opencode-cli` (the service) is never a host; on Windows the app's program is
+  named like the CLI and is left out. The desktop app uses only the default folder (§3.7): its
+  column shows the default folder's sign-in. Left: `Live` still sets no PID, `Procs` or `App` (the
+  turns run in the service, whose process hopsesh does not read), so presence never classifies an
+  OpenCode session; a Linux desktop app has no detection (`accounts_view.go` and
+  `movement_hooks.go` accept only `.app` or `.exe`); the plugin floor is still judged by the
+  program's version, not the running service's (PR 6's note).
+- **Stand-in.** It plays `service get|set|unset port` over `{config}/service.json` (OpenCode's
+  file); setting or unsetting stops a service registered in that state folder, which it logs
+  ("opencode: stopped the background service"), and a started service takes the port set.
+  `$FAKE_OPENCODE_FAIL` takes "service set" too. `$FAKE_OPENCODE_SERVICE` still makes every
+  folder's service run; the scenarios use the default folder's registration file instead.
+- **Tests.** Module: folder roots and variables (macOS and Windows paths), detect and list in a
+  folder, port choice, `PrepareAccount` (variables, refusals), sign-in fixtures, `cli.json`
+  inherit, D2 with and without the yes, the write check, capacity stability, the default
+  folder's earlier plugin. App: a folder made with the stand-in (port, settings file, `cli.json`,
+  no `opencode.json`, the shell command, the default service never stopped, a failed setup
+  removed), notice-hook roots. CLI golden and skill allowlist (`--restart-service`), TUI picker,
+  window facts and Accounts screen, the window's yes. Scenarios: `opencode-accounts.txtar` (add,
+  list, take a session and a Claude Code session into a folder, undo) and
+  `opencode-restart.txtar`. Not here (PR 8): Playwright specs for OpenCode folders and the restart
+  question. Not here (PR 9): the e2e matrices and the nightly real-agent job.
+- **Real-binary check** (opencode 2.3.0; a fresh copy of the sandbox with data, state, cache,
+  config, home and `TMPDIR` in the scratch folder, behind a guard that answered `service status`
+  itself, ran `service set|get port` only with a state and config folder inside an account folder
+  of the copy and no service registered there, and refused any other command without
+  `--standalone`): `hopsesh accounts add opencode Work` and `… Home` made two folders, OpenCode
+  took ports 49375 and 49376 (`service get port` read them back; `{config}/service.json` held only
+  the port), `cli.json`'s theme and mouse settings were copied and its plugin options and
+  `opencode.json` were not, `opencode debug paths` with Work's variables named only folders
+  inside it (and the scratch cache); a scan listed the default folder's sessions (the 10 `hopsesh ls` shows) and found
+  both folders (`accounts list`: OpenCode default, Work, Home, with their ports); `hopsesh pull
+  opencode/<id> --target-profile Work` first failed on the capacity hash above, then, fixed,
+  imported the session into Work's database with `--standalone` (`opencode session list
+  --standalone` with Work's variables listed it; `hopsesh ls` listed it under Work); a second
+  session went into Home and its undo deleted it there with `--standalone`; `notices install`
+  put the plugin in all three config folders, each argv naming its folder, and the notice hook
+  then blocked the default folder's original and let the Work copy run. 35 commands reached the
+  real binary (8 `--version`, 18 `auth list --standalone`, 2 `service set port`, 2 `service get
+  port`, 1 `debug paths`, 2 `session import --standalone`, 1 `session delete --standalone`, 1
+  `session list --standalone`); 26 `service status` were answered by the guard. Outside the
+  scratch folder, `~/.local/share/opencode`, `~/.local/state/opencode`, `~/.config/opencode`,
+  `~/.cache/opencode`, `~/.hopsesh`, `~/.local/bin`, `~/.agents` and `~/.claude` were unchanged
+  (names, sizes and times listed before and after; no contents read); only files the running
+  OpenCode desktop app and Codex app write themselves changed. The harness was not committed
+  (PR 9).
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
