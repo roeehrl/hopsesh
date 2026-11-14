@@ -961,6 +961,9 @@ use it.
 - PR 9: the differential runs (`run.py`, `run2.py`, `run3.py`) and the capture scrubber
   (`ocscrub.py`, §7's `internal/devtools/ocscrub/`) are scripts in the session's scratchpad;
   make them devtools for the nightly real-agent job.
+- PR 8: the browser specs (`internal/devtools/webtest`) still run on `testkit.DemoHomeClaudeCodex`,
+  the demo home without OpenCode's sessions; switch them to `DemoHome` and update the counts,
+  agent subtitles and filters they assert when they gain OpenCode.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
