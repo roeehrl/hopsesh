@@ -48,7 +48,11 @@ func TestOpenCodeAccountFolderGetsItsOwnPort(t *testing.T) {
 	if real, err := filepath.EvalSymlinks(root); err == nil {
 		root = real
 	}
-	if p.Root != root || p.Port <= 49374 || p.Port > 49374+200 {
+	def := 49374 // OpenCode's service port, 28894 on Windows
+	if runtime.GOOS == "windows" {
+		def = 28894
+	}
+	if p.Root != root || p.Port <= def || p.Port > def+200 {
 		t.Fatalf("root %s port %d", p.Root, p.Port)
 	}
 	var settings struct {
@@ -91,7 +95,7 @@ func TestOpenCodeAccountFolderGetsItsOwnPort(t *testing.T) {
 
 	// A second folder gets another port.
 	q, err := a.AddAccount(ctx, "", "opencode", "Home", nil, AddAccountOptions{})
-	if err != nil || q.Port == p.Port || q.Port <= 49374 {
+	if err != nil || q.Port == p.Port || q.Port <= def {
 		t.Fatalf("second folder: port %d (first %d): %v", q.Port, p.Port, err)
 	}
 
