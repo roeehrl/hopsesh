@@ -47,8 +47,9 @@ const writtenProvider = "hopsesh"
 // the session names none, so OpenCode continues it with its default agent).
 const writtenAgent = "build"
 
-// Profile is a window from the catalog when the model is known (ContextCapacity), shell
-// calls replayed as OpenCode's own, and no appends to an existing session (decision D4).
+// Profile is the fallback window (the core reads a write's real one from ContextCapacity),
+// shell calls replayed as OpenCode's own, and no appends to an existing session (decision
+// D4).
 func (*Module) Profile(agent.Install) ir.Profile {
 	return ir.Profile{Window: ir.FallbackWindow, NativeReplay: true}
 }
@@ -250,23 +251,28 @@ func render(h agent.Host, req ir.WriteRequest, sid agent.SessionID, base time.Ti
 	w := &written{sid: sid, provenance: map[string]ir.Item{}}
 	salt := string(sid) + "\x00" + req.OperationID
 	// Times: each item's own, kept increasing (a millisecond apart at least); before the
-	// first item with a time, or with none, from base.
-	last := base.UnixMilli() - int64(2*len(req.Items)) - 2
+	// first item with a time, or with none, from base. Every time is before base, room
+	// left for the messages still to come (at most one per item and an idle after each),
+	// so a source clock ahead of this one never gives a message an id after the ones
+	// OpenCode makes for the next turn.
+	total := int64(2*len(req.Items) + 1)
+	last := base.UnixMilli() - total - 1
 	for _, it := range req.Items {
 		if !it.Time.IsZero() {
-			last = it.Time.UnixMilli() - 1
+			last = min(last, it.Time.UnixMilli()-1)
 			break
 		}
 	}
+	n := 0
 	next := func(t time.Time) int64 {
 		ms := last + 1
 		if !t.IsZero() && t.UnixMilli() > ms {
 			ms = t.UnixMilli()
 		}
+		ms = min(ms, base.UnixMilli()-(total-int64(n)))
 		last = ms
 		return ms
 	}
-	n := 0
 	msgID := func(ms int64) string {
 		n++
 		sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00msg\x00%d", salt, n)))
@@ -294,7 +300,7 @@ func render(h agent.Host, req ir.WriteRequest, sid agent.SessionID, base time.Ti
 		case it.Tool != nil && it.Tool.Call.Shell != nil:
 			sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00call\x00%d", salt, k)))
 			ms := next(it.Time)
-			tool := writtenTool{Type: "tool", ID: "call_" + hex.EncodeToString(sum[:4]), Name: "shell", State: shellState(it.Tool),
+			tool := writtenTool{Type: "tool", ID: "call_" + hex.EncodeToString(sum[:4]), Name: "shell", State: shellState(h, it.Tool),
 				Time: writtenToolTime{Created: ms, Ran: ms, Completed: ms}}
 			mid := reply(ms, tool, "tool-calls")
 			w.provenance[mid+"/0"] = it
@@ -337,20 +343,34 @@ func render(h agent.Host, req ir.WriteRequest, sid agent.SessionID, base time.Ti
 	return w, nil
 }
 
-// shellState is a shell call's state as OpenCode records a completed one: its command,
-// its output as one text item, and its exit status. A call that failed without an exit
-// status is a tool error.
-func shellState(t *ir.ToolPair) map[string]any {
+// shellState is a shell call's state as OpenCode records a completed one: its command and
+// the folder it ran in, its output as one text item, and its exit status (a non-zero one
+// also as a second text item, "Exit code: N", as OpenCode's own shell tool gives the
+// model). A call that failed without an exit status is a tool error.
+func shellState(h agent.Host, t *ir.ToolPair) map[string]any {
 	input := map[string]any{"command": t.Call.Shell.Command}
+	if t.Call.Shell.Dir != "" {
+		input["workdir"] = t.Call.Shell.Dir
+	}
 	out := t.Result.Output
 	if t.Result.Status == ir.StatusFailed && t.Result.ExitCode == nil {
 		return map[string]any{"status": "error", "input": input, "error": map[string]any{"type": "tool.execution", "message": nonEmptyText(out, "The command failed.")}}
 	}
 	md := map[string]any{"status": "completed", "truncated": false}
-	if t.Result.ExitCode != nil {
-		md["exit"] = *t.Result.ExitCode
+	var code string
+	if c := t.Result.ExitCode; c != nil {
+		md["exit"] = *c
+		if *c != 0 {
+			code = fmt.Sprintf("Exit code: %d", *c)
+		}
 	}
-	return map[string]any{"status": "completed", "input": input, "content": []any{writtenText{Type: "text", Text: out}}, "metadata": md}
+	if code == "" {
+		return map[string]any{"status": "completed", "input": input, "content": []any{writtenText{Type: "text", Text: out}}, "metadata": md}
+	}
+	// An output read from OpenCode has the line already (its items joined by "\n").
+	out = strings.TrimSuffix(out, "\n"+code)
+	return map[string]any{"status": "completed", "input": input,
+		"content": []any{writtenText{Type: "text", Text: out}, writtenText{Type: "text", Text: code}}, "metadata": md}
 }
 
 // storedDir is a folder as OpenCode stores it: with "/" on Windows too.

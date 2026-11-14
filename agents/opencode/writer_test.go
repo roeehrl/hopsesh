@@ -3,6 +3,9 @@ package opencode
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -16,14 +19,18 @@ import (
 const writtenSID = "ses_0123456789abHopseshWrite01"
 
 // writeRequest is a continuation as the converter renders one: prompts, replies, shell
-// calls replayed (one that exited, one that failed with an exit status, one that failed
-// without), an empty reply, and hopsesh's briefing and notice, which have no time.
+// calls replayed (one that exited, one that failed with an exit status in another folder,
+// one that failed without), an empty reply, and hopsesh's briefing and notice, which have no time.
 func writeRequest(sid string) ir.WriteRequest {
 	t0 := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 	exit0, exit2 := 0, 2
-	shell := func(id, cmd string, res ir.ToolResult) *ir.ToolPair {
+	shell := func(id, cmd string, res ir.ToolResult, dir ...string) *ir.ToolPair {
 		res.CallID = id
-		return &ir.ToolPair{Call: ir.ToolCall{CallID: id, Name: "Bash", Kind: ir.ToolExecute, Input: json.RawMessage(`{"command":"` + cmd + `"}`), Shell: &ir.Shell{Command: cmd}}, Result: res}
+		sh := &ir.Shell{Command: cmd}
+		if len(dir) > 0 {
+			sh.Dir = dir[0]
+		}
+		return &ir.ToolPair{Call: ir.ToolCall{CallID: id, Name: "Bash", Kind: ir.ToolExecute, Input: json.RawMessage(`{"command":"` + cmd + `"}`), Shell: sh}, Result: res}
 	}
 	return ir.WriteRequest{OperationID: "op-write", Mode: ir.WriteNew, SessionID: sid,
 		Header: ir.Header{CWD: home + "/git/demo", Title: "Find the codeword", Model: "claude-opus-4-5"},
@@ -33,7 +40,7 @@ func writeRequest(sid string) ir.WriteRequest {
 			{Node: "n3", Role: ir.RoleAgent, Time: t0.Add(2 * time.Second), Fidelity: "native",
 				Tool: shell("c1", "cat notes.txt", ir.ToolResult{Status: ir.StatusCompleted, ExitCode: &exit0, Output: "PLUM-7\n"})},
 			{Node: "n4", Role: ir.RoleAgent, Time: t0.Add(3 * time.Second), Fidelity: "native",
-				Tool: shell("c2", "ls missing", ir.ToolResult{Status: ir.StatusFailed, ExitCode: &exit2, Output: "ls: missing: No such file"})},
+				Tool: shell("c2", "ls missing", ir.ToolResult{Status: ir.StatusFailed, ExitCode: &exit2, Output: "ls: missing: No such file"}, home+"/git/demo/sub")},
 			{Node: "n5", Role: ir.RoleAgent, Time: t0.Add(3 * time.Second), Fidelity: "native", // the same second
 				Tool: shell("c3", "false", ir.ToolResult{Status: ir.StatusFailed})},
 			{Node: "n6", Role: ir.RoleAgent, Time: t0.Add(4 * time.Second), Text: "The codeword is PLUM-7."},
@@ -118,7 +125,8 @@ func TestWriterTransfer(t *testing.T) {
 	if tr.Info["time"] == nil || !strings.Contains(string(tr.Info["time"]), `"created":1793491200000`) {
 		t.Fatalf("the session is made at the write's time: %s", tr.Info["time"])
 	}
-	// The shell calls, as OpenCode records them.
+	// The shell calls, as OpenCode records them: a non-zero exit status also as a line the
+	// model reads, and the folder a call ran in.
 	var calls []item
 	for _, m := range tr.Messages {
 		var msg message
@@ -132,9 +140,108 @@ func TestWriterTransfer(t *testing.T) {
 	}
 	if len(calls) != 3 || calls[0].Name != "shell" || calls[0].State.Status != "completed" || string(calls[0].State.Input) != `{"command":"cat notes.txt"}` ||
 		calls[0].Executed == nil || *calls[0].Executed || string(calls[0].State.Metadata["exit"]) != "0" || calls[0].State.Content[0].Text != "PLUM-7\n" ||
+		len(calls[0].State.Content) != 1 ||
 		calls[1].State.Status != "completed" || string(calls[1].State.Metadata["exit"]) != "2" ||
+		string(calls[1].State.Input) != `{"command":"ls missing","workdir":"`+home+`/git/demo/sub"}` ||
+		len(calls[1].State.Content) != 2 || calls[1].State.Content[0].Text != "ls: missing: No such file" || calls[1].State.Content[1].Text != "Exit code: 2" ||
 		calls[2].State.Status != "error" || calls[2].State.Error == nil || calls[2].State.Error.Message != "The command failed." {
 		t.Fatalf("shell calls: %+v", calls)
+	}
+}
+
+// Real OpenCode 2.3.0 imports the session the writer makes from writeRequest and exports
+// the same messages: the test bundle's export/written-by-hopsesh.json is its export of
+// that transfer (written at 2026-11-01, imported with --directory, the folder scrubbed).
+// A change to what the writer writes makes it again with a real OpenCode.
+func TestWrittenAsExported(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	_, h, _ := open(t, fh)
+	w, err := render(h, writeRequest(writtenSID), writtenSID, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := parsePlaced("x.jsonl", w.body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := p.transfer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, err := os.ReadFile(filepath.Join("..", "..", "testbundle", "opencode", "2.3.0", "export", "written-by-hopsesh.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	type transfer struct {
+		Info struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"info"`
+		Messages []any `json:"messages"`
+	}
+	var ours, theirs transfer
+	if err := json.Unmarshal(b, &ours); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(exported, &theirs); err != nil {
+		t.Fatal(err)
+	}
+	if ours.Info != theirs.Info || !reflect.DeepEqual(ours.Messages, theirs.Messages) {
+		t.Fatalf("OpenCode 2.3.0 exported another session than the writer writes:\n%s", b)
+	}
+}
+
+// Times from a source whose clock is ahead (items after the write) stay before the write's
+// own time, ascending, so the ids OpenCode makes for the next turn sort after the written
+// ones.
+func TestWriterTimesBeforeWrite(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	_, h, _ := open(t, fh)
+	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	req := writeRequest(writtenSID)
+	ahead := base.Add(time.Hour).Sub(req.Items[0].Time)
+	for i := range req.Items {
+		if !req.Items[i].Time.IsZero() {
+			req.Items[i].Time = req.Items[i].Time.Add(ahead)
+		}
+	}
+	w, err := render(h, req, writtenSID, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := parsePlaced("x.jsonl", w.body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := "msg_" + idTime(base.UnixMilli(), 1, false)
+	last := ""
+	for _, id := range p.ids() {
+		if id <= last || id >= next {
+			t.Fatalf("%s after %s, or not before %s", id, last, next)
+		}
+		last = id
+	}
+	if s, _, err := decodeJSONL("x.jsonl", w.body); err != nil || s.Updated != base.UnixMilli() {
+		t.Fatalf("the session's update time: %d, %v", s.Updated, err)
+	}
+}
+
+// A write without a folder, or with more than the context holds, places and imports
+// nothing.
+func TestWriteRefusals(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	noDir := writeRequest(writtenSID)
+	noDir.Header.CWD = " "
+	big := writeRequest(writtenSID)
+	big.Items = append(big.Items, ir.Item{Node: "big", Role: ir.RoleUser, Text: strings.Repeat("too much ", 1<<20)})
+	for name, req := range map[string]ir.WriteRequest{"no folder": noDir, "too big": big} {
+		if _, err := m.Write(ctx, h, in, req); err == nil {
+			t.Fatalf("%s: written", name)
+		}
+		if _, ok := fh.Get(anchorOf(h, in, writtenSID)); ok || countCommands(f, "session import") != 0 {
+			t.Fatalf("%s: placed or imported", name)
+		}
 	}
 }
 
@@ -390,7 +497,7 @@ func TestWriteRoundTrip(t *testing.T) {
 			case n.Kind == ir.KindMessage:
 				out = append(out, string(n.Actor)+": "+n.Text)
 			case n.Kind == ir.KindToolCall && n.Tool.Shell != nil:
-				out = append(out, "$ "+n.Tool.Shell.Command)
+				out = append(out, "$ "+n.Tool.Shell.Command+" (in "+n.Tool.Shell.Dir+")")
 			case n.Kind == ir.KindToolResult:
 				out = append(out, "> "+n.Result.Output)
 			}
