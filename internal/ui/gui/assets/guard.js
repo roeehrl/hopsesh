@@ -62,10 +62,16 @@ function hookRow(x, r, name) {
   if (!x.installed) return { ...base, todo: true, note: "not set up" };
   if (t === "needs-review") return { ...base, wait: true, review: true, note: "installed · waiting for your approval in " + app };
   if (t === "disabled") return { ...base, wait: true, review: true, note: "installed · turned off in " + app };
+  // A plugin the agent doesn't load: its own config or a policy removes it, which setting
+  // up again doesn't change (an out-of-date copy is replaced, which may).
+  if (t === "missing" && x.plugin && !x.outdated) return { ...base, wait: true, unloaded: true, note: "installed · not loaded by " + app, detail: x.trust.detail };
   if (t === "missing") return { ...base, todo: true, note: "not seen by " + app };
-  if (t === "unknown") return { ...base, ok: true, note: agentInfo(x.agent)?.hookReview ? "set up (approval not checked)" : "set up (not checked yet)" };
+  if (x.outdated) return { ...base, todo: true, outdated: true, note: "installed · out of date (an older hopsesh's)" };
+  if (t === "unknown") return { ...base, ok: true, note: agentInfo(x.agent)?.hookReview ? "set up (approval not checked)" : x.plugin ? "set up (not confirmed loaded yet)" : "set up (not checked yet)", detail: x.plugin ? x.trust.detail : "" };
+  if (x.trust?.failures) return { ...base, ok: true, note: `set up · ${x.trust.failures} failed check${x.trust.failures === 1 ? "" : "s"}`, detail: x.trust.detail };
   return { ...base, ok: true, note: r ? "installed" : "set up" };
 }
+const hookWord = (x) => x.plugin ? " plugin" : " hook";
 
 export function healthNotice(onChange) {
   const d = health;
@@ -74,26 +80,31 @@ export function healthNotice(onChange) {
   const several = (id) => hooks.filter((x) => x.agent === id).length > 1;
   const cliNote = session?.cli ? "couldn't install: " + session.cli : d.cli?.state === "dangling" ? "points to a moved or deleted app" : "not installed";
   const rows = [d.cliReady ? { ok: true, name: "hopsesh command", note: "" } : { todo: true, failed: !!session?.cli, name: "hopsesh command", note: cliNote }];
-  for (const x of hooks) rows.push(hookRow(x, session?.results?.[hookKey(x)], agentName(x.agent) + " hook" + (several(x.agent) ? ` (${x.profileLabel || x.profile || "default account"})` : "")));
+  for (const x of hooks) rows.push(hookRow(x, session?.results?.[hookKey(x)], agentName(x.agent) + hookWord(x) + (several(x.agent) ? ` (${x.profileLabel || x.profile || "default account"})` : "")));
   const todo = rows.filter((r) => r.todo), waits = rows.filter((r) => r.wait), na = rows.filter((r) => r.na);
   const allSet = !todo.length && !waits.length && !na.length;
   if (!session && (allSet || d.dismissed)) return null;
   const skill = state.info?.skillState;
   const skillRow = skill && skill !== "checking" ? { ok: skill === "current", skill: true, name: "hopsesh skill", note: skill === "current" ? "recommended · set up" : skill === "stale" ? "recommended · out of date (Settings › Agents)" : "recommended · not installed (Settings › Agents)" } : null;
-  const waiting = waits.find((r) => r.review)?.x;
+  const waiting = waits.find((r) => r.review)?.x, unloaded = waits.find((r) => r.unloaded);
+  const onlyOutdated = todo.length && todo.every((r) => r.outdated);
   const blocking = d.mode === "block";
   const why = blocking
     ? "When you move a session, hopsesh blocks the copy you left until you move it back, so the two never drift apart."
     : "When you move a session, hopsesh warns in the copy you left until you move it back.";
   const title = allSet ? "Protection is set up"
+    : onlyOutdated && !session?.ran ? "Update the hopsesh plugin"
     : todo.length ? (session?.ran ? "Protection isn't fully set up" : "Protect moved sessions")
     : waiting ? `Approve hopsesh in ${agentName(waiting.agent)} to finish`
+    : unloaded ? `${agentName(unloaded.x.agent)} doesn't load the hopsesh plugin`
     : waits.length ? "Protection is turned off in an agent" : "Some agents can't be protected yet";
   const lead = allSet ? "Moved sessions are protected on this machine."
+    : onlyOutdated && !session?.ran ? "The plugin still protects moved sessions, but its files are an older hopsesh's. Updating replaces them with this version's."
     : todo.length ? (session?.ran ? "Some steps did not finish; each says why." : why + " This needs:")
     : waiting ? (inSharedApp(waiting)
       ? `In ${waiting.app} desktop, open ${agentName(waiting.agent)} and choose Review hooks (or run /hooks in the terminal), then trust the two hopsesh hooks. hopsesh never approves hooks for you.`
       : `hopsesh set up its hook; ${agentName(waiting.agent)} runs a new hook only after you approve it. hopsesh never approves hooks for you.`)
+    : unloaded ? `${agentName(unloaded.x.agent)}'s own settings decide which plugins it loads, so hopsesh can't fix this from here. ${unloaded.x.trust?.fix || ""}`.trim()
     : "Each agent says what it needs.";
   const run = async () => {
     busy = true; onChange();
@@ -111,7 +122,8 @@ export function healthNotice(onChange) {
   const item = (r) => h("li", { class: r.ok ? "ok" : r.wait ? "wait" : r.na ? "na" : r.failed ? "fail" : "todo" },
     h("span", { class: "mark", "aria-hidden": "true" }, mark(r)),
     h("span", { class: "protect-item" }, h("span", {}, r.name, r.note ? h("span", { class: "muted" }, " · " + r.note) : null),
-      r.tools ? h("span", { class: "protect-tools muted" }, r.tools) : null));
+      r.tools ? h("span", { class: "protect-tools muted" }, r.tools) : null,
+      r.detail ? h("span", { class: "protect-tools muted" }, r.detail) : null));
   return h("section", { class: "card notice protect-card" + (allSet ? "" : " warn-card"), role: "status", "aria-label": "Movement protection", "aria-busy": busy ? "true" : "false" },
     h("div", { class: "protect-body" },
       h("b", {}, title),
@@ -119,7 +131,7 @@ export function healthNotice(onChange) {
       session?.error ? h("span", { class: "protect-error" }, "hopsesh could not set up protection: " + session.error) : null,
       h("ul", { class: "protect-list" }, rows.map(item), skillRow ? item(skillRow) : null)),
     h("div", { class: "protect-actions" },
-      todo.length ? h("button", { class: "btn primary", disabled: busy, onclick: run }, session?.ran ? "Try again" : "Set up protection") : null,
+      todo.length ? h("button", { class: "btn primary", disabled: busy, onclick: run }, session?.ran ? "Try again" : onlyOutdated ? "Update the plugin" : "Set up protection") : null,
       waiting ? h("button", { class: todo.length ? "btn" : "btn primary", onclick: () => trustHelp(waiting, onChange) }, `Approve in ${agentName(waiting.agent)}…`) : null,
       waiting?.app ? h("button", { class: "btn", onclick: () => api("OpenAgentApp", waiting.agent).catch(fail) }, `Open ${waiting.app} desktop`) : null,
       session ? h("button", { class: allSet ? "btn primary" : "btn", onclick: () => { session = null; onChange(); } }, "Done")

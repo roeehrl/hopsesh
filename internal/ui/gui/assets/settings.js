@@ -238,6 +238,9 @@ function skill() {
   if (sk.state && sk.state !== "absent" && sk.state !== "foreign") acts.push(h("button", { class: "btn", onclick: () => run(() => api("RemoveSkill", sk.state === "modified"), "Removed the hopsesh skill") }, "Remove"));
   acts.push(h("button", { class: "btn", onclick: preview }, "What it tells your agents"));
   const missing = rules.filter((r) => !r.present);
+  // An agent whose rules hopsesh's protection plugin applies (OpenCode's): without the
+  // plugin they are written but do nothing.
+  const unapplied = rules.filter((r) => r.present && (s.noticeHooks || []).some((x) => x.plugin && !x.installed && r.agent.startsWith(agentName(x.agent))));
   return [card(
     h("div", { class: "set-row" }, title("The hopsesh skill", "Teaches each installed agent to find your sessions, hop one here, continue it in another agent or send it on. It shows you the plan and acts only after you say yes."),
       chip(SKILL_TEXT[sk.state] || [sk.state, ""])),
@@ -252,6 +255,7 @@ function skill() {
       : missing.length && (sk.state === "current" || sk.state === "modified") ? h("div", { class: "set-row" },
         h("span", { class: "muted", style: "font-size:12px" }, missing.map((r) => r.agent).join(" and ") + " ask you before every hopsesh command."),
         h("button", { class: "btn", onclick: () => install(sk.state === "modified", true, "Agents can now list and plan without asking; hops still ask") }, "Allow read-only commands")) : null,
+    unapplied.length ? h("span", { class: "warn", style: "font-size:12px" }, `${unapplied.map((r) => r.agent).join(" and ")} ${unapplied.length === 1 ? "applies" : "apply"} these rules through hopsesh's plugin, which isn't installed, so they have no effect there yet. Install the plugin under Protection hooks (Settings › Machines).`) : null,
     h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, acts),
     h("span", { class: "muted mono", style: "font-size:11px" }, `runs ${s.skillBin}`))];
 }
@@ -457,17 +461,30 @@ const installHooks = (id, profile) => withCLI(() => api("InstallNoticeHooks", id
 function noticeSetup() {
   const hooks = s.noticeHooks || [];
   const off = s.original === "off";
-  const trustWords = (t) => !t ? "" : t.state === "trusted" ? " · trusted by the agent" : t.state === "needs-review" ? " · waiting for your approval in the agent" : t.state === "disabled" ? " · turned off in the agent" : t.state === "missing" ? " · not seen by the agent" : " · trust not verified";
+  // trustWords is what the agent says of an installed hook: trusted (Codex) or loaded (a
+  // plugin: OpenCode's), with the checks that failed and let it go on (a hook fails open).
+  const trustWords = (hook) => {
+    const t = hook.trust, app = agentName(hook.agent);
+    if (!t) return "";
+    const failed = t.failures ? ` · ${t.failures} failed check${t.failures === 1 ? "" : "s"}` : "";
+    if (hook.plugin) return (t.state === "trusted" ? " · loaded by " + app : t.state === "missing" ? " · not loaded by " + app : " · not confirmed loaded yet") + failed;
+    return (t.state === "trusted" ? " · trusted by the agent" : t.state === "needs-review" ? " · waiting for your approval in the agent" : t.state === "disabled" ? " · turned off in the agent" : t.state === "missing" ? " · not seen by the agent" : " · trust not verified") + failed;
+  };
+  const noun = (hook) => hook.plugin ? "plugin" : "hook";
+  const plugins = [...new Set(hooks.filter((x) => x.plugin).map((x) => agentName(x.agent)))];
   return card(h("span", {class:"sec-h"}, "Protection hooks"),
     h("span", {class:"muted"}, "Blocking and warnings work through a small hook each agent runs before a prompt. The hooks run the hopsesh command."
+      + plugins.map((n) => ` In ${n} it is a plugin, which ${n} loads by itself: it refuses a blocked session's tool calls (${n} can't refuse a prompt) and tells the agent why.`).join("")
       + localAgents().filter((a) => a.hookReview).map((a) => ` ${a.name} runs a new hook only after you approve it in ${a.name} (/hooks); hopsesh checks and tells you, and never approves hooks for you.`).join("")),
     s.noticeHooksError && s.cliReady ? h("span", {class:"warn"}, s.noticeHooksError) : null,
     !s.cliReady ? h("span", {class:"warn"}, "The hopsesh command is not installed; installing a hook installs it first.") : null,
     ...hooks.map(hook => h("div", {class:"set-row"},
-      title(hookName(hook, hooks), `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),
+      title(hookName(hook, hooks) + (hook.plugin ? " plugin" : ""), `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook) : ""}${hook.outdated ? " · out of date" : ""}${hook.reason ? " · " + hook.reason : ""}`),
       hook.trust && hook.trust.state !== "trusted" && hook.trust.fix ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.fix) : null,
-      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Hook removed")}, "Remove hook")
-      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),"Hook installed")}, "Install hook"))),
+      hook.trust?.failures && hook.trust.detail ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.detail) : null,
+      hook.installed && hook.outdated ? h("button", {class:"btn primary",disabled:off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),"Plugin updated")}, "Update plugin") : null,
+      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),hook.plugin ? "Plugin removed" : "Hook removed")}, "Remove " + noun(hook))
+      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),hook.plugin ? "Plugin installed" : "Hook installed")}, "Install " + noun(hook)))),
     h("div", {style:"display:flex;gap:8px;flex-wrap:wrap"},
       h("button", {class:"btn",disabled:off,onclick:()=>run(()=>installHooks("",""),"Hooks installed")}, "Install all hooks"),
       h("button", {class:"btn",onclick:()=>run(()=>loadHookHealth(true))}, "Check again")));

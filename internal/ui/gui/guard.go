@@ -218,15 +218,16 @@ func hookProblems(hooks []app.MovementHookStatus, mode string, approves func(age
 	out := []HookProblem{}
 	for _, h := range hooks {
 		p := HookProblem{Agent: h.Agent, Profile: h.Profile, Label: h.ProfileLabel}
+		noun := hookNoun(h.Plugin)
 		switch {
 		case !h.Supported:
 			p.State, p.Message = "unsupported", "Movement protection is not available here: "+h.Reason
 		case h.Result == app.HookFailed:
-			p.State, p.Message = "failed", "hopsesh could not check the protection hook: "+h.Reason
+			p.State, p.Message = "failed", "hopsesh could not check the protection "+noun+": "+h.Reason
 		case !h.Enabled:
 			p.State, p.Message = "settings", h.Reason
 		case !h.Installed:
-			p.State, p.Message, p.Fix = "not-installed", "The protection hook is not installed, so originals are not protected.", "Install the hook in Settings › General."
+			p.State, p.Message, p.Fix = "not-installed", "The protection "+noun+" is not installed, so originals are not protected.", "Install the "+noun+" in Settings › General."
 		case h.Trust != nil && h.Trust.State == agent.HookUnknown && !approves(h.Agent):
 			continue
 		case h.Trust != nil && h.Trust.State != agent.HookTrusted:
@@ -237,12 +238,28 @@ func hookProblems(hooks []app.MovementHookStatus, mode string, approves func(age
 				agent.HookMissing:     strings.TrimSpace("The agent does not run the hopsesh hooks, so originals are not protected. " + h.Trust.Detail),
 				agent.HookUnknown:     "hopsesh could not ask the agent whether it trusts the hooks. " + h.Trust.Detail,
 			}[h.Trust.State]
+			if h.Plugin && h.Trust.State == agent.HookMissing {
+				// The agent's own words say which plugin it does not load.
+				p.Message = "The agent does not load the hopsesh plugin, so originals are not protected."
+				if h.Trust.Detail != "" {
+					p.Message = h.Trust.Detail + " Until it does, originals are not protected."
+				}
+			}
 		default:
 			continue
 		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// hookNoun names an agent's protection hook: a plugin the agent loads (OpenCode), or a
+// hook in its settings.
+func hookNoun(plugin bool) string {
+	if plugin {
+		return "plugin"
+	}
+	return "hook"
 }
 
 // guardFor is the protection of entry e, a copy that moved on (nil otherwise). A copy on
@@ -323,8 +340,12 @@ func localGuard(g *GuardDTO, e app.Entry) {
 			return
 		}
 	}
+	plugin := false
+	for _, h := range d.Hooks {
+		plugin = plugin || h.Agent == e.Agent && h.Plugin
+	}
 	g.State = guardUnprotected
-	g.Problem, g.Fix, g.Action = "No protection hook covers this account, so the original is not protected.", "Install the hooks in Settings › General.", actionSetUp
+	g.Problem, g.Fix, g.Action = "No protection "+hookNoun(plugin)+" covers this account, so the original is not protected.", "Install the hooks in Settings › General.", actionSetUp
 }
 
 // remoteGuard is the protection of a copy left on machine m, from st, what hopsesh last
@@ -341,6 +362,7 @@ func remoteGuard(g *GuardDTO, e app.Entry, m *app.Machine, st app.MachineStatus,
 	if found {
 		name, label = nonEmptyStr(folder.Name, name), nonEmptyStr(label, folder.ProfileLabel)
 	}
+	noun := hookNoun(found && folder.Plugin)
 	forFolder := ""
 	if label != "" {
 		forFolder = " for “" + label + "”"
@@ -379,18 +401,18 @@ func remoteGuard(g *GuardDTO, e app.Entry, m *app.Machine, st app.MachineStatus,
 				g.Fix = "Approve the hopsesh hook in " + name + " on " + where + ": " + hook.Reason + "."
 			}
 		case fix == app.FixHooks && hook.State == app.CheckError:
-			g.Problem = "The " + name + " hook on " + where + forFolder + " is broken (" + nonEmptyStr(hook.Reason, hook.Text) + ")" + stops
+			g.Problem = "The " + name + " " + noun + " on " + where + forFolder + " is broken (" + nonEmptyStr(hook.Reason, hook.Text) + ")" + stops
 			g.Fix, g.Action = setUpFix(m)
 		case fix == app.FixHooks:
-			g.Problem = "The " + name + " hook isn't set up on " + where + forFolder + stops
+			g.Problem = "The " + name + " " + noun + " isn't set up on " + where + forFolder + stops
 			g.Fix, g.Action = setUpFix(m)
 		case hook.State == app.CheckWarn:
-			g.Problem = "The " + name + " hook on " + where + forFolder + " is turned off (" + hook.Reason + ")" + stops
+			g.Problem = "The " + name + " " + noun + " on " + where + forFolder + " is turned off (" + hook.Reason + ")" + stops
 			g.Fix, g.Action = "Turn it on again on "+where+".", actionMachines
 		default:
-			g.Problem = name + " on " + where + " can't run hopsesh's protection hook" + stops
+			g.Problem = name + " on " + where + " can't run hopsesh's protection " + noun + stops
 			if hook.Reason != "" {
-				g.Problem = name + " on " + where + " can't run hopsesh's protection hook (" + hook.Reason + ")" + stops
+				g.Problem = name + " on " + where + " can't run hopsesh's protection " + noun + " (" + hook.Reason + ")" + stops
 			}
 		}
 		return

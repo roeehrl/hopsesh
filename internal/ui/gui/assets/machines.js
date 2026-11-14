@@ -659,7 +659,7 @@ function machineDetail(r, d, extras = {}) {
         st.agents.map((a) => h("div", { class: "mline" },
           h("span", { class: "msym " + worst(a.hook, a.skill), "aria-hidden": "true" }, symOf({ state: worst(a.hook, a.skill) })),
           h("span", { class: "mlabel", title: a.folder || "" }, agentLabel(a)),
-          h("span", { class: "mtext" }, "Hook: ", a.hook.text, " · Skill: ", a.skill.text),
+          h("span", { class: "mtext", title: [a.hook.reason, a.skill.reason].filter(Boolean).join(" · ") || null }, a.plugin ? "Plugin: " : "Hook: ", a.hook.text, " · Skill: ", a.skill.text),
           h("span", { class: "mfix" })))) : null,
     st.version || r.local ? remoteSection(r.local ? "" : r.name, r.local ? sys.here : r.name) : null,
     r.local ? phoneSection() : null,

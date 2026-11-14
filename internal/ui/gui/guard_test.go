@@ -85,6 +85,19 @@ func TestHookProblemsUncheckedPlugin(t *testing.T) {
 	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || !strings.Contains(got[0].Message, "err_1") || got[0].Fix == "" {
 		t.Fatalf("problems: %+v", got)
 	}
+	// Named as the plugin it is, in the agent's words.
+	hooks[0].Plugin = true
+	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || !strings.HasPrefix(got[0].Message, "OpenCode could not load the hopsesh plugin: boom") || !strings.HasSuffix(got[0].Message, "Until it does, originals are not protected.") {
+		t.Fatalf("problems: %+v", got)
+	}
+	hooks[0].Trust.Detail = ""
+	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || got[0].Message != "The agent does not load the hopsesh plugin, so originals are not protected." {
+		t.Fatalf("problems: %+v", got)
+	}
+	hooks[0].Installed = false
+	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || got[0].Message != "The protection plugin is not installed, so originals are not protected." || got[0].Fix != "Install the plugin in Settings › General." {
+		t.Fatalf("problems: %+v", got)
+	}
 }
 
 func TestGuardIsEffectiveOnlyWithATrustedHook(t *testing.T) {
