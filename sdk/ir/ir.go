@@ -273,6 +273,11 @@ type WriteResult struct {
 	To         int64        `json:"to"`
 	Cursor     Cursor       `json:"cursor"` // the session's new end
 	Projection []Projection `json:"projection,omitempty"`
+	// Stamp is the state a new session the agent keeps in a database was left in by the
+	// write (an agent.SessionStamp), when the writer read it and the session held only
+	// what it wrote; a stamp no state matches when it held more (used since). Empty when
+	// the writer gives none: the core then reads the stamp itself after the write.
+	Stamp string `json:"stamp,omitempty"`
 }
 
 // Projection binds the exact native representation to the logical revisions it carries.

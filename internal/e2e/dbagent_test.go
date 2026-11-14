@@ -751,3 +751,53 @@ func TestVirtualSessionNoWorkSync(t *testing.T) {
 		t.Fatalf("receipts %+v (%d imports)", j.Receipts, m.Imports())
 	}
 }
+
+// A turn added to a continued session right after its import, before the write read its
+// state, is never taken for the operation's: the writer gives the stamp it left only when
+// the session holds just what it wrote, so the unforced undo refuses to delete that turn.
+func TestContinueIntoVirtualSessionUsedAtOnce(t *testing.T) {
+	root := t.TempDir()
+	box, here := newLocation(t, "box", root), newLocation(t, "here", root)
+	seed(t, box)
+	os.MkdirAll(dbInstall(here).Main(), 0o700)
+	m := dbagent.New()
+	m.WriteStamps.Store(true)
+	m.AfterImport = func(id agent.SessionID) {
+		if err := dbagent.Continue(dbInstall(here).Main(), id, dbagent.Message{ID: "msg_soon", Role: "user", Text: "Go on, quickly."}); err != nil {
+			t.Error(err)
+		}
+	}
+	ctx := context.Background()
+	state := t.TempDir()
+	in := move.Input{Source: move.Side{Machine: box.m, Module: claude.New(), Install: box.in}, Session: list(t, box)[sid],
+		Target: move.Side{Machine: here.m, Module: m, Install: dbInstall(here)}}
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := move.Apply(ctx, p, in, move.Env{StateDir: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j, err := journal.Load(state, res.Journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	made := p.Placement.Key.Session
+	stamped := false
+	for _, e := range vendorEntries(j) {
+		stamped = stamped || e.Created && e.Key.Session == made && e.Stamp == "v1:used-since-written"
+	}
+	if !stamped {
+		t.Fatalf("the journal holds the writer's stamp: %+v", vendorEntries(j))
+	}
+	if err := j.Undo(ctx, reachDB(m, here), false); !errors.Is(err, journal.ErrChanged) {
+		t.Fatalf("undo over the turn added at once: %v", err)
+	}
+	if !dbagent.Exists(dbInstall(here).Main(), made) {
+		t.Fatal("the refused undo deleted the session")
+	}
+	if err := j.Undo(ctx, reachDB(m, here), true); err != nil || dbagent.Exists(dbInstall(here).Main(), made) {
+		t.Fatalf("forced undo: %v", err)
+	}
+}

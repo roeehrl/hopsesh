@@ -204,7 +204,10 @@ func vendorWrite(m agent.Module, req ir.WriteRequest) bool {
 }
 
 // recordVendorWritten journals the session a write made when the writer chose another id
-// than the one asked for, and records the stamp the write left it at.
+// than the one asked for, and records the stamp the write left it at: the writer's own
+// (ir.WriteResult.Stamp, read with the check that the session holds only what it wrote,
+// so a turn added right after the write is never taken for the operation's), else one
+// read now.
 func recordVendorWritten(ctx context.Context, j *journal.Journal, side Side, h agent.Host, key agent.SessionKey, req ir.WriteRequest, w ir.WriteResult) error {
 	if w.SessionID != "" && w.SessionID != req.SessionID {
 		req.SessionID = w.SessionID
@@ -214,6 +217,9 @@ func recordVendorWritten(ctx context.Context, j *journal.Journal, side Side, h a
 	}
 	if vendorWrite(side.Module, req) {
 		key.Session = agent.SessionID(req.SessionID)
+		if w.Stamp != "" {
+			return j.StampCreatedSession(side.Machine.Name, key, agent.SessionStamp(w.Stamp))
+		}
 		stampMade(ctx, j, side, h, key)
 	}
 	return nil

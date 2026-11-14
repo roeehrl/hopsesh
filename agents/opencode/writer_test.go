@@ -260,6 +260,9 @@ func TestWriteReadsBack(t *testing.T) {
 	if res.SessionID != writtenSID || res.Path != anchorOf(h, in, writtenSID) || res.From != 0 || res.To != 13 || res.Cursor.Offset != 13 {
 		t.Fatalf("result: %+v", res)
 	}
+	if st, err := m.SessionStamp(ctx, h, in, writtenSID); err != nil || res.Stamp != string(st) || !strings.HasPrefix(res.Stamp, "v1:13@") {
+		t.Fatalf("the write's stamp %q, the session's %q (%v)", res.Stamp, st, err)
+	}
 	imports := 0
 	for _, c := range f.commands() {
 		if strings.HasPrefix(c, "session import") {
@@ -540,5 +543,21 @@ func TestWriteChecksTheImportingService(t *testing.T) {
 	}
 	if _, ok := fh.Get(anchorOf(fh, in, agent.SessionID(req.SessionID))); ok {
 		t.Error("the recovery placed the transfer before the check")
+	}
+}
+
+// A write's stamp is the session's only while it holds just the written messages: one read
+// after a turn was added is no state undo would delete unforced.
+func TestWrittenStamp(t *testing.T) {
+	if got := writtenStamp(stampFor(13, 1700), 13); got != stampFor(13, 1700) {
+		t.Fatalf("the written count: %q", got)
+	}
+	for _, st := range []agent.SessionStamp{stampFor(14, 1800), "", "v2:13@1"} {
+		if got := writtenStamp(st, 13); got != usedSince {
+			t.Fatalf("%q: %q", st, got)
+		}
+	}
+	if usedSince.Format() != stampFor(1, 1).Format() {
+		t.Fatal("usedSince must be of the module's stamp format, so undo refuses rather than asks")
 	}
 }
