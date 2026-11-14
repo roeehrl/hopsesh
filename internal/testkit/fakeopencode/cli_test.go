@@ -250,15 +250,17 @@ func TestAPI(t *testing.T) {
 	}
 	// The background service switches the folder of an idle session at once, with
 	// OpenCode's location-switched message.
-	if r := m.run("api", "--standalone", "POST", "/api/session/"+sid+"/move", "-d", `{"directory":"`+filepath.Join(m.home, "gone")+`"}`); r.code != 1 || r.stderr != "HTTP 400 Bad Request\n" || !strings.Contains(r.stdout, "Directory does not exist") {
+	gone, _ := json.Marshal(map[string]string{"directory": filepath.Join(m.home, "gone")})
+	if r := m.run("api", "--standalone", "POST", "/api/session/"+sid+"/move", "-d", string(gone)); r.code != 1 || r.stderr != "HTTP 400 Bad Request\n" || !strings.Contains(r.stdout, "Directory does not exist") {
 		t.Errorf("a move to a missing folder: %+v", r)
 	}
 	b, _ := json.Marshal(map[string]string{"directory": other})
+	otherJSON, _ := json.Marshal(other)
 	m.env["FAKE_OPENCODE_SERVICE"] = "running"
 	m.must("api", "POST", "/api/session/"+sid+"/move", "-d", string(b))
 	delete(m.env, "FAKE_OPENCODE_SERVICE")
 	exp := m.must("session", "export", sid, "--standalone")
-	if !strings.Contains(exp, `"type": "location-switched"`) || !strings.Contains(exp, `"directory": "`+other+`"`) {
+	if !strings.Contains(exp, `"type": "location-switched"`) || !strings.Contains(exp, `"directory": `+string(otherJSON)) {
 		t.Errorf("after the move: %s", exp)
 	}
 	// Interrupt ends only a running turn, which only the background service runs; the

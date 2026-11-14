@@ -43,7 +43,7 @@ func TestDemoHomeOpenCode(t *testing.T) {
 	var ids []string
 	for _, s := range listed {
 		ids = append(ids, s.ID)
-		if s.Directory != filepath.ToSlash(filepath.Join(h, "git", "demo")) {
+		if s.Directory != filepath.Join(h, "git", "demo") { // as OpenCode resolved it: the OS's separators
 			t.Errorf("%s is in %s", s.ID, s.Directory)
 		}
 	}
