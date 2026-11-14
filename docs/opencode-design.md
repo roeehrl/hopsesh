@@ -981,8 +981,24 @@ Decisions and what is left:
   database keeps `media:` refs, which an import refuses as "Bad Request"). Where nothing runs it
   is made from SQL as before, and a session with media is refused (`ErrUnsupported`). Backups
   are OpenCode's exports too (`{data}/hopsesh/opencode/backup/<id>-<ns>.json`, children in
-  `<…>.children/<n>-<child>.json`, parents first); a restore imports those files as they are.
-  Moves cost an export (and a `service status`) per family member at the source.
+  `<…>.children/<n>-<child>.json`); a restore imports those files as they are, ordered by their
+  `parentID` (a cycle is refused). Moves cost an export (and a `service status`) per family
+  member at the source. An export a move or backup carries runs a private server only behind
+  the same version check as a change (`writeService`); when that check fails, or the service
+  state is unknown, the session is read from the database instead (media refused), so risk 13's
+  list of standalone calls now reads "the account probe, writes, exports behind the write
+  check, and reads where SQL is unavailable".
+- **Undo keeps a backup whole.** The journal keeps, besides the backup file a set-aside entry
+  names, every file the operation created beside it named after it (`<name>.<anything>`, so
+  OpenCode's `<…>.children/`) while the session is not put back, and removes them together once
+  it is. An import gives a restored session a new `time_updated`, so a restore that stopped
+  halfway could not be told from other work by its stamp: undo now marks a vendor-session entry
+  `Undoing` when it deletes a created session or begins a restore, skips such a deleted session
+  on the next undo, and finishes such a restore by calling `Restore` again (idempotent: the
+  same message ids are done, others are `ErrDiverged`, the only "other work"). A set-aside
+  session at another stamp is likewise restored when forced, kept when `Restore` refuses. A
+  set-aside session is never put back while the session the operation made at its id is
+  still there.
 - **The program's folders are pinned.** Every OpenCode command gets `XDG_DATA_HOME` and
   `XDG_STATE_HOME` from the machine's facts (as Detect resolved the roots), so it writes the
   database hopsesh read and asks for the service registered there, also when hopsesh runs with
@@ -991,28 +1007,50 @@ Decisions and what is left:
   module gives the children and every message new ids (message ids are keys of the whole
   database), each the old id's time part plus a tail hashed from the copy's id and the old id
   (a fork's `_<seq>` kept), so a recovery makes the same ids. They are replaced only where
-  OpenCode refers to them: session `id`/`parentID`, message `id`, `metadata.keepID`, a tool
+  OpenCode refers to them: session `id`/`parentID`, `revert.messageID` (2.3.0's import drops
+  `revert`), message `id`, `metadata.keepID`, a subagent answer's `metadata.childID`, a tool
   state's `metadata.sessionID`. Text, tool input and output stay as staged, so the copy reads
   as the staged conversation (its IR node ids and lineage heads match); a subagent's answer, or
   a later `subagent` call's input, may still name the original's child. The core maps such a
   copy to its source node for node (`move.renamedProjection`, only when every node has the
   source's content in order), as it cannot pair them by anchor.
 - **Stamps** are the parent's (settled count and update time). `session delete` deletes the
-  children too; a child used on its own since is not guarded separately.
-- **Cross-version moves** are refused in AfterInstall when the copy was last written by a newer
-  OpenCode than the running service (or, stopped, the program). A session holding a message
+  children too; a child used on its own since is not guarded separately (left: fold the
+  descendants' counts and updates into the stamp, which changes every stamp hopsesh recorded,
+  so it waits for a stamp format version). `Delete` reads the stamp right before the delete;
+  the service can still add a turn in between, since OpenCode's delete names no state.
+- **Install failures.** Only the copy's own divergence is `ErrDiverged` (the core then drops
+  the session from the journal); a child that OpenCode has with other messages fails the
+  install with a plain error, so the root this run imported stays the operation's and undo
+  deletes it. A placed family whose parents make a cycle is refused before any import.
+- **Unknown service state.** When `service status` fails, a change (import, delete, restore,
+  rename) is refused (`unknownService`), as `cd` and resume already were; only reads where SQL
+  is unavailable still run a private server.
+- **Cross-version moves** are refused when the copy was last written by a newer OpenCode than
+  the running service (or, stopped, the program): first through the new optional
+  `agent.InstallChecker`, which `move.Apply` asks with the session's `AgentVersion` before it
+  sets aside the copy the move replaces (so nothing here changes), then again in AfterInstall
+  for every session of the placed family. A session holding a message
   type the target OpenCode does not know fails at its import (2.3.0 answers "Bad Request"), as
   a restore of such a backup does.
 - **`cd` needs the running service** (§2 F12 and the PR 3 sandbox finding): a private server
   takes the move, exits before the step boundary and leaves the session marked busy. With the
   service stopped (or unknown) the plan is blocked with "type /cd <dir> in the session, or start
   OpenCode", and nothing runs; undo of a `cd` needs it running too. With it running, hopsesh
-  posts the move and waits (30 s) for a newer `location-switched` message naming the folder.
+  posts the move and waits (30 s) for a newer `location-switched` message naming the folder:
+  every 100 ms from the database, or, where hopsesh cannot read it, every second through
+  `api GET …/message`, asking `service status` before each call and stopping when the service
+  no longer runs (a call without `--standalone` would start it again). `PlanChangeDir` does
+  not create the anchor §3.1 and §3.5 planned: the plan's `Main` is the summary's path (the
+  anchor), and nothing in a `cd` writes there.
   A same-machine `pull --to` is now this folder change. The stand-in now plays the private
   server's move as 2.3.0 does (queued, `time_busy` set, no message); the service applies it at
   once. Not run against the real service (the sandbox never starts one).
 - **Resume after the import.** `move.Apply` asks `HostResumer.ResumeOn` on the target once the
-  session is there; a refusal (D2) leaves the plan's command with the reason as a warning. A
+  session is there; a refusal (D2) leaves the plan's command for the user to read, with the
+  reason as a warning, but not runnable: `Result.Run` and the plan's `Resume` are empty, so
+  `pull --run`, the TUI and the GUI do not launch a command that would restart a service of
+  another version. A
   no-work sync (`sync.go`), recovery's early return (`operation.go`) and continuations
   (`continue.go`, PR 5) still print the pure `Resume` command.
 - **Forks.** `VerifyNativeFork` reads both sessions with SQL (local only; `ErrUnsupported`
@@ -1023,11 +1061,20 @@ Decisions and what is left:
   not have, so OpenCode forks are verified again on each scan (cheap with SQL; PR 9 could key
   it on stamps).
 - **Titles.** hopsesh records the titles it gives (a rename, a keep-both copy) in
-  `{data}/hopsesh/opencode/titles.json`; a session whose title is still that one lists as
-  "custom". A write that fails is ignored (it is a listing note).
+  `{data}/hopsesh/opencode/titles.jsonl`, one `{"id","title"}` line each (the last counts),
+  written as standalone appends: an operation's undo takes out its own line, and a line added
+  later never makes an earlier undo refuse (a whole-file rewrite through the journal did). A
+  session whose title is still the recorded one lists as "custom". A write that fails is
+  ignored (it is a listing note). Undoing a rename takes out its record but does not rename
+  the session back in OpenCode (the PATCH is not journaled): left for a later PR.
 - **Leftovers on disk.** The transfer files AfterInstall writes for `session import`
-  (`{data}/hopsesh/opencode/tmp/<id>.json`) and backups stay until an undo removes the journaled
-  ones; the module host has no remove. A later PR could clean `tmp/` after a sealed operation.
+  (`{data}/hopsesh/opencode/tmp/<id>-<content hash>.json`, so another operation never rewrites
+  one) and backups stay until an undo removes the journaled ones; the module host has no
+  remove. A later PR could clean `tmp/` after a sealed operation.
+- **Move preview warnings.** `agent.Bundle` now carries `Warnings`, which the core adds to the
+  move plan's. OpenCode's say that a window showing the session while it is idle cannot be
+  seen (risk 5), and that a session of the `claude-agent` provider moves as an OpenCode
+  session (non-goals).
 - **Stated losses** are unchanged (archived state, slug, fork fields, times, instruction
   state); the move preview does not list them yet (PR 8 copy).
 - **Real-binary check** (opencode 2.3.0, a fresh copy of the sandbox, `XDG_*` and HOME in the
@@ -1040,7 +1087,15 @@ Decisions and what is left:
   at the right one it deleted the session and its child; a backup restored twice gave one
   session with its child; the unforced undo of the move was refused after that restore and the
   forced one deleted it. `cd` was refused (service stopped). The harness was not committed
-  (PR 9 makes such checks devtools).
+  (PR 9 makes such checks devtools). Re-run after the review fixes (a fresh copy, the same
+  guard; 93 commands reached the real binary, every one `--standalone`): the same results,
+  plus: the move preview carried the idle-window warning; in a keep-both copy the subagent
+  answer's `metadata.childID` named the copy's child; `titles.jsonl` held the copy's line and
+  its undo took it out; a set-aside made through the journal, undone while its folder was
+  gone ("Location not found"), kept the backup and its child's file, and a second undo with
+  the folder back restored the session with its child and removed both files; a restore after
+  the root alone had been imported (its stamp now another: 2.3.0's import sets
+  `time_updated`) imported only the child.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
@@ -1061,8 +1116,9 @@ one-line PR after D10's condition is met.
    (`Schedule.Service.run`; `server/src/process.ts`): a standalone server may take the schedule lease
    in `kv`, fire due schedules when `experimental.schedules` is on, wake sessions, and run a newer
    binary's migrations on the database. It never starts the service (restart continuity is
-   service-only). Mitigation: as few standalone calls as possible (the account probe, writes, and
-   reads where SQL is unavailable).
+   service-only). Mitigation: as few standalone calls as possible (the account probe, writes,
+   exports a move or backup carries, behind the same version check as writes, and reads where
+   SQL is unavailable).
 4. **Protection is weaker than Claude/Codex:** tools are blocked, prompts are not; a rejected tool is
    an error the model may route around; fail-open hides hook failures. Mitigations: notice entry,
    permission deny, cache-miss check after restarts, failure counter shown by HookTrust.
