@@ -19,7 +19,7 @@ func (appendless) Profile(agent.Install) ir.Profile { return ir.Profile{Window: 
 // Work brought back from a cloud is offered as an addition to the session it was handed
 // off from only when that session's agent can add to it (Profile.PortableAppend); with
 // one that cannot (OpenCode), it comes as a new session, and asking to add is refused
-// before anything is written.
+// before anything is written (at planning, and when a plan from before asks).
 func TestFetchAppendNeedsPortableAppend(t *testing.T) {
 	key := agent.SessionKey{Agent: "codex", Session: "original"}
 	head := ir.Cursor{Head: "left", Offset: 3}
@@ -48,8 +48,11 @@ func TestFetchAppendNeedsPortableAppend(t *testing.T) {
 						errs = append(errs, msg)
 					}
 				})
-				if p.Fetch.CanAppend != tc.offer || (p.Fetch.Original != nil) != tc.offer || p.Fetch.Append != (tc.offer && appendOriginal) || len(errs) > 0 {
+				if p.Fetch.CanAppend != tc.offer || (p.Fetch.Original != nil) != tc.offer || p.Fetch.Append != (tc.offer && appendOriginal) {
 					t.Fatalf("append %t: offered %t, original %v, appending %t, %v", appendOriginal, p.Fetch.CanAppend, p.Fetch.Original, p.Fetch.Append, errs)
+				}
+				if refused := !tc.offer && appendOriginal; (len(errs) > 0) != refused {
+					t.Fatalf("append %t: refused %v, want refused %t", appendOriginal, errs, refused)
 				}
 			}
 		})
