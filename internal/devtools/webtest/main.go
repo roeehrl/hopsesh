@@ -2,7 +2,15 @@
 // the real assets and the real service (internal/ui/gui) on a demo home made from the
 // agents' test fixtures, with a stand-in for the Wails runtime. It is not shipped.
 //
-// The demo home also has stand-in Claude Code and Codex clouds and a Copilot cloud agent:
+// The demo home has Claude Code, Codex and OpenCode sessions; this program, run as
+// opencode, is the stand-in OpenCode (internal/testkit/fakeopencode), whose background
+// service is stopped unless POST /reset?opencode=running starts it (opencode=restart: of
+// another version than the program, so opening a session would restart it; opencode=
+// outdated: every protection hook installed, hopsesh's plugin with one of its files an
+// older hopsesh's; opencode=removed: installed, the service running, and OpenCode's own
+// config removing hopsesh's plugin).
+//
+// It also has stand-in Claude Code and Codex clouds and a Copilot cloud agent:
 // this program, run as claude, codex or gh, is the stand-in claude, codex or gh; the demo
 // repository's GitHub remote is a local bare repository; POST /cloud adds a cloud session
 // (?cloud=copilot-cloud for a Copilot task, ?cloud=codex-cloud for a Codex cloud task with
@@ -124,6 +132,8 @@ func main() {
 		os.Exit(fakeagent.Claude())
 	case "codex":
 		os.Exit(fakeagent.Codex())
+	case "opencode":
+		os.Exit(fakeagent.OpenCode())
 	case "termfake":
 		os.Exit(termfake.Main())
 	}
@@ -162,7 +172,7 @@ func main() {
 		if *world == "empty" {
 			err = os.MkdirAll(h, 0o700)
 		} else {
-			err = testkit.DemoHomeClaudeCodex(h)
+			err = testkit.DemoHome(h)
 		}
 		if err != nil {
 			log.Fatal(err)
@@ -190,11 +200,14 @@ func main() {
 		_ = os.Unsetenv("FAKE_CODEX_EMAIL")
 		_ = os.Unsetenv("FAKE_CODEX_VERSION")
 		_ = os.Unsetenv("FAKE_CODEX_HOOKS")
+		for _, k := range []string{"FAKE_OPENCODE_SERVICE", "FAKE_OPENCODE_SERVICE_VERSION", "FAKE_OPENCODE_VERSION", "FAKE_OPENCODE_AUTH", "FAKE_OPENCODE_ACTIVE"} {
+			_ = os.Unsetenv(k)
+		}
 		if err := os.RemoveAll(h); err != nil {
 			return err
 		}
 		testkit.Apply(testkit.Env(h))
-		if err := testkit.DemoHomeClaudeCodex(h); err != nil {
+		if err := testkit.DemoHome(h); err != nil {
 			return err
 		}
 		if err := cloudWorld(h); err != nil {
@@ -425,6 +438,46 @@ func main() {
 				return
 			}
 		}
+		if oc := r.URL.Query().Get("opencode"); oc != "" {
+			// OpenCode's background service: running (the program's version), or restart
+			// (running another version than any opencode here, so opening a session would
+			// restart it: decision D2). outdated and removed: every protection hook is
+			// installed (with the protection world's command), and one of the plugin's files
+			// is an older hopsesh's, or OpenCode's config removes the plugin.
+			if err := openCodeWorld(h, oc); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if oc == "outdated" || oc == "removed" {
+				// Every agent's protection hook, hopsesh's plugin among them.
+				mu.RLock()
+				app := svc
+				mu.RUnlock()
+				if _, err := app.Scan(); err != nil {
+					http.Error(w, "scanning: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				if _, err := app.InstallNoticeHooks("", ""); err != nil {
+					http.Error(w, "installing the hooks: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				var err error
+				if oc == "outdated" {
+					f := filepath.Join(h, ".config", "opencode", "plugins", "hopsesh", "index.js")
+					var b []byte
+					if b, err = os.ReadFile(f); err == nil {
+						err = os.WriteFile(f, append(b, []byte("// an older hopsesh's plugin\n")...), 0o600)
+					}
+				}
+				if err == nil {
+					_, err = app.HookHealth(true) // the install's own check read the folder before
+				}
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+		}
 		if r.URL.Query().Get("terminal") == gui.WhereHere {
 			// In the app's own terminal the stand-in Claude Code asks whether it trusts a
 			// folder it has not seen (the user answers in the tab).
@@ -517,7 +570,7 @@ func call(w http.ResponseWriter, r *http.Request, svc *gui.App) {
 // origin is the demo repository's stand-in GitHub remote.
 var origin fakecloud.Origin
 
-// cloudWorld puts the stand-in claude, codex, gh and jules first on PATH (the account has the Codex
+// cloudWorld puts the stand-in claude, codex, opencode, gh and jules first on PATH (the account has the Codex
 // cloud environments env_api, "acme-api", and env_web, "acme-web") and points the demo
 // repository's GitHub remote at a local bare repository, with main pushed there.
 func cloudWorld(h string) error {
@@ -529,7 +582,7 @@ func cloudWorld(h string) error {
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{"claude", "codex", "gh", "jules"} {
+	for _, name := range []string{"claude", "codex", "opencode", "gh", "jules"} {
 		if runtime.GOOS == "windows" {
 			b, err := os.ReadFile(self)
 			if err == nil {
@@ -924,6 +977,45 @@ func voiceWorld(h string) error {
 	}
 	b := string(meta) + "\n" + `{"timestamp":"2026-10-02T06:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Plan the week out loud","images":[]}}` + "\n"
 	return os.WriteFile(filepath.Join(dir, "rollout-2026-10-02T09-00-00-"+id+".jsonl"), []byte(b), 0o600)
+}
+
+// restartVersion is the background service's version in the restart world: one the stand-in
+// opencode is not (2.3.0), so opening a session would restart the service.
+const restartVersion = "2.2.5"
+
+// openCodeWorld sets up the stand-in OpenCode's background service (running, restart) or
+// the command hopsesh's hooks run (outdated, removed: the reset then installs them).
+func openCodeWorld(h, mode string) error {
+	switch mode {
+	case "running":
+		os.Setenv("FAKE_OPENCODE_SERVICE", "running")
+	case "restart":
+		// The module would pick an OpenCode desktop app's own CLI of the service's version,
+		// which is not the stand-in: never run that.
+		for _, app := range []string{"/Applications/OpenCode.app", filepath.Join(h, "Applications", "OpenCode.app")} {
+			if b, err := os.ReadFile(filepath.Join(app, "Contents", "Resources", "opencode-cli.version")); err == nil && strings.TrimSpace(string(b)) == restartVersion {
+				return fmt.Errorf("%s bundles opencode %s, the restart world's service version", app, restartVersion)
+			}
+		}
+		os.Setenv("FAKE_OPENCODE_SERVICE", "running")
+		os.Setenv("FAKE_OPENCODE_SERVICE_VERSION", restartVersion)
+	case "outdated":
+		return protectionWorld(h, "blocked")
+	case "removed":
+		// The service runs, and OpenCode's own config removes hopsesh's plugin.
+		os.Setenv("FAKE_OPENCODE_SERVICE", "running")
+		dir := filepath.Join(h, ".config", "opencode")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{"plugins":["-hopsesh"]}`+"\n"), 0o600); err != nil {
+			return err
+		}
+		return protectionWorld(h, "blocked")
+	default:
+		return fmt.Errorf("opencode is running, restart, outdated or removed, not %q", mode)
+	}
+	return nil
 }
 
 func protectionWorld(h, mode string) error {
