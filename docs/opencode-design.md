@@ -1558,7 +1558,7 @@ folder's own config gets its own plugin, its argv naming the folder). Decisions 
   OpenCode session. OpenCode's service starts the shells of the desktop app's terminal panel, so
   a Claude Code or Codex session run there walks up to OpenCode desktop: the window does not
   place it in another agent's app (`placesOf` counts it as unknown, as before this PR), since
-  showing that place would open the session's own agent's app; a "Running in OpenCode" label is
+  showing that place would open the session's own agent's app; a "Running in OpenCode desktop" label is
   PR 8's copy. A Linux desktop app has no detection (`accounts_view.go` and
   `movement_hooks.go` accept only `.app` or `.exe`); the plugin floor is still judged by the
   program's version, not the running service's (PR 6's note): left for PR 9, whose real-agent
@@ -1631,6 +1631,120 @@ folder's own config gets its own plugin, its argv naming the folder). Decisions 
   The same folders outside the scratch folder were unchanged but for what the running OpenCode
   desktop app (its hourly log), Codex and Claude Code write themselves; the desktop app's
   service kept its process.
+
+**Left by PR 8 for later PRs.** The window now speaks of OpenCode as it is, and the browser
+specs run on the demo home with OpenCode's sessions (`testkit.DemoHome`; `DemoHomeClaudeCodex`
+is gone) and the stand-in `opencode` first on the webtest server's PATH, so a real `opencode`
+installed on the machine never runs (the webtest's own program plays it, as it plays `claude`
+and `codex`). Done here from the earlier notes:
+- **PR 0:** `--opencode`/`--opencode-soft` tokens (light and dark), `.chip.agent-opencode` and
+  `.msg-l.agent-opencode`. The Settings bell text says how any program says it waits (the bell
+  or a notification) instead of naming Claude Code alone; the specs that counted two agents and
+  four sessions (`list`, `sessions`) count three and seven.
+- **PR 2:** a session's size is shown as people read it: `EntryDTO.Messages` for an agent that
+  counts messages ("7 messages" in the row and the details), `sizeKB` only for bytes (before,
+  an OpenCode session of 2048 messages would have read "2 KB"). A repository's size on disk
+  leaves the counts out; sorting by size puts OpenCode's sessions last.
+- **PR 4:** the move preview states what an OpenCode copy leaves out (a third Bundle warning:
+  `/undo` snapshots, archived state, slug, fork link, times, instruction state, jobs).
+- **PR 6:** OpenCode's hook is called a plugin wherever it shows (`MovementHookStatus.Plugin`,
+  `AgentSetup.Plugin`: the hook is a `HookDir`). Settings says the plugin refuses a blocked
+  session's tool calls (OpenCode cannot refuse a prompt), its trust reads "loaded by OpenCode",
+  "not loaded by OpenCode" or "not confirmed loaded yet" (not "trusted by the agent"), and the
+  guard's unchecked plugin reads "set up (not confirmed loaded yet)" with OpenCode's detail.
+  The failure count shows in Settings ("2 failed checks", with the detail) and on the
+  Machines page (a warning). An older hopsesh's or edited plugin (`MovementHookStatus.Outdated`)
+  is offered for update: the protection card ("Update the hopsesh plugin"), Settings ("Update
+  plugin") and the Machines page ("installed, out of date", with the set-up fix). A plugin
+  OpenCode does not load is no longer a "Set up protection" item: the card says OpenCode's own
+  settings decide which plugins it loads and gives OpenCode's fix, and the Machines page offers
+  no set-up (unless the copy is also out of date, which an install may cure). Settings says
+  when OpenCode's allow rules have no effect because the plugin is not installed.
+- **PR 7, D2:** every path asks with one question (`askRestart` in `core.js`: the module's
+  reason and what going on does: OpenCode restarts its service with that version, its windows
+  reconnect and a running turn stops):
+  - A move or continuation whose resume would restart the service: `move.Result.RestartsService`
+    marks it (with `Plan.ResumeOptions`, so a yes keeps the start prompt). The done screen says
+    so; "Resume …" asks and opens it once (`OpenResult`, `AllowResultRestart`); the TUI's done
+    screen asks the same (y, anything else leaves it). The TUI opens sessions through plans, so
+    this is its one question.
+  - Another machine: `peer.TerminalRequest.RestartService` carries the yes, and hopsesh there
+    refuses with `peer.CodeRestartsService` (`errors.Is` with `agent.ErrRestartsService`), so the
+    window asks for "Continue on …", "Open it on … here", "Continue this old copy anyway" and a
+    new session there, then sends the request again. An older hopsesh there ignores the field
+    and refuses as before; the refusal's message still says how to agree on that machine
+    (`peer.Error.Message`), while a current hopsesh reads only the reason (`peer.Error.Reason`).
+  - Fixed: the new-session question (PR 7) was answered "no" by its own dialog closing (the
+    `close` event of the dialog it replaced resolved it), so agreeing never started anything.
+- **PR 7, copy:** a tab run by the desktop app's `opencode-cli` is titled and listed as
+  `opencode` (`programOf`: a module's program also as `<name>-cli`, which also gives such a
+  tab the module's `TerminalEnv`; an account folder's command, `claude-work`, keeps its name). A Claude Code or Codex session in OpenCode desktop's terminal
+  panel reads "Working in OpenCode desktop" (`PlaceDTO.In`), with a caption that hopsesh cannot show it
+  there, instead of an unknown window. OpenCode's `Desktop.Product` is "OpenCode desktop" (the
+  grid read "OpenCode 2.2.7, running OpenCode 2.2.7", the folder "Terminal and OpenCode share one
+  sign-in"). Settings' "experimental" chip says what it means (D10).
+- **Review fixes:**
+  - Only a plugin OpenCode's own settings leave out (a config entry or policy removes it, or it
+    has not reloaded it yet: `agent.HookTrust.Excluded`) is one hopsesh can't fix. One that
+    failed to load, or another plugin of hopsesh's name, is a "Set up protection" item on the
+    card, keeps the Machines page's set-up fix, and Settings offers "Install plugin again".
+  - The remote D2 refusal carries the hint for an older hopsesh apart from the reason
+    (`peer.Error.Reason`; a new session's hint no longer says `hopsesh open`), so the window's
+    question shows only the reason. `hopsesh terminals run` asks the same (or takes
+    `--restart-service`), and the client API's `terminal.open` refuses with `blocked` and takes
+    `restartService`.
+  - The question ends the module's reason with a full stop and says the service starts again
+    "with that other version" (the reason names it).
+  - "Working in OpenCode desktop" (the place's `Desktop.Product`), not "Working in OpenCode".
+  - The protection fixes point to Settings › Machines (where the hooks are), not General.
+  - The rules note matches a rule to the plugin of its own folder (`RuleState.AgentID` and
+    `Profile`), and also when the plugin is installed but not loaded.
+  - The experimental chip's meaning and the Machines page's reasons are visible text, not only
+    tooltips; the Move menu's experimental item says what it means.
+  - The plugin's failed checks are reported only while the last one is under a week old
+    (`failureWindow`): hopsesh never writes OpenCode's storage to reset the count.
+  - An OpenCode session has no "File" row and no "Reveal in Finder" (`AgentFacts.Virtual`;
+    `RevealEntry` refuses it); the Machines page's storage line counts its sessions in messages;
+    quitting with an OpenCode tab mid-turn says the turn goes on in the service
+    (`Spec.ServiceTurns`, D3); the done screen of a push to a machine without hopsesh's login
+    session no longer promises to ask; the TUI and `hopsesh doctor` say "plugin"; a program
+    named `OPENCODE.EXE` is OpenCode's.
+  - `real/setup.ts` puts the stand-in `opencode` first on PATH for the test world.
+- **Playwright:** `opencode.spec.ts` (15 tests, one file instead of §7's three): sizes and
+  preview, no desktop app, file or reveal for a session (D11), the experimental badge (D10),
+  continue Claude Code → OpenCode and OpenCode → Claude Code with undo, the plugin's texts,
+  update offer, a config that removes it, one that fails to load (installed again from
+  Settings), the failure count, an OpenCode account folder with its port in the grid and
+  folders, the D2 question for a resume, a new session and a held move result, and on another
+  machine (mocked) through "Join it there", "Continue on …" and "Continue this old copy
+  anyway", "Working in OpenCode desktop", and the rules note. Worlds:
+  `/reset?opencode=running|restart|outdated|removed|failed`; `restart` refuses to start when an
+  OpenCode desktop app here bundles its service version (2.2.5), since the module would then
+  pick that app's CLI. `layout.spec.ts` polls a padding it read once (the Machines page draws
+  again as its checks come in).
+
+Left:
+- PR 9: the module still reads `/Applications/OpenCode.app` in tests (`desktopCLIs`; only the
+  webtest's and the window tests' guards keep the real CLI from being chosen): let tests set
+  the desktop folders. The remote D2 path between two real hopsesh (the mesh and OS-pair legs)
+  is not run; Go checks the code on the wire and Playwright the window with a mocked peer.
+  Whether OpenCode's TUI rings the bell or sends a notification when it waits was not checked
+  (it needs a model call): the real-agent job. The Windows real-window specs (`real/`) now see
+  OpenCode's demo sessions, with the stand-in first on PATH; not run here. `hopsesh serve` and
+  the app put the login shell's PATH first (`AdoptLoginPATH`), so a test that goes through
+  them on a machine with a real `opencode` (Homebrew's) would run it: tests call
+  `OpenTerminal` directly. The window's remote tabs (`remote_tabs.go`) have no fake peer in Go
+  tests: that `RestartService` reaches the request is checked by the mesh legs, and the window
+  side by Playwright against a mocked `/call`. The Machines page's "Plugin:" line (another
+  machine's) has no browser spec.
+- §7's other spec updates (`accounts*.spec.ts` tool cells, discovery, move targets, movement,
+  protection) were folded into `opencode.spec.ts` where they concern OpenCode; not covered yet:
+  a same-agent OpenCode move or one into an account folder, an OpenCode session's move targets,
+  an OpenCode original left as an old copy here, Change folder, Rename and Stop for an OpenCode
+  session, a return into OpenCode (D4), and "Open it on X, here" (`OpenOnMachine`) driven from
+  the done screen.
+- Not done: the quick access window shows no size; sorting by size mixes no units but puts
+  message counts last.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.

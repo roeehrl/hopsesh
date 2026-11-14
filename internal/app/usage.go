@@ -8,12 +8,14 @@ import (
 )
 
 // AgentUsage is how much one agent's sessions take on one machine: the session files its
-// listing sized (each copy where it is).
+// listing sized (each copy where it is), or, for an agent that keeps them in a database
+// (OpenCode), their messages.
 type AgentUsage struct {
 	Agent    agent.ID `json:"agent"`
 	Name     string   `json:"name"`
 	Sessions int      `json:"sessions"`
 	Bytes    int64    `json:"bytes"`
+	Messages int64    `json:"messages,omitempty"`
 }
 
 // Usage is what each agent's sessions on machine take, largest first.
@@ -32,6 +34,8 @@ func (inv *Inventory) Usage(machine string) []AgentUsage {
 		u.Sessions++
 		if e.SizeUnit == "" {
 			u.Bytes += e.Session.Size
+		} else if e.SizeUnit == SizeMessages && e.Session.Size > 0 {
+			u.Messages += e.Session.Size
 		}
 	}
 	for _, u := range by {

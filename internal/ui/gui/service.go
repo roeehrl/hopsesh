@@ -186,6 +186,12 @@ type AgentFacts struct {
 	Tools []ToolDTO `json:"tools"`
 	// HookReview: it runs a new hook only after the user approves it there (Codex).
 	HookReview bool `json:"hookReview"`
+	// Virtual: it keeps sessions in a database (agent.VirtualSessions: OpenCode), so a
+	// session's path is hopsesh's anchor, not a file to show.
+	Virtual bool `json:"virtual"`
+	// ServiceTurns: its turns run in its background service, so quitting its tab leaves a
+	// turn running (agent.Spec).
+	ServiceTurns bool `json:"serviceTurns"`
 	// ResumeAcrossAccounts: a session continues under another account (agent.Spec).
 	ResumeAcrossAccounts bool `json:"resumeAcrossAccounts"`
 	// RemoteControlTyped is what to type in a session to turn remote control on there.
@@ -204,7 +210,7 @@ type DesktopDTO struct {
 func agentFacts(m agent.Module, goos string) AgentFacts {
 	s := m.Spec()
 	f := AgentFacts{Short: s.Short(), Local: s.MainRoot().Name != "", Accounts: s.Accounts != nil, AppName: appicon.Name(s.Icon.Apps),
-		Tools: []ToolDTO{}, ResumeAcrossAccounts: s.ResumeAcrossAccounts}
+		Tools: []ToolDTO{}, ResumeAcrossAccounts: s.ResumeAcrossAccounts, ServiceTurns: s.ServiceTurns}
 	if d := s.Desktop; d != nil {
 		f.Desktop = &DesktopDTO{Tool: d.Tool, Product: d.Product, OwnSignIn: d.OwnSignIn, Shared: d.Shared}
 	}
@@ -218,6 +224,7 @@ func agentFacts(m agent.Module, goos string) AgentFacts {
 		f.Tools = accountTools(s)
 	}
 	f.HookReview = agent.ApprovesHooks(m)
+	f.Virtual = agent.IsVirtual(m)
 	if rc, ok := m.(agent.RemoteControlTyper); ok {
 		f.RemoteControlTyped = rc.RemoteControlInSession()
 	}

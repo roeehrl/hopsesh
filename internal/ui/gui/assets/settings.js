@@ -109,6 +109,8 @@ function general() {
   ];
 }
 
+const experimental = (name) => `hopsesh's ${name} support is new: some of what it does is checked only against the versions it was tested with`;
+
 function agents() {
   return s.agents.map((a) => {
     const caps = a.capabilities || [];
@@ -117,11 +119,13 @@ function agents() {
       h("div", { class: "set-row" },
         agentBadge(a.id, a.name),
         title(a.name, a.version ? `${a.version}${a.runtime === "app" ? " (built into the desktop app)" : ""} on ${sys.here}${a.folder ? " · " + a.folder : ""}` : `Not installed on ${sys.here}`),
-        a.stability === "experimental" ? h("span", { class: "chip st-warn" }, "experimental") : null,
+        a.stability === "experimental" ? h("span", { class: "chip st-warn", title: experimental(a.name) }, "experimental") : null,
         h("button", { class: "switch", role: "switch", "aria-checked": a.enabled ? "true" : "false", "aria-label": `${a.name} on`,
           onclick: () => set(!a.enabled, a.remoteControl, a.import, a.enabled ? `${a.name} is off` : `${a.name} is on`) })),
       h("div", { style: "display:flex;gap:5px;flex-wrap:wrap" }, caps.filter((c) => !c.startsWith("cloud-")).map((c) => CAPS[c] || c).sort().map((c) => h("span", { class: "cap" }, c))),
       (a.clouds || []).map((c) => cloudRow(a, c)),
+      // The chip's meaning as text too: a tooltip reaches neither the keyboard nor touch.
+      a.stability === "experimental" ? h("span", { class: "muted", style: "font-size:12px" }, "Experimental: " + experimental(a.name) + ".") : null,
       a.tested?.length ? h("span", { class: "muted", style: "font-size:12px" }, "Tested with " + a.tested.join(", ")) : null,
       a.enabled && caps.includes("remote-control") ? h("label", { class: "opt" }, h("input", { type: "checkbox", checked: a.remoteControl, onchange: (e) => set(true, e.target.checked, a.import, "Saved") }),
         h("span", {}, h("b", {}, `Turn on Remote Control for sessions hopped into ${a.name}`), h("span", { class: "muted" }, "Reach them from your phone or other machines. Needs the agent's own subscription login."))) : null,
@@ -194,8 +198,8 @@ function terminal() {
       state.info?.desktopManaged ? h("div",{class:"set-row"},title("When the main window closes", "Desktop presence controls keeping the app running. Quitting always asks before ending active terminal programs."),h("button",{class:"btn",onclick:()=>go("settings","desktop")},"Desktop presence…")) : sw("keepTabs", "Keep tabs when the window closes", "Used when Desktop presence has no explicit close preference. Closing the window hides it while programs keep running. Quitting hopsesh ends every program in its tabs; hopsesh asks first. For work that must outlive hopsesh, use Open in my terminal."),
       sw("closeEnded", "Close a tab when its program ends", "When it ends well (a hand-off's step once hopsesh has its link). A program that failed keeps its tab, so you can read why."),
       sw("notify", "Tell me when a program waits for me", sys.mac
-        ? "A notification when a tab you can't see waits for your answer. hopsesh writes the text; it never shows what the program printed. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications); hopsesh never changes Claude Code's settings for you."
-        : "The terminal's taskbar button flashes when a tab you can't see waits for your answer. Claude Code tells hopsesh it's waiting only if you turn on its terminal bell (/config → Notifications).")),
+        ? "A notification when a tab you can't see waits for your answer. hopsesh writes the text; it never shows what the program printed. A program says it's waiting by ringing the terminal's bell or sending a notification; Claude Code does so only if you turn on its terminal bell (/config → Notifications), and hopsesh never changes an agent's settings for you."
+        : "The terminal's taskbar button flashes when a tab you can't see waits for your answer. A program says it's waiting by ringing the terminal's bell or sending a notification; Claude Code does so only if you turn on its terminal bell (/config → Notifications).")),
     card(h("span", { class: "sec-h" }, "Look"),
       h("div", { class: "set-row" }, title("Font", `Fonts with box-drawing characters draw ${words(agentNames())} best. Empty: the system's monospace font.`),
         h("input", { class: "field", "aria-label": "Font", list: "term-fonts", value: ts.font, placeholder: sys.mac ? "SF Mono" : sys.win ? "Cascadia Mono" : "monospace", onchange: (e) => setTerm({ font: e.target.value.trim() }) }),
@@ -238,6 +242,11 @@ function skill() {
   if (sk.state && sk.state !== "absent" && sk.state !== "foreign") acts.push(h("button", { class: "btn", onclick: () => run(() => api("RemoveSkill", sk.state === "modified"), "Removed the hopsesh skill") }, "Remove"));
   acts.push(h("button", { class: "btn", onclick: preview }, "What it tells your agents"));
   const missing = rules.filter((r) => !r.present);
+  // An agent folder whose rules hopsesh's protection plugin applies (OpenCode's): without
+  // the plugin there, or with one the agent doesn't load, they are written but do nothing.
+  const pluginOf = (r) => (s.noticeHooks || []).find((x) => x.plugin && x.agent === r.agentId && (r.profile ? x.profile === r.profile : !x.profileLabel));
+  const unapplied = rules.filter((r) => { const x = r.present && pluginOf(r); return x && (!x.installed || x.trust?.state === "missing"); });
+  const why = [...new Set(unapplied.map((r) => pluginOf(r).installed ? "isn't loaded" : "isn't installed"))].sort().join(" or ");
   return [card(
     h("div", { class: "set-row" }, title("The hopsesh skill", "Teaches each installed agent to find your sessions, hop one here, continue it in another agent or send it on. It shows you the plan and acts only after you say yes."),
       chip(SKILL_TEXT[sk.state] || [sk.state, ""])),
@@ -252,6 +261,7 @@ function skill() {
       : missing.length && (sk.state === "current" || sk.state === "modified") ? h("div", { class: "set-row" },
         h("span", { class: "muted", style: "font-size:12px" }, missing.map((r) => r.agent).join(" and ") + " ask you before every hopsesh command."),
         h("button", { class: "btn", onclick: () => install(sk.state === "modified", true, "Agents can now list and plan without asking; hops still ask") }, "Allow read-only commands")) : null,
+    unapplied.length ? h("span", { class: "warn", style: "font-size:12px" }, `${unapplied.map((r) => r.agent).join(" and ")} ${unapplied.length === 1 ? "applies" : "apply"} these rules through hopsesh's plugin, which ${why}, so they have no effect there yet. ${why.includes("loaded") ? "Protection hooks (Settings › Machines) says why." : "Install the plugin under Protection hooks (Settings › Machines)."}`) : null,
     h("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, acts),
     h("span", { class: "muted mono", style: "font-size:11px" }, `runs ${s.skillBin}`))];
 }
@@ -457,17 +467,33 @@ const installHooks = (id, profile) => withCLI(() => api("InstallNoticeHooks", id
 function noticeSetup() {
   const hooks = s.noticeHooks || [];
   const off = s.original === "off";
-  const trustWords = (t) => !t ? "" : t.state === "trusted" ? " · trusted by the agent" : t.state === "needs-review" ? " · waiting for your approval in the agent" : t.state === "disabled" ? " · turned off in the agent" : t.state === "missing" ? " · not seen by the agent" : " · trust not verified";
+  // trustWords is what the agent says of an installed hook: trusted (Codex) or loaded (a
+  // plugin: OpenCode's), with the checks that failed and let it go on (a hook fails open).
+  const trustWords = (hook) => {
+    const t = hook.trust, app = agentName(hook.agent);
+    if (!t) return "";
+    const failed = t.failures ? ` · ${t.failures} failed check${t.failures === 1 ? "" : "s"}` : "";
+    if (hook.plugin) return (t.state === "trusted" ? " · loaded by " + app : t.state === "missing" ? " · not loaded by " + app : " · not confirmed loaded yet") + failed;
+    return (t.state === "trusted" ? " · trusted by the agent" : t.state === "needs-review" ? " · waiting for your approval in the agent" : t.state === "disabled" ? " · turned off in the agent" : t.state === "missing" ? " · not seen by the agent" : " · trust not verified") + failed;
+  };
+  const noun = (hook) => hook.plugin ? "plugin" : "hook";
+  const plugins = [...new Set(hooks.filter((x) => x.plugin).map((x) => agentName(x.agent)))];
   return card(h("span", {class:"sec-h"}, "Protection hooks"),
     h("span", {class:"muted"}, "Blocking and warnings work through a small hook each agent runs before a prompt. The hooks run the hopsesh command."
+      + plugins.map((n) => ` In ${n} it is a plugin, which ${n} loads by itself: it refuses a blocked session's tool calls (${n} can't refuse a prompt) and tells the agent why.`).join("")
       + localAgents().filter((a) => a.hookReview).map((a) => ` ${a.name} runs a new hook only after you approve it in ${a.name} (/hooks); hopsesh checks and tells you, and never approves hooks for you.`).join("")),
     s.noticeHooksError && s.cliReady ? h("span", {class:"warn"}, s.noticeHooksError) : null,
     !s.cliReady ? h("span", {class:"warn"}, "The hopsesh command is not installed; installing a hook installs it first.") : null,
     ...hooks.map(hook => h("div", {class:"set-row"},
-      title(hookName(hook, hooks), `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook.trust) : ""}${hook.reason ? " · " + hook.reason : ""}`),
+      title(hookName(hook, hooks) + (hook.plugin ? " plugin" : ""), `${hook.installed ? "Installed" : "Not installed"}${hook.installed ? trustWords(hook) : ""}${hook.outdated ? " · out of date" : ""}${hook.reason ? " · " + hook.reason : ""}`),
       hook.trust && hook.trust.state !== "trusted" && hook.trust.fix ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.fix) : null,
-      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),"Hook removed")}, "Remove hook")
-      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),"Hook installed")}, "Install hook"))),
+      (hook.trust?.failures || hook.trust?.state === "missing") && hook.trust.detail ? h("span", {class:"muted",style:"font-size:12px"}, hook.trust.detail) : null,
+      hook.installed && hook.outdated ? h("button", {class:"btn primary",disabled:off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),"Plugin updated")}, "Update plugin") : null,
+      // Installed, but the agent doesn't run it (and its own settings don't leave it out):
+      // installing it again may fix it.
+      hook.installed && !hook.outdated && hook.trust?.state === "missing" && !hook.trust.excluded ? h("button", {class:"btn primary",disabled:off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),hook.plugin ? "Plugin installed again" : "Hook installed again")}, `Install ${noun(hook)} again`) : null,
+      hook.installed ? h("button", {class:"btn",onclick:()=>run(()=>api("RemoveNoticeHooks",hook.agent,hook.profile),hook.plugin ? "Plugin removed" : "Hook removed")}, "Remove " + noun(hook))
+      : h("button", {class:"btn",disabled:!hook.supported || off,onclick:()=>run(()=>installHooks(hook.agent,hook.profile),hook.plugin ? "Plugin installed" : "Hook installed")}, "Install " + noun(hook)))),
     h("div", {style:"display:flex;gap:8px;flex-wrap:wrap"},
       h("button", {class:"btn",disabled:off,onclick:()=>run(()=>installHooks("",""),"Hooks installed")}, "Install all hooks"),
       h("button", {class:"btn",onclick:()=>run(()=>loadHookHealth(true))}, "Check again")));

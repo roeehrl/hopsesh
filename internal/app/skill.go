@@ -31,9 +31,12 @@ type SkillCopy struct {
 
 // RuleState is one agent's approval rules.
 type RuleState struct {
-	Agent   string `json:"agent"`
-	Path    string `json:"path"`
-	Present bool   `json:"present"`
+	Agent string `json:"agent"` // as people read it: "OpenCode (Work)"
+	// AgentID and Profile name the agent folder (Profile "" the default one).
+	AgentID agent.ID `json:"agentId"`
+	Profile string   `json:"profile,omitempty"`
+	Path    string   `json:"path"`
+	Present bool     `json:"present"`
 }
 
 // SkillReport is the skill and rules across every agent installed here.
@@ -45,9 +48,11 @@ type SkillReport struct {
 }
 
 type integration struct {
-	name string
-	in   agent.Install
-	ig   agent.Integration
+	name    string
+	id      agent.ID
+	profile string // an added account folder's id ("" the default folder)
+	in      agent.Install
+	ig      agent.Integration
 }
 
 // integrations are the installed agents' integration points on this machine.
@@ -67,7 +72,7 @@ func (a *App) integrations(ctx context.Context) []integration {
 		if err != nil || !in.Present && in.Binary == "" {
 			continue // not used on this machine
 		}
-		out = append(out, integration{name: mod.Spec().Name, in: in, ig: ig.Integration(h, in)})
+		out = append(out, integration{name: mod.Spec().Name, id: mod.Spec().ID, in: in, ig: ig.Integration(h, in)})
 		// Every account folder reads its own copy where the agent keeps skills per folder
 		// (Claude Code: <folder>/skills); copies in one place are one copy.
 		if mod.Spec().Accounts == nil {
@@ -85,7 +90,7 @@ func (a *App) integrations(ctx context.Context) []integration {
 			if err != nil {
 				continue
 			}
-			out = append(out, integration{name: mod.Spec().Name + " (" + p.Profile.Name + ")", in: p, ig: ig.Integration(ph, p)})
+			out = append(out, integration{name: mod.Spec().Name + " (" + p.Profile.Name + ")", id: mod.Spec().ID, profile: p.ProfileID(), in: p, ig: ig.Integration(ph, p)})
 		}
 	}
 	return out
@@ -107,7 +112,7 @@ func (a *App) Skill(ctx context.Context, files map[string][]byte, bin string) Sk
 		}
 		c.Agents = append(c.Agents, it.name)
 		if r := it.ig.Rules; r != nil {
-			rep.Rules = append(rep.Rules, RuleState{Agent: it.name, Path: r.Path, Present: rulesPresent(r, Rules(bin))})
+			rep.Rules = append(rep.Rules, RuleState{Agent: it.name, AgentID: it.id, Profile: it.profile, Path: r.Path, Present: rulesPresent(r, Rules(bin))})
 		}
 	}
 	rep.InSync, rep.State = true, integrate.Current

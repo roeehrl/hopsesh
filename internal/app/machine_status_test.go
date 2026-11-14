@@ -396,3 +396,36 @@ func TestGuardReadsTheHook(t *testing.T) {
 		t.Fatalf("no hopsesh there: the planner decides alone: %+v", g)
 	}
 }
+
+// A plugin the agent loads (OpenCode's) reads as a plugin: one the agent leaves out is
+// not hopsesh's to set up again (its own config or a policy removes it), one that failed
+// to load is, an older hopsesh's copy is offered for update, and checks that failed and
+// let a call through are counted.
+func TestPluginHookChecks(t *testing.T) {
+	h := MovementHookStatus{Agent: "opencode", Supported: true, Installed: true, Enabled: true, Plugin: true,
+		Trust: &agent.HookTrust{State: agent.HookMissing, Detail: "OpenCode doesn't load the hopsesh plugin", Fix: "Take the entry out", Excluded: true}}
+	if c := hookCheck(h, "OpenCode"); c.State != CheckWarn || c.Text != "installed, not loaded by OpenCode" || c.Fix != "" || !strings.Contains(c.Reason, "Take the entry out") {
+		t.Fatalf("not loaded: %+v", c)
+	}
+	failed := h
+	failed.Trust = &agent.HookTrust{State: agent.HookMissing, Detail: "OpenCode could not load the hopsesh plugin: no id", Fix: "Install hopsesh's hooks again."}
+	if c := hookCheck(failed, "OpenCode"); c.State != CheckWarn || c.Text != "installed, not loaded by OpenCode" || c.Fix != FixHooks || !strings.Contains(c.Reason, "could not load") {
+		t.Fatalf("failed to load (installing again may help): %+v", c)
+	}
+	h.Outdated = true
+	if c := hookCheck(h, "OpenCode"); c.Fix != FixHooks {
+		t.Fatalf("not loaded, out of date (an install may help): %+v", c)
+	}
+	h.Trust = &agent.HookTrust{State: agent.HookTrusted}
+	if c := hookCheck(h, "OpenCode"); c.State != CheckWarn || c.Text != "installed, out of date" || c.Fix != FixHooks {
+		t.Fatalf("out of date: %+v", c)
+	}
+	h.Outdated = false
+	if c := hookCheck(h, "OpenCode"); c.State != CheckOK || c.Text != "installed · loaded by OpenCode" {
+		t.Fatalf("loaded: %+v", c)
+	}
+	h.Trust = &agent.HookTrust{State: agent.HookTrusted, Failures: 2, Detail: "the plugin let 2 call(s) through"}
+	if c := hookCheck(h, "OpenCode"); c.State != CheckWarn || c.Text != "installed · 2 failed checks" || c.Reason != h.Trust.Detail {
+		t.Fatalf("failures: %+v", c)
+	}
+}

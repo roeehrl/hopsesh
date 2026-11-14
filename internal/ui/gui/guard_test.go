@@ -29,7 +29,7 @@ func TestCachedGuardDoesNotDeclareCurrentHooksMissingOrEffective(t *testing.T) {
 	e.Cached = false
 	set(nil)
 	// Not checked yet and no check running: unknown, saying so, never "checking".
-	if g := guardFor(core, e, nil); g.Checking || g.Effective || g.State != guardUnknown || g.Action != actionSettings || g.Problem == "" {
+	if g := guardFor(core, e, nil); g.Checking || g.Effective || g.State != guardUnknown || g.Action != actionMachines || g.Problem == "" {
 		t.Fatalf("unchecked hooks: %+v", g)
 	}
 	health.mu.Lock()
@@ -83,6 +83,19 @@ func TestHookProblemsUncheckedPlugin(t *testing.T) {
 	}
 	hooks[0].Trust = &agent.HookTrust{State: agent.HookMissing, Detail: "OpenCode could not load the hopsesh plugin: boom (err_1 in OpenCode's log)", Fix: "Install hopsesh's hooks again."}
 	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || !strings.Contains(got[0].Message, "err_1") || got[0].Fix == "" {
+		t.Fatalf("problems: %+v", got)
+	}
+	// Named as the plugin it is, in the agent's words.
+	hooks[0].Plugin = true
+	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || !strings.HasPrefix(got[0].Message, "OpenCode could not load the hopsesh plugin: boom") || !strings.HasSuffix(got[0].Message, "Until it does, originals are not protected.") {
+		t.Fatalf("problems: %+v", got)
+	}
+	hooks[0].Trust.Detail = ""
+	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || got[0].Message != "The agent does not load the hopsesh plugin, so originals are not protected." {
+		t.Fatalf("problems: %+v", got)
+	}
+	hooks[0].Installed = false
+	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || got[0].Message != "The protection plugin is not installed, so originals are not protected." || got[0].Fix != "Install the plugin in Settings › Machines." {
 		t.Fatalf("problems: %+v", got)
 	}
 }

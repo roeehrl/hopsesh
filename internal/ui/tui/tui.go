@@ -96,6 +96,9 @@ type model struct {
 	machines       machinesView
 	deps           Deps
 	copied         bool // the resume command was copied on the done screen
+	// restartAsk: the done screen asks whether to restart the agent's background service
+	// to open the session (move.Result.RestartsService, decision D2).
+	restartAsk     bool
 	mode           mode
 	width          int
 	height         int
@@ -883,8 +886,25 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.restartAsk {
+			m.restartAsk = false
+			if k != "y" && k != "Y" {
+				return m, nil
+			}
+			c, err := m.restartResume()
+			if err != nil {
+				m.err, m.mode = err, modeError
+				return m, nil
+			}
+			m.exit = &Exit{RunDir: c.Dir, RunArgv: c.Argv, Env: c.Env, Unset: c.Unset, Key: m.plan.Placement.Key, Title: m.plan.Title, Agent: m.plan.Agent}
+			return m, tea.Quit
+		}
 		switch k {
 		case "enter":
+			if len(m.plan.Resume.Argv) == 0 && m.result.RestartsService && (m.returnTo == nil || m.returnTo.Local) {
+				m.restartAsk = true // opening it would restart the agent's background service: ask
+				return m, nil
+			}
 			if len(m.plan.Resume.Argv) == 0 {
 				return m, tea.Quit // the target refused its resume command (a warning says why)
 			}
@@ -1620,6 +1640,19 @@ func comparisonLine(s string, limit int) string {
 	return s
 }
 
+// restartResume is the resume command of the session just moved or continued, made again
+// with the person's yes to restart the agent's background service (decision D2).
+func (m *model) restartResume() (agent.Command, error) {
+	key := m.plan.Placement.Key
+	o := m.plan.ResumeOptions()
+	o.RestartService = true
+	inv := m.inv
+	if inv == nil {
+		inv = &app.Inventory{}
+	}
+	return m.deps.App.Resume(inv, app.Entry{Cached: true, Location: agent.MachineLocation(app.LocalName()), Machine: app.LocalName(), Agent: key.Agent, Session: agent.Summary{Key: key}}, o)
+}
+
 func (m *model) viewDone(b *strings.Builder) {
 	p, res := m.plan, m.result
 	if p.NoWork {
@@ -1656,6 +1689,23 @@ func (m *model) viewDone(b *strings.Builder) {
 	}
 	if m.copied {
 		b.WriteString(okSt.Render("\n  Copied to the clipboard.") + "\n")
+	}
+	held := res.RestartsService && (m.returnTo == nil || m.returnTo.Local)
+	if held {
+		for _, w := range res.Warnings {
+			for _, line := range strings.Split(lipgloss.NewStyle().Width(max(m.width-6, 20)).Render(w), "\n") {
+				b.WriteString("  " + warnSt.Render(line) + "\n")
+			}
+		}
+	}
+	if m.restartAsk {
+		b.WriteString("\n  " + warnSt.Render("Restart "+p.Agent+"'s background service and open it? Its windows reconnect; a turn it is running now stops.") + "\n")
+		b.WriteString(dim.Render("\n  y: restart it and open · any other key: not now\n"))
+		return
+	}
+	if held {
+		b.WriteString(dim.Render("\n  enter: open it (asks before restarting " + p.Agent + "'s background service) · c: copy the command · q: quit (undo with: hopsesh undo " + res.Journal + ")\n"))
+		return
 	}
 	if m.returnTo != nil && !m.returnTo.Local {
 		b.WriteString(dim.Render("\n  c: copy the command to run on destination · q: quit (undo with: hopsesh undo " + res.Journal + ")\n"))

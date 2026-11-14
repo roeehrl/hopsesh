@@ -3,7 +3,7 @@
 // open, the end of its conversation (safe, locally rendered Markdown), and its
 // repository, copies and details, which open and close app-wide.
 import { role, chip as roleChip, isOldCopy, oldCopiesOf } from "./guard.js";
-import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, bytes, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $, accountShown, copyEntry, agentInfo, agentShort, isAppPlace } from "./core.js";
+import { accountLabel, accountTitle, api, h, fill, icon, ICONS, state, sys, here, ago, when, sizeOf, agentBadge, cloudOf, cloudTitle, count, path, rich, fail, toast, dialog, errText, cap, $, accountShown, copyEntry, agentInfo, agentShort, isAppPlace } from "./core.js";
 import { selectDestination, model, statusLine, placeName, showPlace, placeCount, onInspector, liveOf, appWord } from "./actions.js";
 import { openMenu, isOpen, openEl, closeAll } from "./menu.js";
 import { sectionOpen, setSection } from "./layout.js";
@@ -374,8 +374,8 @@ function details(e) {
   return section("details", "Details", false, null, h("dl", { class: "kv wide" },
     kv("Session ID", h("span", { class: "id-line" }, h("span", { class: "mono", style: "font-size:11.5px" }, id),
       h("button", { class: "btn small", "aria-label": "Copy session ID", onclick: async () => { await api("CopyText", id); toast("Copied the session ID"); } }, "Copy"))),
-    kv("File", e.path ? path(e.path, 11) : null),
-    kv("Size", e.sizeKB ? bytes(e.sizeKB * 1024) : null),
+    kv("File", e.path && !agentInfo(e.agent)?.virtual ? path(e.path, 11) : null),
+    kv("Size", sizeOf(e) || null),
     kv("Agent", [e.agentName, e.agentVersion ? " " + e.agentVersion : ""].join("")),
     kv("Machine", e.cloud ? cloudTitle(e.machine) : e.machine === here() ? `${e.machine} (${sys.here})` : e.machine),
     kv("Last active", e.lastActive ? when(e.lastActive) : null)));
@@ -404,7 +404,7 @@ export function inspector(e, previous=null) {
   const signature=JSON.stringify([item,{...group,entries:undefined},statusLine(e),m.primary?.label,m.primary?.disabled,state.info?.previews,state.info?.agents,[...tabs.values()].filter(t=>t.machine===e.machine&&t.key===e.key).map(t=>[t.id,t.state,t.attention]),copies]);
   const same=previous?.dataset.key===e.machine+"\u0000"+e.key;
   if(same && previous.dataset.signature===signature) return previous;
-  const conversationKey=JSON.stringify([e.machine,e.key,e.lastActive,e.sizeKB,e.canPreview,state.info?.previews]);
+  const conversationKey=JSON.stringify([e.machine,e.key,e.lastActive,e.sizeKB,e.messages,e.canPreview,state.info?.previews]);
   const retained=same && previous.dataset.conversationKey===conversationKey ? previous.querySelector('#sec-conversation')?.parentElement : null;
   const journey = () => { setSection("copies", true); refresh(e); $("#sec-copies")?.scrollIntoView({block:"nearest"}); };
   return h("aside", { class: "inspector", id: "inspector", "aria-label": e.cloud ? `Cloud ${e.cloud.noun || "session"} details` : "Session details", "data-key": e.machine + "\u0000" + e.key, "data-signature":signature, "data-conversation-key":conversationKey },

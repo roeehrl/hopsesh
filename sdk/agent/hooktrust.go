@@ -44,4 +44,9 @@ type HookTrust struct {
 	// open), where the agent keeps that count (OpenCode's plugin); Detail then says when
 	// the last one was and why.
 	Failures int `json:"failures,omitempty"`
+	// Excluded marks a missing hook that the agent leaves out by its own settings (a
+	// config entry or a policy removes OpenCode's plugin), or has not reloaded since it
+	// was installed: installing it again does not change that. Another missing hook (one
+	// that failed to load, or another of the same name runs) is installed again.
+	Excluded bool `json:"excluded,omitempty"`
 }

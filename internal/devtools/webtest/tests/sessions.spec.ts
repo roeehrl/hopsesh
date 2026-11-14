@@ -13,6 +13,7 @@ test("machine sidebar subtitles show detected agents consistently even without s
     const local = body.result.machines.find((m: any) => m.local);
     expect(local.agentNames).toContain("Claude Code");
     expect(local.agentNames).toContain("Codex");
+    expect(local.agentNames).toContain("OpenCode");
     body.result.groups = [];
     body.result.total = 0;
     body.result.machines = [local,
@@ -26,7 +27,7 @@ test("machine sidebar subtitles show detected agents consistently even without s
   await expect(page.getByRole("heading", { name: "All sessions" })).toBeVisible();
   const local = sidebar(page).getByRole("button", { name: /^This (Mac|PC|computer)/ });
   const remote = sidebar(page).getByRole("button", { name: /^other-mac/ });
-  await expect(local.locator("small")).toHaveText("Claude Code, Codex");
+  await expect(local.locator("small")).toHaveText("Claude Code, Codex, OpenCode");
   await expect(remote.locator("small")).toHaveText("Claude Code, Codex");
   await expect(remote.locator("small")).toHaveAttribute("title", "Claude Code 2.1.288, Codex 0.160.1");
   await expect(remote).not.toContainText(/darwin|hopsesh 0.4.0/);
@@ -39,17 +40,17 @@ test("machine sidebar subtitles show detected agents consistently even without s
 test("lists sessions by repository, in one tree, with their agents and states", async ({ page }) => {
   await expect(page.getByRole("tree", { name: "Sessions" })).toHaveCount(1);
   await expect(group(page, "demo")).toHaveAttribute("aria-expanded", "true");
-  await expect(group(page, "demo")).toHaveAttribute("aria-label", /^demo, 2 sessions/);
+  await expect(group(page, "demo")).toHaveAttribute("aria-label", /^demo, 5 sessions/);
   await expect(row(page, "Find the codeword")).toBeVisible();
   await expect(row(page, "Find the codeword")).toHaveAttribute("aria-level", "2");
   await expect(row(page, "What is the codeword in notes.txt?")).toBeVisible();
   await expect(group(page, "Outside a git checkout")).toBeVisible();
-  await expect(sidebar(page).getByRole("button", { name: /All sessions/ })).toContainText("4");
+  await expect(sidebar(page).getByRole("button", { name: /All sessions/ })).toContainText("7");
   // Places only: no agents, no "In the cloud".
-  await expect(sidebar(page).getByRole("button", { name: /^CO?\s*Codex|^CC?\s*Claude Code/ })).toHaveCount(0);
-  await expect(sidebar(page).getByRole("button", { name: /^This (Mac|PC|computer)/ })).toContainText("4");
+  await expect(sidebar(page).getByRole("button", { name: /^CO?\s*Codex|^CC?\s*Claude Code|^O?C?\s*OpenCode/ })).toHaveCount(0);
+  await expect(sidebar(page).getByRole("button", { name: /^This (Mac|PC|computer)/ })).toContainText("7");
   await expect(row(page, "Find the codeword").locator(".chip.st-ended")).toHaveText("Ended");
-  await expect(page.locator("#list-count")).toHaveText("4 sessions");
+  await expect(page.locator("#list-count")).toHaveText("7 sessions");
 });
 
 test("the details pane: a status line, one action row, the conversation and the repository", async ({ page }) => {
@@ -121,7 +122,7 @@ test("the keyboard moves through the tree: rows and group headers, ← and → c
   await page.keyboard.press("ArrowRight");
   await expect(demo).toHaveAttribute("aria-expanded", "true");
   await page.keyboard.press("ArrowRight");
-  await expect(row(page, "What is the codeword in notes.txt?")).toBeFocused();
+  await expect(row(page, "part rows")).toBeFocused(); // the newest: an OpenCode session
   // ⌥← (Ctrl+← on Windows and Linux) closes every group, * opens them all.
   const mac = await page.evaluate(() => document.documentElement.dataset.os === "darwin");
   await page.keyboard.press(mac ? "Alt+ArrowLeft" : "Control+ArrowLeft");
@@ -358,7 +359,7 @@ test("the palette finds a session and shows it; its action is on mod+Enter", asy
   await page.locator("#btn-filter").click();
   await page.getByRole("menuitemcheckbox", { name: /^Moved/ }).click();
   await page.keyboard.press("Escape");
-  await expect(page.locator("#list-count")).toHaveText("1 of 4");
+  await expect(page.locator("#list-count")).toHaveText("1 of 7");
   await page.getByRole("button", { name: "Search sessions or run a command" }).click();
   const input = page.getByRole("combobox", { name: "Search sessions or run a command" });
   await input.fill("codeword notes");
@@ -370,7 +371,7 @@ test("the palette finds a session and shows it; its action is on mod+Enter", asy
   const r = row(page, "What is the codeword in notes.txt?");
   await expect(r).toHaveAttribute("aria-selected", "true");
   await expect(r).toBeInViewport();
-  await expect(page.locator("#list-count")).toHaveText("4 sessions");
+  await expect(page.locator("#list-count")).toHaveText("7 sessions");
   await expect(details(page).getByRole("heading", { name: "What is the codeword in notes.txt?" })).toBeVisible();
   // The palette lists the session's actions from all three menus.
   await page.getByRole("button", { name: "Search sessions or run a command" }).click();

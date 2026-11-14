@@ -80,6 +80,8 @@ type AgentSetup struct {
 	Folder  string `json:"folder,omitempty"`
 	Hook    Check  `json:"hook"`
 	Skill   Check  `json:"skill"`
+	// Plugin: the agent's hook is a plugin it loads (OpenCode), not a hook in its settings.
+	Plugin bool `json:"plugin,omitempty"`
 }
 
 // MachineStatus is what hopsesh can do on one machine.
@@ -720,7 +722,7 @@ func (a *App) protectionSetups(p Protection, m *Machine) []AgentSetup {
 			continue
 		}
 		index[key] = len(out)
-		out = append(out, AgentSetup{Agent: h.Agent, Name: a.agentName(h.Agent), Profile: h.Profile, ProfileLabel: h.ProfileLabel, Hook: hookCheck(h, a.agentName(h.Agent)), Skill: Check{State: CheckUnknown, Text: "not checked"}})
+		out = append(out, AgentSetup{Agent: h.Agent, Name: a.agentName(h.Agent), Profile: h.Profile, ProfileLabel: h.ProfileLabel, Hook: hookCheck(h, a.agentName(h.Agent)), Plugin: h.Plugin, Skill: Check{State: CheckUnknown, Text: "not checked"}})
 	}
 	// The skill report names the agents each copy serves ("Claude Code", "Claude Code (work)").
 	for _, c := range p.Skill.Copies {
@@ -782,9 +784,26 @@ func hookCheck(h MovementHookStatus, name string) Check {
 		// Turned off by the agent, or protection of originals is off in hopsesh there (no
 		// reason): either way it blocks nothing.
 		return Check{State: CheckWarn, Text: "installed, turned off", Reason: nonEmptyStr(h.Reason, "protection of originals is off in hopsesh there")}
+	case h.Trust != nil && h.Trust.State == agent.HookMissing && h.Trust.Excluded && !h.Outdated:
+		// The agent leaves the plugin out: its own config or a policy removes it (or it
+		// has not reloaded it yet), which installing again does not change, so there is
+		// nothing for hopsesh to set up. One that failed to load is installed again below.
+		return Check{State: CheckWarn, Text: "installed, not loaded by " + name, Reason: strings.TrimSpace(nonEmptyStr(h.Trust.Detail, name+" doesn't load it") + " " + h.Trust.Fix)}
 	case h.Trust != nil && h.Trust.State == agent.HookMissing:
 		// Installed, but the agent does not run it (it does not list it, or did not load it).
-		return Check{State: CheckWarn, Text: "installed, not running in " + name, Reason: nonEmptyStr(h.Trust.Detail, name+" doesn't run it"), Fix: FixHooks}
+		text := "installed, not running in " + name
+		if h.Plugin {
+			text = "installed, not loaded by " + name
+		}
+		return Check{State: CheckWarn, Text: text, Reason: strings.TrimSpace(nonEmptyStr(h.Trust.Detail, name+" doesn't run it") + " " + h.Trust.Fix), Fix: FixHooks}
+	case h.Outdated:
+		// An older hopsesh's plugin (or an edited one) still runs; installing replaces it.
+		return Check{State: CheckWarn, Text: "installed, out of date", Reason: "the plugin's files are an older hopsesh's (or edited); setting up the hooks again replaces them", Fix: FixHooks}
+	case h.Trust != nil && h.Trust.State == agent.HookTrusted && h.Trust.Failures > 0:
+		// It runs, but some of its checks failed and let the agent go on (a hook fails open).
+		return Check{State: CheckWarn, Text: fmt.Sprintf("installed · %d failed check%s", h.Trust.Failures, map[bool]string{true: "", false: "s"}[h.Trust.Failures == 1]), Reason: h.Trust.Detail}
+	case h.Trust != nil && h.Trust.State == agent.HookTrusted && h.Plugin:
+		return Check{State: CheckOK, Text: "installed · loaded by " + name}
 	case h.Trust != nil && h.Trust.State == agent.HookTrusted:
 		return Check{State: CheckOK, Text: "installed · trusted"}
 	}
@@ -841,8 +860,9 @@ func (a *App) fileSetups(ctx context.Context, hm *host.Machine, m *Machine) []Ag
 			continue
 		}
 		if hi, ok := mod.(agent.MovementHookIntegrator); ok {
-			if c, ok := remoteHooks(fsys, h.Path(), hi.MovementHooks(h, in, bin), agent.ApprovesHooks(mod)); ok {
-				as.Hook = c
+			hooks := hi.MovementHooks(h, in, bin)
+			if c, ok := remoteHooks(fsys, h.Path(), hooks, agent.ApprovesHooks(mod)); ok {
+				as.Hook, as.Plugin = c, hooks.Dir != nil
 			}
 		}
 		if ig, ok := mod.(agent.Integrator); ok {
