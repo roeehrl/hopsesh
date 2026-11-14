@@ -1561,7 +1561,8 @@ folder's own config gets its own plugin, its argv naming the folder). Decisions 
   showing that place would open the session's own agent's app; a "Running in OpenCode" label is
   PR 8's copy. A Linux desktop app has no detection (`accounts_view.go` and
   `movement_hooks.go` accept only `.app` or `.exe`); the plugin floor is still judged by the
-  program's version, not the running service's (PR 6's note).
+  program's version, not the running service's (PR 6's note): left for PR 9, whose real-agent
+  job is the first to run a service of another version than the program.
 - **Stand-in.** It plays `service get|set|unset port` over `{config}/service.json` (OpenCode's
   file); setting or unsetting stops a service registered in that state folder, which it logs
   ("opencode: stopped the background service"), and a started service takes the port set.
@@ -1613,6 +1614,23 @@ folder's own config gets its own plugin, its argv naming the folder). Decisions 
   (names, sizes and times listed before and after; no contents read); only files the running
   OpenCode desktop app and Codex app write themselves changed. The harness was not committed
   (PR 9).
+- **Real-binary check after the reviews** (the same guard, on a fresh copy of the sandbox):
+  `accounts add` gave Work and Home ports 49375 and 49376 (read back; `service.json` held only
+  the port; `cli.json`'s display settings copied, its plugin options and `opencode.json` not);
+  `opencode debug paths` with Work's variables named only folders inside it; `hopsesh accounts
+  login <Work> --run` ran `opencode auth login --standalone` with Work's variables, which the
+  real program accepted and ended, without a terminal, with OpenCode's "Pass an integration ID
+  or name" before connecting to anything; a session went into Work (`session list --standalone`
+  there listed it) and another into Home, undone (`session delete --standalone`); `notices
+  install` put the plugin in the three config folders, each argv naming its folder; the hook
+  blocked the default original and let the Work copy run, and once the Work copy was continued
+  in Claude Code, blocked it with the scan's notes removed. 31 commands reached the real binary
+  (7 `--version`, 13 `auth list --standalone`, 1 `auth login --standalone`, 1 `debug paths`, 2
+  `service set port`, 2 `service get port`, 2 `session import --standalone`, 1 `session delete
+  --standalone`, 2 `session list --standalone`); 21 `service status` were answered by the guard.
+  The same folders outside the scratch folder were unchanged but for what the running OpenCode
+  desktop app (its hourly log), Codex and Claude Code write themselves; the desktop app's
+  service kept its process.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
