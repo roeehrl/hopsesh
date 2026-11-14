@@ -90,13 +90,23 @@ const (
 // Error is a failure the other end reported. A protocol mismatch also says which protocol
 // and hopsesh the answering end has (hopsesh 0.3 and older sent neither).
 type Error struct {
-	Code     string `json:"code"`
-	Message  string `json:"message"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	// Reason is Message without what it tells a hopsesh that does not know Code to do
+	// (CodeRestartsService: how to agree on that machine instead); "" when that is all of
+	// Message. A hopsesh that knows the code asks or says what to do itself.
+	Reason   string `json:"reason,omitempty"`
 	Protocol int    `json:"protocol,omitempty"`
 	Version  string `json:"version,omitempty"`
 }
 
-func (e *Error) Error() string { return e.Message }
+// Error is the Reason when there is one: what this hopsesh, which knows every code, shows.
+func (e *Error) Error() string {
+	if e.Reason != "" {
+		return e.Reason
+	}
+	return e.Message
+}
 
 // ErrProtocol and ErrRefused classify an Error with errors.Is.
 var (

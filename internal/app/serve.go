@@ -203,7 +203,7 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 		}
 		cmd, err := a.Resume(inv, e, agent.ResumeOptions{RestartService: req.RestartService})
 		if err != nil {
-			return t, remoteRestart(err)
+			return t, remoteRestart(err, req.Kind)
 		}
 		if err := release(); err != nil {
 			return t, err
@@ -218,7 +218,7 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 	case peer.TerminalNew:
 		cmd, err := a.NewSessionCommand(ctx, req.Agent, req.Profile, req.Dir, req.RestartService)
 		if err != nil {
-			return t, remoteRestart(err)
+			return t, remoteRestart(err, req.Kind)
 		}
 		c, t.Title, t.Dir = cmd, "New "+mod.Spec().Name+" session", cmd.Dir
 	default:
@@ -244,13 +244,18 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 
 // remoteRestart is a refusal to restart the agent's background service (decision D2) for
 // a request from another machine: coded so hopsesh there asks the person and sends the
-// request again with their yes (TerminalRequest.RestartService), and saying how to agree
-// here for an older hopsesh there, which cannot ask.
-func remoteRestart(err error) error {
-	if errors.Is(err, agent.ErrRestartsService) {
-		return &peer.Error{Code: peer.CodeRestartsService, Message: fmt.Sprintf("%v. An older hopsesh on the machine you opened it from cannot ask about it: then, on %s, open the session with hopsesh open --restart-service", err, LocalName())}
+// request again with their yes (TerminalRequest.RestartService). Its Message also says
+// how to agree here, for an older hopsesh there, which cannot ask; its Reason does not.
+func remoteRestart(err error, kind string) error {
+	if !errors.Is(err, agent.ErrRestartsService) {
+		return err
 	}
-	return err
+	how := "open the session with hopsesh open --restart-service"
+	if kind == peer.TerminalNew {
+		how = "start the session there yourself"
+	}
+	return &peer.Error{Code: peer.CodeRestartsService, Reason: err.Error(),
+		Message: fmt.Sprintf("%v. The hopsesh you asked from is too old to ask about it: on %s, %s", err, LocalName(), how)}
 }
 
 // NewSessionCommand starts a new session of an agent in dir, signed in as the account of

@@ -740,6 +740,9 @@ func (s *clientSession) terminal(ctx context.Context, p clientapi.TerminalParams
 		if strings.HasPrefix(err.Error(), MovedOriginal) {
 			return nil, &clientapi.Error{Code: clientapi.CodeBlocked, Message: err.Error(), Fix: "continue the copy it moved to, or ask again with anyway"}
 		}
+		if errors.Is(err, agent.ErrRestartsService) {
+			return nil, &clientapi.Error{Code: clientapi.CodeBlocked, Message: err.Error(), Fix: "ask the user, then ask again with restartService (a turn the service runs for another window stops)"}
+		}
 		return nil, err
 	}
 	return &clientapi.Terminal{ID: t.ID, Title: t.Title, Dir: t.Dir, State: t.State, Started: t.Started}, nil
@@ -747,7 +750,7 @@ func (s *clientSession) terminal(ctx context.Context, p clientapi.TerminalParams
 
 func terminalResume(k agent.SessionKey, p clientapi.TerminalParams) peer.TerminalRequest {
 	return peer.TerminalRequest{Kind: peer.TerminalResume, Agent: k.Agent, Profile: k.Profile, Session: string(k.Session),
-		Cols: p.Cols, Rows: p.Rows, Anyway: p.Anyway}
+		Cols: p.Cols, Rows: p.Rows, Anyway: p.Anyway, RestartService: p.RestartService}
 }
 
 // setup sets hopsesh up on a machine, as hopsesh hosts setup does, sending each step.

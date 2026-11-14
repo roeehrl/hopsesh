@@ -294,6 +294,10 @@ type TerminalParams struct {
 	Rows    int    `json:"rows,omitempty"`
 	// Anyway continues a copy a move left behind; the user confirmed it.
 	Anyway bool `json:"anyway,omitempty"`
+	// RestartService lets the agent restart its background service to open the session,
+	// when no program of the service's version is here (OpenCode); the user agreed, since
+	// a turn it runs for another window stops.
+	RestartService bool `json:"restartService,omitempty"`
 }
 
 // Terminal is a terminal hopsesh runs (attach with hopsesh terminals attach <id>).

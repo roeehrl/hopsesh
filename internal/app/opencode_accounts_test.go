@@ -226,20 +226,34 @@ func exe() string {
 }
 
 // A request from another machine that would restart the agent's service is refused with a
-// code, so hopsesh there asks and sends it again with the yes (an older one cannot ask: the
-// refusal says how to agree on this machine). Other errors pass as they are.
+// code, so hopsesh there asks and sends it again with the yes. An older one, which cannot
+// ask, reads the message, which says how to agree on this machine; a current one shows
+// only the reason. Other errors pass as they are.
 func TestRemoteRestartSaysHowToAgree(t *testing.T) {
-	err := remoteRestart(fmt.Errorf("opening it: %w", agent.ErrRestartsService))
-	if !errors.Is(err, agent.ErrRestartsService) || !strings.Contains(err.Error(), "hopsesh open --restart-service") || !strings.Contains(err.Error(), LocalName()) {
+	err := remoteRestart(fmt.Errorf("opening it: %w", agent.ErrRestartsService), peer.TerminalResume)
+	var pe *peer.Error
+	if !errors.Is(err, agent.ErrRestartsService) || !errors.As(err, &pe) || !strings.Contains(pe.Message, "hopsesh open --restart-service") || !strings.Contains(pe.Message, LocalName()) {
 		t.Fatalf("%v", err)
 	}
-	// As the other machine reads it: the code survives the wire.
+	if err.Error() != "opening it: "+agent.ErrRestartsService.Error() {
+		t.Fatalf("a current hopsesh reads the hint for an older one: %q", err.Error())
+	}
+	// As the other machine reads it: the code and the reason survive the wire, and an
+	// older hopsesh (which knows neither) gets the message with the hint.
 	b, _ := json.Marshal(err)
 	var got peer.Error
-	if json.Unmarshal(b, &got) != nil || got.Code != peer.CodeRestartsService || !errors.Is(&got, agent.ErrRestartsService) {
+	if json.Unmarshal(b, &got) != nil || got.Code != peer.CodeRestartsService || !errors.Is(&got, agent.ErrRestartsService) || got.Error() != err.Error() {
 		t.Fatalf("on the wire: %s", b)
 	}
-	if other := errors.New("x"); remoteRestart(other) != other {
+	var old struct{ Code, Message string }
+	if json.Unmarshal(b, &old) != nil || !strings.Contains(old.Message, "--restart-service") {
+		t.Fatalf("an older hopsesh: %s", b)
+	}
+	// A new session is not opened with hopsesh open.
+	if err := remoteRestart(agent.ErrRestartsService, peer.TerminalNew); !errors.As(err, &pe) || strings.Contains(pe.Message, "hopsesh open") || !strings.Contains(pe.Message, "start the session there yourself") {
+		t.Fatalf("a new session: %+v", pe)
+	}
+	if other := errors.New("x"); remoteRestart(other, peer.TerminalResume) != other {
 		t.Fatal("another error was changed")
 	}
 }
