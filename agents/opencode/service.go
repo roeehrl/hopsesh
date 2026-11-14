@@ -326,6 +326,9 @@ func desktopCLIs(h agent.Host) []desktopCLI {
 	}
 	var out []desktopCLI
 	for _, app := range desktopApps {
+		if !strings.HasPrefix(app, "~/") && !agent.SystemPrograms() {
+			continue // a test: never this machine's real desktop app
+		}
 		app = agent.Expand(app, h.Facts().Home, nil, h.Path())
 		res := h.Path().Join(app, "Contents", "Resources")
 		b, err := h.FS().ReadFile(h.Path().Join(res, "opencode-cli.version"), 1<<10)

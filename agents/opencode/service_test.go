@@ -196,6 +196,7 @@ func resumeOn(t *testing.T, fh agent.Host, sid string) (agent.Command, error) {
 }
 
 func TestResumeProgramMatchesTheService(t *testing.T) {
+	t.Setenv("HOPSESH_APP_RUNTIMES", "on") // a fake host's /Applications: nothing real is found or run
 	stagedHost := func(t *testing.T) (*osHost, *fakeOpenCode) {
 		fh, f := newMachine(t, setup{})
 		f.status, f.version = serviceURL, "2.2.7"
