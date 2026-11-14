@@ -14,6 +14,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
 	"github.com/roeehrl/hopsesh/internal/core/repos"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -205,10 +206,30 @@ func (a *App) ChangeDir(ctx context.Context, c *DirChange) (string, error) {
 	}
 	j.AddKey(e.Session.Key)
 	jh, err := m.host.For(ctx, mod.Spec(), in, j)
+	// A session kept in a database: its file is an anchor, which does not change when the
+	// session is used, so its stamp guards undo. The change is journaled before it is made,
+	// at the stamp then, and the stamp it leaves is recorded after it.
+	virtual := c.Plan.Method == agent.DirAgent && agent.IsVirtual(mod)
+	if err == nil && virtual {
+		var st agent.SessionStamp
+		if st, _, err = move.StampNow(ctx, mod, h, in, e.Session.Key); err == nil {
+			err = j.ChangedSessionDir(m.Name, e.Session.Key, c.Plan.Main, c.Plan.From, c.Plan.To, st)
+		}
+	}
 	if err == nil {
 		err = c.mod.ChangeDir(ctx, jh, in, e.Session, c.Plan)
 	}
-	if err == nil && c.Plan.Method == agent.DirAgent {
+	switch {
+	case err != nil:
+	case virtual:
+		var st agent.SessionStamp
+		if st, _, err = move.StampNow(ctx, mod, h, in, e.Session.Key); err == nil {
+			err = j.RestampSessionDir(m.Name, e.Session.Key, st)
+		}
+		if err != nil {
+			err = fmt.Errorf("the session's folder changed, but hopsesh could not record its state after the change, so undoing it will need force: %w", err)
+		}
+	case c.Plan.Method == agent.DirAgent:
 		err = j.ChangedDir(host.LocalFS(), m.Name, e.Session.Key, c.Plan.Main, c.Plan.From, c.Plan.To)
 	}
 	if err == nil && c.Plan.Main != e.Session.Path {
@@ -275,8 +296,9 @@ func (a *App) WaitChangedDir(ctx context.Context, c *DirChange, interval time.Du
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
-		// The main file's new place is cheap to watch; a listing confirms the folder.
-		if _, err := h.FS().Stat(c.Plan.Main); err == nil {
+		// The main file's new place is cheap to watch; a listing confirms the folder. A
+		// session kept in a database has an anchor that need not be there: list it.
+		if _, err := h.FS().Stat(c.Plan.Main); err == nil || agent.IsVirtual(mod) {
 			if got, err := folderOf(ctx, mod, h, c.in, c.Entry.Session.Key); err == nil && got == c.Plan.To {
 				if a.Audit != nil {
 					a.Audit.Write(audit.Entry{Action: "cd", Host: c.m.Name, Session: c.Entry.Session.Key.String(), Detail: map[string]any{"ok": true, "to": c.Plan.To, "method": "in-session"}})

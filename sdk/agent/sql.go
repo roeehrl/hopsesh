@@ -22,6 +22,12 @@ type SQLHost interface {
 // vacuums. db is the database file's absolute path. The confined Host a module gets lets it
 // read only its Spec's SQLTables, from the files its SQLFiles name, and gives each call
 // at most DefaultSQLTimeout (less when ctx ends sooner).
+//
+// A database file that is not there is ErrNotInstalled: ErrNotFound is left to the module
+// for a session the database does not hold, since the core takes it to mean the session
+// was deleted. A read the machine's tools cannot do (another machine's WAL database that
+// no program has open, which its SQLite cannot open read only) is ErrUnsupported: the
+// module then reads with its agent's own program.
 type SQL interface {
 	// Query runs one SELECT and returns its rows, refusing more than the default limits.
 	Query(ctx context.Context, db, q string, args ...any) (Rows, error)

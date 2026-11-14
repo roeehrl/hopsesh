@@ -1,12 +1,15 @@
 package journal
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Receipt is a durable commit intention after native installation. Recovery replays
@@ -16,7 +19,14 @@ type Receipt struct {
 	Path    string `json:"path"`
 	Body    []byte `json:"body"`
 	Native  *State `json:"native,omitempty"`
-	Applied bool   `json:"applied"`
+	// Session and Stamp guard a receipt beside a session an agent keeps in a database (its
+	// file is an anchor, which does not change when the session is used).
+	Session *agent.SessionKey  `json:"session,omitempty"`
+	Stamp   agent.SessionStamp `json:"stamp,omitempty"`
+	Applied bool               `json:"applied"`
+	// Stale: its session was gone when it was recovered (deleted since), so it was dropped
+	// unwritten; Applied is then true too.
+	Stale bool `json:"stale,omitempty"`
 }
 
 func (j *Journal) WriteReceipt(fsys host.FS, machine, path string, body []byte, guardNative bool) error {
@@ -31,6 +41,19 @@ func (j *Journal) WriteReceipt(fsys host.FS, machine, path string, body []byte, 
 		}
 		receipt.Native = &st
 	}
+	return j.writeReceipt(fsys, receipt)
+}
+
+// WriteSessionReceipt is WriteReceipt beside a session an agent keeps in a database: its
+// stamp now, not its file, guards a later recovery.
+func (j *Journal) WriteSessionReceipt(fsys host.FS, machine, path string, body []byte, key agent.SessionKey, stamp agent.SessionStamp) error {
+	if stamp == "" {
+		return fmt.Errorf("cannot guard a receipt without the session's stamp")
+	}
+	return j.writeReceipt(fsys, Receipt{Machine: machine, Path: path, Body: body, Session: &key, Stamp: stamp})
+}
+
+func (j *Journal) writeReceipt(fsys host.FS, receipt Receipt) error {
 	j.mu.Lock()
 	index := len(j.Receipts)
 	j.Receipts = append(j.Receipts, receipt)
@@ -52,13 +75,42 @@ func (j *Journal) WriteReceipt(fsys host.FS, machine, path string, body []byte, 
 	return err
 }
 func (j *Journal) RecoverReceipts(fsFor func(string) (host.FS, error)) error {
+	return j.RecoverReceiptsWith(context.Background(), Files(fsFor))
+}
+
+// RecoverReceiptsWith is RecoverReceipts that also checks the stamps of sessions kept in a
+// database, through r.Sessions.
+func (j *Journal) RecoverReceiptsWith(ctx context.Context, r Reach) error {
 	for i, receipt := range j.Receipts {
 		if receipt.Applied {
 			continue
 		}
-		fsys, err := fsFor(receipt.Machine)
+		fsys, err := r.fs(receipt.Machine)
 		if err != nil {
 			return err
+		}
+		if receipt.Session != nil {
+			if r.Sessions == nil {
+				return fmt.Errorf("the %s session %s cannot be checked from here; acknowledgement remains pending", receipt.Session.Agent, receipt.Session.Session)
+			}
+			now, err := r.Sessions.Stamp(ctx, receipt.Machine, *receipt.Session)
+			if errors.Is(err, agent.ErrNotFound) {
+				// The session was deleted since: lineage beside it would describe nothing.
+				j.mu.Lock()
+				j.Receipts[i].Applied, j.Receipts[i].Stale = true, true
+				err = j.saveLocked()
+				j.mu.Unlock()
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				return fmt.Errorf("checking the %s session %s: %w; acknowledgement remains pending", receipt.Session.Agent, receipt.Session.Session, err)
+			}
+			if now != receipt.Stamp {
+				return fmt.Errorf("%w: destination used before receipt recovery", ErrChanged)
+			}
 		}
 		if receipt.Native != nil {
 			now, err := fileState(fsys, receipt.Machine, receipt.Native.Path)

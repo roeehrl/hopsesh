@@ -89,6 +89,10 @@ func (h *FakeHost) SQLReads() []string {
 	return append([]string(nil), h.sqlReads...)
 }
 
+// SQLFile is the real file behind a database made by LoadSQL, for an agent's stand-in
+// program that writes it the way the agent does.
+func (h *FakeHost) SQLFile(p string) (string, bool) { return h.dbFile(p) }
+
 func (h *FakeHost) dbFile(p string) (string, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -215,7 +219,7 @@ func (s fakeSQL) Columns(ctx context.Context, db, table string) ([]string, error
 func (s fakeSQL) open(ctx context.Context, db string) (*sql.Conn, func(), error) {
 	file, ok := s.h.dbFile(db)
 	if !ok {
-		return nil, nil, fmt.Errorf("%w: no database at %s", agent.ErrNotFound, db)
+		return nil, nil, fmt.Errorf("%w: no database at %s", agent.ErrNotInstalled, db)
 	}
 	d, err := sql.Open("sqlite", "file:"+file+"?mode=ro&_pragma=query_only(1)&_pragma=busy_timeout(2000)")
 	if err != nil {

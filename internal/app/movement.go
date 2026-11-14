@@ -244,7 +244,16 @@ func (a *App) observeFamily(ctx context.Context, inv *Inventory, family string, 
 		if err == nil {
 			// An unchanged copy against unchanged receipts observes the same way: replay
 			// it instead of rereading and rehashing its whole transcript.
-			if st, statErr := statOf(h.FS(), e.Session.Path); statErr == nil && !st.Missing {
+			st, statErr := statOf(h.FS(), e.Session.Path)
+			if agent.IsVirtual(mod) {
+				// Its anchor does not change when it is used: its stamp names its version.
+				stamp, ok := sessionStamp(ctx, mod, h, in, e.Session, e.Cached)
+				st, statErr = statKey{Stamp: string(stamp)}, nil
+				if !ok {
+					st.Missing = true
+				}
+			}
+			if statErr == nil && !st.Missing {
 				copyKey = copyObservationKey(committed, *e, st, in, r, id)
 				if c, ok := copyObservations.get(copyKey); ok {
 					c.replay(g)
@@ -399,8 +408,10 @@ const driftAfter = time.Minute
 // the move read it to, and it was active more than driftAfter after the move. Only the
 // listing is needed (no transcript is read). The offset is the byte end of the agent's
 // own transcript file for Claude Code and Codex (a compressed Codex rollout is listed at
-// its uncompressed size, as it is read); agents that record none, saved rows and a
-// departure read from another copy's file say nothing.
+// its uncompressed size, as it is read); the offset unit is module-defined, the same as
+// Summary.Size's (a module with VirtualSessions counts its settled records in both);
+// agents that record none, saved rows and a departure read from another copy's file say
+// nothing.
 func sourceDrift(g *lineage.Manifest, id lineage.ReplicaID, hop lineage.Hop, e Entry) (time.Time, bool) {
 	if e.Cached || e.Session.Size <= 0 {
 		return time.Time{}, false
@@ -599,6 +610,13 @@ func (a *App) MovementNoticeDetailsForPath(ctx context.Context, id agent.ID, pro
 	}
 	if path == "" {
 		path = cache.Path
+	}
+	if path == "" {
+		// An agent that keeps sessions in a database sends no file: its session's anchor,
+		// and the lineage beside it, follow from the id.
+		if mod, ok := a.Module(id); ok && agent.IsVirtual(mod) {
+			path = filepath.Join(scope.Root, filepath.FromSlash(agent.AnchorRel(id, key.Session)))
+		}
 	}
 	if path == "" {
 		return details, nil

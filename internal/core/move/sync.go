@@ -31,7 +31,7 @@ func applyNoWork(ctx context.Context, p *Plan, in Input, env Env) (*Result, erro
 		return res, err
 	}
 	res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
-	return res, j.Seal(machinesOf(ctx, in))
+	return res, j.SealWith(ctx, reachOf(ctx, p, in))
 }
 func recordSync(ctx context.Context, p *Plan, in Input, j *journal.Journal, res *Result) error {
 	seg, err := readSegment(ctx, in.Target, *p.SyncTo)
@@ -56,7 +56,7 @@ func recordSync(ctx context.Context, p *Plan, in Input, j *journal.Journal, res 
 	if err = m.Validate(); err != nil {
 		return err
 	}
-	if err = j.WriteReceipt(fsys, p.Target.Location, lineage.PathFor(p.SyncTo.Path), m.ForBranch(p.targetLine).Encode(), true); err != nil {
+	if err = writeNativeReceipt(ctx, j, fsys, in.Target, p.Target.Location, p.SyncTo.Path, p.SyncTo.Key, m.ForBranch(p.targetLine).Encode()); err != nil {
 		return err
 	}
 	fsys, err = in.Source.Machine.FS(ctx)

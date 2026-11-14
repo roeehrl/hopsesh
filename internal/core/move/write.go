@@ -99,21 +99,30 @@ func writeFetched(ctx context.Context, p *Plan, env Env, j *journal.Journal, bas
 		return appendWritten(ctx, p, env, j, nodes, base, branch, res)
 	}
 	title := fmt.Sprintf("%s (from %s)", nonEmpty(nonEmpty(seg.Header.Title, in.Session.Title), "a "+fp.Noun), fp.CloudTitle)
-	req, r, _, err := portableWrite(ctx, h, tm, tin, nil, nodes, ir.WriteRequest{OperationID: j.ID, Mode: ir.WriteNew, SessionID: newID(), Header: ir.Header{CWD: fp.Worktree, Title: title, GitBranch: branch, Created: seg.Header.Created}}, convert.Request{IncludeGenerated: true, Nodes: nodes, From: fp.CloudTitle, To: spec.Name, Fidelity: convert.History, Briefing: convert.Briefing{SourceID: string(fp.Session), SourceLoc: fp.Cloud, TargetLoc: machine, When: time.Now(), Branch: branch, Head: short(head), ToolNames: spec.Tools}})
+	req, r, _, err := portableWrite(ctx, h, tm, tin, nil, nodes, ir.WriteRequest{OperationID: j.ID, Mode: ir.WriteNew, SessionID: string(agent.NewSessionID(tm, tin, time.Now(), newID)), Header: ir.Header{CWD: fp.Worktree, Title: title, GitBranch: branch, Created: seg.Header.Created}}, convert.Request{IncludeGenerated: true, Nodes: nodes, From: fp.CloudTitle, To: spec.Name, Fidelity: convert.History, Briefing: convert.Briefing{SourceID: string(fp.Session), SourceLoc: fp.Cloud, TargetLoc: machine, When: time.Now(), Branch: branch, Head: short(head), ToolNames: spec.Tools}})
 	if err != nil {
 		return err
 	}
 	if env.Progress != nil {
 		env.Progress("writing bounded conversation for " + spec.Name)
 	}
+	asked := agent.SessionKey{Agent: spec.ID, Profile: tin.ProfileID()}
+	if err := recordVendorWrite(j, tm, machine, asked, req); err != nil {
+		return err
+	}
 	w, err := writer.Write(ctx, h, tin, req)
 	if err != nil {
 		return fmt.Errorf("writing the %s session: %w", spec.Name, err)
 	}
+	side := Side{Machine: in.Machine, Module: tm, Install: tin}
+	if err := recordVendorWritten(ctx, j, side, h, asked, req, w); err != nil {
+		return err
+	}
 	key := agent.SessionKey{Agent: spec.ID, Profile: tin.ProfileID(), Session: agent.SessionID(w.SessionID)}
 	j.AddKey(key)
 	pl := agent.Placement{Key: key, SourceID: fp.Session, CWD: fp.Worktree, Location: machine, Name: title}
-	if pi, ok := tm.(agent.PostInstaller); ok {
+	// An agent that installs its own sessions imported it in Write.
+	if pi, ok := tm.(agent.PostInstaller); ok && !agent.InstallsViaVendor(tm) {
 		if err := pi.AfterInstall(ctx, h, tin, key, pl); err != nil {
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 		}
@@ -139,7 +148,7 @@ func writeFetched(ctx context.Context, p *Plan, env Env, j *journal.Journal, bas
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	if err := j.WriteReceipt(host.LocalFS(), machine, lineage.PathFor(w.Path), m.Encode(), true); err != nil {
+	if err := writeNativeReceipt(ctx, j, host.LocalFS(), side, machine, w.Path, key, m.Encode()); err != nil {
 		return err
 	}
 	resume := tm.Resume(tin, key, pl, agent.ResumeOptions{})
@@ -214,9 +223,15 @@ func appendWritten(ctx context.Context, p *Plan, env Env, j *journal.Journal, no
 	if err != nil {
 		return err
 	}
+	if err := recordVendorWrite(j, tm, machine, o.Key, req); err != nil {
+		return err
+	}
 	w, err := writer.Write(ctx, h, tin, req)
 	if err != nil {
 		return fmt.Errorf("adding to %s: %w", o.Title, err)
+	}
+	if err := recordVendorWritten(ctx, j, Side{Machine: in.Machine, Module: tm, Install: tin}, h, o.Key, req, w); err != nil {
+		return err
 	}
 	old := o
 	if rolled {
@@ -252,12 +267,14 @@ func appendWritten(ctx context.Context, p *Plan, env Env, j *journal.Journal, no
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	if err := j.WriteReceipt(host.LocalFS(), machine, lineage.PathFor(o.Path), m.Encode(), true); err != nil {
+	side := Side{Machine: in.Machine, Module: tm, Install: tin}
+	if err := writeNativeReceipt(ctx, j, host.LocalFS(), side, machine, o.Path, o.Key, m.Encode()); err != nil {
 		return err
 	}
 	pl := agent.Placement{Key: o.Key, SourceID: o.Key.Session, CWD: o.CWD, Location: machine, Name: o.Title}
 	if rolled {
-		if pi, ok := tm.(agent.PostInstaller); ok {
+		// An agent that installs its own sessions imported it in Write.
+		if pi, ok := tm.(agent.PostInstaller); ok && !agent.InstallsViaVendor(tm) {
 			if err := pi.AfterInstall(ctx, h, tin, o.Key, pl); err != nil {
 				res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 			}

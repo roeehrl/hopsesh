@@ -77,6 +77,9 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 	s := in.Session
 	spec := tgt.Module.Spec()
 	if opt.Via == ViaImport {
+		if agent.IsVirtual(src.Module) {
+			return nil, fmt.Errorf("%w: --via import reads the session's file, and %s keeps its sessions in a database; leave --via off", agent.ErrUnsupported, src.Module.Spec().Name)
+		}
 		if imp, ok := tgt.Module.(agent.Importer); !ok || !imp.CanImport(src.Module.Spec().ID) {
 			return nil, fmt.Errorf("%w: %s cannot import %s sessions itself", agent.ErrUnsupported, spec.Name, src.Module.Spec().Name)
 		}
@@ -97,7 +100,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		cwd = realIntended(cwd)
 	}
 	p.Target.CWD = cwd
-	p.Placement = agent.Placement{Key: agent.SessionKey{Agent: spec.ID, Profile: tgt.Install.ProfileID(), Session: agent.SessionID(newID())}, SourceID: s.Key.Session,
+	p.Placement = agent.Placement{Key: agent.SessionKey{Agent: spec.ID, Profile: tgt.Install.ProfileID(), Session: agent.NewSessionID(tgt.Module, tgt.Install, time.Now(), newID)}, SourceID: s.Key.Session,
 		CWD: cwd, OtherAccount: opt.OtherAccount, Location: tgt.Machine.Name, Mappings: withShortNames(ctx, src, continueMappings(p, src, tgt))}
 
 	srcHost, err := src.Machine.For(ctx, src.Module.Spec(), src.Install, nil)
@@ -148,7 +151,7 @@ func buildContinue(ctx context.Context, in Input, opt Options) (*Plan, error) {
 		cp.RolloverCursor = cp.expect
 		cp.AppendTo = nil
 		cp.Relation = RelationNew
-		p.Placement.Key.Session = agent.SessionID(newID())
+		p.Placement.Key.Session = agent.NewSessionID(tgt.Module, tgt.Install, time.Now(), newID)
 		seg.Nodes = fullNodes
 		capacity, err = agent.CapacityFor(ctx, tgt.Module, targetHost, tgt.Install, nil)
 		if err != nil {
@@ -518,7 +521,7 @@ func importThen(ctx context.Context, p *Plan, in Input, h agent.Host, j *journal
 	j.AddKey(s.Key)
 	// Rejected vendor output can be inspected before undo. Pin it immediately so
 	// undo refuses to delete any work added after this failed import.
-	if err := j.Seal(machinesOf(ctx, in)); err != nil {
+	if err := j.SealWith(ctx, reachOf(ctx, p, in)); err != nil {
 		return ir.WriteResult{}, err
 	}
 	if importErr != nil {
@@ -617,7 +620,13 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 		return nil, err
 	}
 	for path, expect := range p.ExpectedDestination {
-		seg, e := readSegment(ctx, tgt, agent.Summary{Path: path})
+		summary := agent.Summary{Path: path}
+		for _, c := range in.Copies {
+			if c.Summary.Path == path {
+				summary = c.Summary // a module that keeps sessions in a database reads by key
+			}
+		}
+		seg, e := readSegment(ctx, tgt, summary)
 		if e != nil || seg.Cursor != expect {
 			return nil, fmt.Errorf("destination changed since planning; refresh the plan")
 		}
@@ -659,6 +668,8 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 			nativeHead = np.ExpectedDestination[nativeDst]
 		} else if dst, _, nh, err := install(ctx, np, p.nativeIn, env, j, &Result{}, func(string) {}); err != nil {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("the %s session was not also kept here: %v", name, err))
+		} else if err := keptByVendor(ctx, np, p.nativeIn.Target, j); err != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("the %s session was not also kept here: %v", name, err))
 		} else {
 			nativeDst, nativeHead = dst, nh
 		}
@@ -675,12 +686,20 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 		if err := operationRequest(env, p, req, nativeDst, nativeHead); err != nil {
 			return res, err
 		}
+		// A session the agent's own program makes is journaled before it is made.
+		if err := recordVendorWrite(j, tgt.Module, tgt.Machine.Name, p.Placement.Key, req); err != nil {
+			return res, err
+		}
 		step(fmt.Sprintf("writing the session for %s", tgt.Module.Spec().Name))
 		w, err = tgt.Module.(agent.Writer).Write(ctx, h, tgt.Install, req)
+		if err == nil {
+			err = recordVendorWritten(ctx, j, tgt, h, p.Placement.Key, req, w)
+		}
 	}
 	if err != nil {
 		return res, err
 	}
+	adoptWritten(p, in, j, w)
 	res.Files, res.Bytes = 1, w.To-w.From
 	if err := operationNative(env, p, w.Path, w.Cursor, res); err != nil {
 		return res, err
@@ -696,19 +715,45 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 	if err := recordContinuation(ctx, p, in, j, w, nativeDst, nativeHead, res); err != nil {
 		return res, err
 	}
-	if pi, ok := tgt.Module.(agent.PostInstaller); ok {
-		pl := p.Placement
-		pl.Name = cp.header.Title
+	pl := p.Placement
+	pl.Name = cp.header.Title
+	// An agent that installs its own sessions imported it in Write, before lineage.
+	if pi, ok := tgt.Module.(agent.PostInstaller); ok && !agent.InstallsViaVendor(tgt.Module) {
 		if err := pi.AfterInstall(ctx, h, tgt.Install, pl.Key, pl); err != nil {
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 		}
 	}
 	res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
-	if err := j.Seal(machinesOf(ctx, in)); err != nil {
+	if err := j.SealWith(ctx, reachOf(ctx, p, in)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
 	}
 	step("done")
 	return res, nil
+}
+
+// adoptWritten takes the session a write made as the continuation's: the writer may have
+// given it another id than the one asked for.
+func adoptWritten(p *Plan, in Input, j *journal.Journal, w ir.WriteResult) {
+	id := agent.SessionID(w.SessionID)
+	if id == "" || id == p.Placement.Key.Session {
+		return
+	}
+	p.Placement.Key.Session = id
+	j.AddKey(p.Placement.Key)
+	p.Resume = in.Target.Module.Resume(in.Target.Install, p.Placement.Key, p.Placement, p.resumeOpts)
+}
+
+// keptByVendor imports the source agent's own copy placed here, when that agent installs
+// its own sessions.
+func keptByVendor(ctx context.Context, np *Plan, side Side, j *journal.Journal) error {
+	if !agent.InstallsViaVendor(side.Module) {
+		return nil
+	}
+	h, err := side.Machine.For(ctx, side.Module.Spec(), side.Install, j)
+	if err != nil {
+		return err
+	}
+	return vendorInstall(ctx, side, h, j, np.Placement)
 }
 
 func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journal, w ir.WriteResult, nativeDst string, nativeHead ir.Cursor, res *Result) error {
@@ -736,11 +781,11 @@ func recordContinuation(ctx context.Context, p *Plan, in Input, j *journal.Journ
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	if err := j.WriteReceipt(host.LocalFS(), p.Target.Location, lineage.PathFor(w.Path), m.ForBranch(p.targetLine).Encode(), true); err != nil {
+	if err := writeNativeReceipt(ctx, j, host.LocalFS(), in.Target, p.Target.Location, w.Path, p.Placement.Key, m.ForBranch(p.targetLine).Encode()); err != nil {
 		return fmt.Errorf("recording destination receipt: %w", err)
 	}
 	if nativeDst != "" {
-		if err := j.WriteReceipt(host.LocalFS(), p.Target.Location, lineage.PathFor(nativeDst), m.ForBranch(p.sourceLine).Encode(), true); err != nil {
+		if err := writeNativeReceipt(ctx, j, host.LocalFS(), p.nativeIn.Target, p.Target.Location, nativeDst, p.native.Placement.Key, m.ForBranch(p.sourceLine).Encode()); err != nil {
 			return err
 		}
 	}

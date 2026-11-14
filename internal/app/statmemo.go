@@ -47,11 +47,13 @@ func ResourceCounters() Counters {
 	return Counters{Scans: scans.Load(), ContentReads: contentReads.Load(), TranscriptReads: transcriptReads.Load()}
 }
 
-// statKey names one file's observed version.
+// statKey names one file's observed version, or, for a session kept in a database, its
+// stamp (Stamp; its anchor file says nothing).
 type statKey struct {
 	Size     int64
 	Modified time.Time
 	Missing  bool
+	Stamp    string `json:",omitempty"`
 }
 
 func statOf(fsys agent.FS, path string) (statKey, error) {
