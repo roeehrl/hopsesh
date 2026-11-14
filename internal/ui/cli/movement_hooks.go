@@ -237,7 +237,7 @@ func noticesCmd() *cobra.Command {
 							state = "installed"
 						}
 						if t := st.Trust; t != nil {
-							state += map[string]string{agent.HookTrusted: "; trusted by the agent", agent.HookNeedsReview: "; NOT RUNNING: waiting for your approval in the agent", agent.HookDisabled: "; NOT RUNNING: turned off in the agent", agent.HookMissing: "; not seen by the agent", agent.HookUnknown: "; trust not verified"}[t.State]
+							state += map[string]string{agent.HookTrusted: "; trusted by the agent", agent.HookNeedsReview: "; NOT RUNNING: waiting for your approval in the agent", agent.HookDisabled: "; NOT RUNNING: turned off in the agent", agent.HookMissing: "; NOT RUNNING: not seen by the agent", agent.HookUnknown: "; trust not verified"}[t.State]
 						}
 						if !st.Enabled {
 							state += "; protection off"
@@ -245,6 +245,9 @@ func noticesCmd() *cobra.Command {
 						r.printf("%s profile=%q: %s\n  %s\n", st.Agent, st.Profile, state, st.Path)
 						if st.Reason != "" {
 							r.printf("  %s\n", st.Reason)
+						}
+						if t := st.Trust; t != nil && (t.State != agent.HookTrusted || t.Failures > 0) && t.Detail != "" {
+							r.printf("  %s\n", t.Detail)
 						}
 						if t := st.Trust; t != nil && t.State != agent.HookTrusted && t.Fix != "" {
 							r.printf("  %s\n", t.Fix)

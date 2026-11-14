@@ -62,7 +62,9 @@ exec hopsesh notices status --agent opencode --json
 stdout '"state": "missing"'
 stdout '-hopsesh'
 exec hopsesh notices status --agent opencode
-stdout 'not seen by the agent'
+stdout 'NOT RUNNING: not seen by the agent'
+stdout 'doesn.t load the hopsesh plugin'
+stdout 'Take the entry that removes hopsesh'
 cp remove-all.json $HOME/.config/opencode/opencode.json
 exec hopsesh notices status --agent opencode --json
 stdout '"state": "missing"'
