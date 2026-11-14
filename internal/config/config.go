@@ -57,33 +57,62 @@ type Agent struct {
 	// session's Resume menu: "here" (the hopsesh Terminal window), "terminal" (the
 	// terminal app) or "app" (the agent's desktop app). "" follows [terminal] resume.
 	Place string `toml:"place,omitempty"`
+	// Kinds are the kinds of session (agent.Spec.Kinds) the user shows; the others stay
+	// hidden.
+	Kinds map[string]bool `toml:"kinds,omitempty"`
 	// VoiceThreads and WorkThreads show the agent's voice conversations and Work threads
-	// (Codex app), hidden by default.
+	// (Codex app). They are the "voice" and "work" kinds as earlier versions wrote them,
+	// and are still written so those versions read the setting.
 	VoiceThreads bool `toml:"voice_threads,omitempty"`
 	WorkThreads  bool `toml:"work_threads,omitempty"`
 }
 
+// legacyKinds are the kinds earlier versions kept in a setting of their own.
+func (a *Agent) legacyKinds() map[string]*bool {
+	return map[string]*bool{"voice": &a.VoiceThreads, "work": &a.WorkThreads}
+}
+
 // Shows reports whether sessions of these kinds (agent.Summary.Kinds) are listed.
 func (a Agent) Shows(kinds []string) bool {
+	legacy := a.legacyKinds()
 	for _, k := range kinds {
-		if k == "voice" && !a.VoiceThreads || k == "work" && !a.WorkThreads {
+		if old, ok := legacy[k]; ok && *old {
+			continue
+		}
+		if !a.Kinds[k] {
 			return false
 		}
 	}
 	return true
 }
 
-// SetShows turns a kind of session on or off; false for a kind this setting lacks.
+// SetShows turns a kind of session on or off; false for a kind with no name.
 func (a *Agent) SetShows(kind string, show bool) bool {
-	switch kind {
-	case "voice":
-		a.VoiceThreads = show
-	case "work":
-		a.WorkThreads = show
-	default:
+	if kind == "" {
 		return false
 	}
+	if old, ok := a.legacyKinds()[kind]; ok {
+		*old = show
+		delete(a.Kinds, kind)
+		return true
+	}
+	if show {
+		if a.Kinds == nil {
+			a.Kinds = map[string]bool{}
+		}
+		a.Kinds[kind] = true
+	} else {
+		delete(a.Kinds, kind)
+	}
+	if len(a.Kinds) == 0 {
+		a.Kinds = nil
+	}
 	return true
+}
+
+// IsZero reports whether the agent has only default settings.
+func (a Agent) IsZero() bool {
+	return !a.Disabled && !a.RemoteControl && !a.Import && a.Place == "" && len(a.Kinds) == 0 && !a.VoiceThreads && !a.WorkThreads
 }
 
 // Cloud is per-cloud configuration, by the cloud's name ("codex-cloud"). Like a machine,

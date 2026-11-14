@@ -55,15 +55,7 @@ type SettingsDTO struct {
 // machines (the skill names the clouds itself); the command line renders the same files.
 func (a *App) skillFiles() (map[string][]byte, string) {
 	bin := integrate.SkillBin()
-	var names, ids []string
-	for _, s := range a.snapshot().Specs() {
-		if len(s.Roots) == 0 {
-			continue
-		}
-		names = append(names, s.Name)
-		ids = append(ids, string(s.ID))
-	}
-	files, _ := skill.Render(skill.NewParams(bin, version.Version, names, ids))
+	files, _ := skill.Render(skill.SpecParams(bin, version.Version, a.snapshot().Specs()))
 	return files, bin
 }
 
@@ -176,7 +168,7 @@ func (a *App) SetAgent(id string, enabled, remoteControl, imp bool) error {
 	}
 	ac := a.core.Cfg.Agents[id]
 	ac.Disabled, ac.RemoteControl, ac.Import = !enabled, remoteControl, imp
-	if ac == (config.Agent{}) {
+	if ac.IsZero() {
 		delete(a.core.Cfg.Agents, id)
 	} else {
 		a.core.Cfg.Agents[id] = ac
@@ -203,7 +195,7 @@ func (a *App) SetAgentKind(id, kind string, show bool) error {
 	if !ac.SetShows(kind, show) {
 		return fmt.Errorf("hopsesh has no setting for %q sessions", kind)
 	}
-	if ac == (config.Agent{}) {
+	if ac.IsZero() {
 		delete(a.core.Cfg.Agents, id)
 	} else {
 		a.core.Cfg.Agents[id] = ac

@@ -719,7 +719,7 @@ func (m *model) key(k string) (tea.Model, tea.Cmd) {
 		case "b":
 			if m.cursor < len(m.rows) && m.rows[m.cursor].item != nil {
 				e := m.rows[m.cursor].item.Entry
-				if e.Cloud != nil || (e.Agent != "claude" && e.Agent != "codex") {
+				if e.Cloud != nil || !m.continues(e.Agent) {
 					break
 				}
 				m.sel, m.target, m.picked, m.ho = m.rows[m.cursor], "", nil, handoff{}
@@ -1768,4 +1768,11 @@ func nextBudget(cur int) int {
 		}
 	}
 	return choices[0]
+}
+
+// continues reports whether a session of agent id can continue as a new copy of itself
+// (a bounded continuation): its module reads and writes sessions.
+func (m *model) continues(id agent.ID) bool {
+	mod, ok := m.deps.App.Module(id)
+	return ok && agent.Has(mod, agent.CapRead) && agent.Has(mod, agent.CapWrite)
 }

@@ -52,6 +52,10 @@ func Run(t *testing.T, m agent.Module, newHost func(t *testing.T) *FakeHost) {
 		if !in.Present || in.Agent != spec.ID {
 			t.Fatalf("Detect found no %s: %+v", spec.ID, in)
 		}
+		// The core finds the agent's data through Main: an install must name its main root.
+		if in.Main() == "" || in.Main() != in.Root(spec.MainRoot().Name) {
+			t.Fatalf("Detect named no main root (%s): %+v", spec.MainRoot().Name, in)
+		}
 		h := agent.Confine(fh, spec, in)
 		l, err := m.List(ctx, h, in)
 		if err != nil {

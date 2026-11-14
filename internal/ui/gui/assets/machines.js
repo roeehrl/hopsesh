@@ -4,7 +4,7 @@
 // hopsesh itself, the command, and each agent folder's hook and skill. This machine's page
 // also holds its command, skill and protection hooks in full. hopsesh connects only to
 // machines you added.
-import { on, api, h, fill, icon, ICONS, view, state, screen, go, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, ago, current, rich, navigationID, loadError, bytes, hopMark } from "./core.js";
+import { on, api, h, fill, icon, ICONS, view, state, screen, go, toast, fail, errText, cap, dialog, ask, machineStatus, sys, when, ago, current, rich, navigationID, loadError, bytes, hopMark, localAgents, words } from "./core.js";
 import { signIn, onSignedIn } from "./term.js";
 
 // A sign-in tab ended well: the card shows the new check.
@@ -180,7 +180,7 @@ function setupDialog(m) {
   const plan = h("li", { class: "muted", role: "status" }, `Checking which hopsesh ${m.name} has…`);
   api("PlanUpdate", m.name).then((p) => {
     const items = p.steps.map((s) => h("li", { "data-step": s.do }, s.text, s.command ? [": ", h("span", { class: "mono" }, s.command)] : null));
-    if (p.ends) items.push(h("li", { class: "warn" }, `Restarts hopsesh in the login session there, which ends the ${p.ends === 1 ? "terminal" : p.ends + " terminals"} it runs there. Claude Code and Codex keep each conversation up to its last finished turn.`));
+    if (p.ends) items.push(h("li", { class: "warn" }, `Restarts hopsesh in the login session there, which ends the ${p.ends === 1 ? "terminal" : p.ends + " terminals"} it runs there. ${words(localAgents(true).map((a) => a.name))} keep each conversation up to its last finished turn.`));
     plan.replaceWith(...(items.length ? items : [h("li", {}, `Every hopsesh on ${m.name} is ${p.version} or newer already.`)]));
   }).catch(() => fill(plan, `Copies this hopsesh (${state.info?.version || "this version"}) to `, h("span", { class: "mono" }, "~/.hopsesh/bin"), ` on ${m.name} over SSH, or updates the ones there.`));
   const start = async () => {
@@ -671,6 +671,8 @@ function machineDetail(r, d, extras = {}) {
 // remoteControlAtStartup), read when the page shows and changed with one switch for all.
 const remote = new Map(); // machine ("" here) → { data, err, busy }
 function remoteSection(machine, where) {
+  // The agents whose remote control hopsesh can turn on ("Claude Code").
+  const rc = words(localAgents(true).filter((a) => a.capabilities?.includes("remote-control")).map((a) => a.name), " or ") || "agent";
   const r = remote.get(machine);
   if (!r) {
     remote.set(machine, { busy: true });
@@ -685,14 +687,14 @@ function remoteSection(machine, where) {
       remote.set(machine, { data });
       const failed = (data.folders || []).filter((f) => f.error);
       toast(failed.length ? cap(`${failed[0].agentName}${failed[0].profileLabel ? ` (${failed[0].profileLabel})` : ""}: ${failed[0].error}`)
-        : !on ? `New Claude Code sessions on ${where} start with Remote Control` : `New Claude Code sessions on ${where} start without Remote Control`);
+        : !on ? `New ${rc} sessions on ${where} start with Remote Control` : `New ${rc} sessions on ${where} start without Remote Control`);
     } catch (err) { remote.set(machine, { ...r, busy: false }); fail(err); }
     refresh();
   };
-  const sw = h("button", { class: "switch", role: "switch", "aria-checked": on ? "true" : "false", "aria-label": `Start Remote Control for every Claude Code session on ${where}`,
+  const sw = h("button", { class: "switch", role: "switch", "aria-checked": on ? "true" : "false", "aria-label": `Start Remote Control for every ${rc} session on ${where}`,
     disabled: !folders.length || !!r?.busy, onclick: set });
   const state = !r || r.busy ? { state: "unknown", text: "Checking…" } : r.err ? { state: "warn", text: r.err }
-    : !r.data.folders.length ? { state: "off", text: "No Claude Code folder here" }
+    : !r.data.folders.length ? { state: "off", text: `No ${rc} folder here` }
     : { state: on ? "ok" : "off", text: on ? "On: every new session connects" : folders.some((f) => f.on) ? "On in some folders" : "Off" };
   const many = (r?.data?.folders || []).length > 1 || (r?.data?.folders || []).some((f) => f.reason || f.error);
   return h("section", { class: "msec", id: "remote-control-" + (machine || "here") }, h("h3", {}, "Remote Control"),

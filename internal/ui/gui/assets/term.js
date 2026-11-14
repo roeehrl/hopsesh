@@ -3,7 +3,7 @@
 // you", the entry points' routing (In this window / In my terminal), and the quit
 // confirmation that lists the programs still running.
 import {showWorkspace} from "./terminal-workspace.js";
-import { api, on, h, state, toast, fail, sys, dialog, count, icon, ago } from "./core.js";
+import { api, on, h, state, toast, fail, sys, dialog, count, icon, ago, localAgents, words } from "./core.js";
 
 export const tabs = new Map(); // id → the tab (TermTab)
 const revisions = new Map(); // retain removals so a delayed startup RPC cannot resurrect them
@@ -162,7 +162,7 @@ export function endDialog(what, list) {
   const n = ending.length;
   const title = what === "update" ? (n ? `Restart and end ${count(n, "program")}?` : "Restart hopsesh?") : (n ? `Quit hopsesh and end ${count(n, "program")}?` : "Quit hopsesh?");
   const lead = (what === "update" ? "Installing the update restarts hopsesh, which ends the programs in its tabs." : "Quitting ends the programs in hopsesh's tabs.") +
-    " Claude Code and Codex keep each conversation up to its last finished turn" + (what === "update" ? ", and the new version resumes them in tabs." : ", and hopsesh offers to resume them when it starts again.");
+    ` ${words(localAgents(true).map((a) => a.name))} keep each conversation up to its last finished turn` + (what === "update" ? ", and the new version resumes them in tabs." : ", and hopsesh offers to resume them when it starts again.");
   const ok = what === "update" ? (n ? `Install and end ${count(n, "program")}` : "Install and restart") : (n ? `Quit and end ${count(n, "program")}` : "Quit");
   return new Promise((resolve) => {
     let answer = "";

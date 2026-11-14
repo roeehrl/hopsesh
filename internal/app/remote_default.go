@@ -85,7 +85,7 @@ func (a *App) remoteDefaultsOn(ctx context.Context, m *host.Machine, set *bool) 
 				continue
 			}
 			rd := RemoteDefault{Agent: mod.Spec().ID, AgentName: mod.Spec().Name, Profile: in.ProfileID(), ProfileLabel: profileLabel(in.Profile), Path: f.Path, Reason: f.Reason}
-			if filepath.Dir(f.Path) != filepath.Clean(in.Root("home")) {
+			if filepath.Dir(f.Path) != filepath.Clean(in.Main()) {
 				rd.Error = "the settings file is outside the agent folder"
 				out.Folders = append(out.Folders, rd)
 				continue

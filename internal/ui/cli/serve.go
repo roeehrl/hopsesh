@@ -281,7 +281,7 @@ hopsesh terminals attach shows it again. Needs hopsesh set up there (hopsesh hos
 		},
 	}
 	f := cmd.Flags()
-	f.String("agent", "claude", "the agent: claude or codex")
+	f.String("agent", firstLocalID(), "the agent: "+joinWith(localIDs(), " or "))
 	f.String("resume", "", "the id of a session on that machine to continue")
 	f.String("dir", "", "the folder there a new session starts in (its home folder by default)")
 	f.String("profile", "", "the account folder's id (the agent's default folder when empty)")

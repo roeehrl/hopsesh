@@ -156,7 +156,7 @@ var agentWatch = map[agent.ID]target{
 				{ID: "claude-live-registry", What: "sessions/<pid>.json: the live registry of running sessions (what started each, what it waits for, and the Remote Control session it is connected to: an id while connected, null after it disconnects, none if it never connected)", Fields: []string{"pid", "sessionId", "status", "waitingFor", "entrypoint", "claude-desktop", "bridgeSessionId", "version"}, Readers: []string{"agents/claude/live.go"}},
 				{ID: "claude-remote-control-default", What: "settings.json remoteControlAtStartup in each Claude folder's user settings: hopsesh's per-machine \"Remote Control for every session\" switch writes true or removes it (a project's settings can turn it off, not on, since 2.1.222)", Fields: []string{"remoteControlAtStartup", "settings.json"}, Readers: []string{"agents/claude/remote_default.go"}},
 				{ID: "claude-desktop-handoff", What: "`claude --desktop --resume <id>`: hands a session to Claude desktop. It accepts only --resume, --continue, --debug and --verbose, so not --remote-control, and Desktop leaves the session it is handed off Remote Control even with its own \"connect new sessions\" setting on (checked with 2.1.311); hopsesh checks after the app opens and asks the person to flip the session's switch. A change here can let hopsesh start it", Fields: []string{"--desktop", "--remote-control", "--resume"}, Readers: []string{"agents/claude/claude.go"}},
-				{ID: "claude-remote-control-command", What: "/remote-control typed into an idle interactive session connects it (hopsesh types it into a session in its own Terminal tab when the person asks)", Fields: []string{"/remote-control"}, Readers: []string{"internal/ui/gui/termapps.go"}},
+				{ID: "claude-remote-control-command", What: "/remote-control typed into an idle interactive session connects it (hopsesh types it into a session in its own Terminal tab when the person asks)", Fields: []string{"/remote-control"}, Readers: []string{"agents/claude/claude.go"}},
 				{ID: "claude-hooks", What: "settings.json hooks (SessionStart, UserPromptSubmit), the payload a hook reads and the output it prints", Fields: []string{"hooks", "SessionStart", "UserPromptSubmit", "disableAllHooks", "session_id", "transcript_path", "hook_event_name", "hookSpecificOutput", "hookEventName", "additionalContext", "decision", "systemMessage"}, Readers: []string{"sdk/agent/hooks_json.go", "agents/claude/hooks.go", "internal/ui/cli/movement_hooks.go"}},
 			},
 		},
@@ -209,7 +209,7 @@ var agentWatch = map[agent.ID]target{
 		Floors: []floor{
 			{Version: "0.129.0", Gates: "the protection hooks: user hooks and hook trust read through app-server hooks/list", Source: "agents/codex/hooks.go", Methods: []string{"hooks/list"}},
 			{Version: "0.133.0", Gates: "hopsesh cd: app-server thread/resume with a cwd, recorded as thread_settings_applied", Source: "agents/codex/cd.go", Relies: []string{"resume", "--cd", "app-server"}, Methods: []string{"thread/resume"}},
-			{Version: "0.156.0", Gates: "`--no-daemon` on resume and fork in hopsesh's own terminal tabs (native writer-lock evidence)", Source: "internal/ui/gui/terminal_binding.go", Relies: []string{"--no-daemon"}},
+			{Version: "0.156.0", Gates: "`--no-daemon` on resume and fork in hopsesh's own terminal tabs (native writer-lock evidence)", Source: "agents/codex/ownedtab.go", Relies: []string{"--no-daemon"}},
 		},
 	},
 }

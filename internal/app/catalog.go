@@ -19,7 +19,7 @@ func (a *App) CatalogScope() string {
 	env := map[string]string{}
 	for _, s := range a.Specs() {
 		for _, r := range s.Roots {
-			for _, k := range r.Env {
+			for _, k := range r.Vars() {
 				env[k] = os.Getenv(k)
 			}
 		}
@@ -344,7 +344,7 @@ func (a *App) discoveryLease(ctx context.Context, o ScanOptions) (*Inventory, fu
 	if a.Catalog == nil || o.NoCache {
 		return nil, func() {}
 	}
-	binding, _ := json.Marshal([]any{a.CatalogScope(), a.Cfg.Hosts, a.Cfg.Agents, a.Cfg.Clouds, o.Hosts, o.NoLocal, o.SkipGit, o.ForceAccounts, LocalName(), os.Getenv("HOME"), os.Getenv("USERPROFILE"), os.Getenv("CLAUDE_CONFIG_DIR"), os.Getenv("CODEX_HOME")})
+	binding, _ := json.Marshal([]any{a.CatalogScope(), a.Cfg.Hosts, a.Cfg.Agents, a.Cfg.Clouds, o.Hosts, o.NoLocal, o.SkipGit, o.ForceAccounts, LocalName(), os.Getenv("HOME"), os.Getenv("USERPROFILE")})
 	scope := fmt.Sprintf("collector-1:%x", sha256.Sum256(binding))
 	owner := fmt.Sprintf("%d:%d", os.Getpid(), time.Now().UnixNano())
 	waited := false

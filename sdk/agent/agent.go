@@ -106,6 +106,12 @@ type Spec struct {
 	Experimental []Capability
 	// Icon is how the user interfaces picture the agent (optional; its initials otherwise).
 	Icon Icon
+	// Desktop is how the agent's desktop app signs in and runs sessions, for the user
+	// interfaces (nil: it has none, or nothing to say).
+	Desktop *Desktop
+	// Plans is what an account's plan is named after when the module's Account.Label is a
+	// bare plan ("max" reads "Claude Max"); empty when the label names it ("ChatGPT Pro").
+	Plans string
 	// Clouds are the vendor clouds the module reaches through its agent's CLI. A module
 	// with clouds may have no Roots (a cloud-only module, see NoLocal).
 	Clouds []Cloud
@@ -117,6 +123,31 @@ type Spec struct {
 	// terminal tabs, on top of the user's: settings that suit that terminal
 	// (CLAUDE_CODE_FORCE_SYNC_OUTPUT=1). Never a credential; not used in other terminals.
 	TerminalEnv []string
+}
+
+// Desktop is an agent's desktop app as the user interfaces show it.
+type Desktop struct {
+	// Tool names the app beside the agent's command-line tool ("Claude desktop", "Codex
+	// app").
+	Tool string
+	// Product is the app as it names itself, before its version ("Claude desktop",
+	// "ChatGPT desktop").
+	Product string
+	// OwnSignIn: the app keeps a sign-in of its own (Install.DesktopAccount) and its
+	// sessions go in the main root's default folder, whatever the environment says (Claude
+	// desktop). Otherwise it shares that folder's sign-in with the terminal (the Codex app).
+	OwnSignIn bool
+	// Shared: one app process runs every session, so the app is shown and opened, never
+	// quit (the Codex app).
+	Shared bool
+}
+
+// Short is the agent's name where space is tight: the first word of its Name ("Claude").
+func (s Spec) Short() string {
+	if f := strings.Fields(s.Name); len(f) > 0 {
+		return f[0]
+	}
+	return string(s.ID)
 }
 
 // SessionKind is a kind of session hidden by default (Spec.Kinds).
@@ -156,30 +187,71 @@ type Root struct {
 	Default map[string]string
 }
 
+// Vars are the environment variables that can set the root. Code that keys on or
+// resolves a root's environment goes through Vars and Locate, never Env itself.
+func (r Root) Vars() []string { return r.Env }
+
+// DefaultFor is the root's folder on goos when no variable sets it ("~/.claude").
+func (r Root) DefaultFor(goos string) string {
+	if p := r.Default[goos]; p != "" {
+		return p
+	}
+	return r.Default["*"]
+}
+
+// Locate is the root's folder on a machine, before Expand: its first set variable, else
+// its default for goos. getenv reads that machine's environment.
+func (r Root) Locate(goos string, getenv func(string) string) string {
+	for _, e := range r.Env {
+		if v := getenv(e); v != "" {
+			return v
+		}
+	}
+	return r.DefaultFor(goos)
+}
+
+// MainRoot is the main data folder: the first declared root (zero for a cloud-only module).
+func (s Spec) MainRoot() Root {
+	if len(s.Roots) == 0 {
+		return Root{}
+	}
+	return s.Roots[0]
+}
+
+// PinMain returns in with its main root at path and no other root: an account folder,
+// before Detect resolves the other roots against the pinned environment.
+func (s Spec) PinMain(in Install, path string) Install {
+	in.MainRoot = s.MainRoot().Name
+	in.Roots = map[string]string{in.MainRoot: path}
+	return in
+}
+
 // Install is an agent as found on one machine.
 type Install struct {
 	// NativeDefaultRoot is launch metadata verified by the module from the detected
 	// machine's home and original environment. Empty means native config lookup is
 	// unverified or explicitly overridden. It grants no filesystem access.
-	NativeDefaultRoot string            `json:"nativeDefaultRoot,omitempty"`
-	Accounts          *ProfileSpec      `json:"-"`
-	OS                string            `json:"os,omitempty"`
-	Desktop           string            `json:"desktop,omitempty"`
-	DesktopVersion    string            `json:"desktopVersion,omitempty"`
-	DesktopWhy        string            `json:"desktopWhy,omitempty"`
+	NativeDefaultRoot string       `json:"nativeDefaultRoot,omitempty"`
+	Accounts          *ProfileSpec `json:"-"`
+	OS                string       `json:"os,omitempty"`
+	Desktop           string       `json:"desktop,omitempty"`
+	DesktopVersion    string       `json:"desktopVersion,omitempty"`
+	DesktopWhy        string       `json:"desktopWhy,omitempty"`
 	// DesktopAccount is who the desktop app is signed in as, when it keeps its own
 	// sign-in (Claude desktop): its account and user fingerprints, never more.
 	DesktopAccount *OwnerRun `json:"desktopAccount,omitempty"`
 	// DesktopEngine is the version of the agent the desktop app runs, its own copy
 	// (Claude desktop's Claude Code, the Codex app's codex).
-	DesktopEngine string `json:"desktopEngine,omitempty"`
-	Profile           *RuntimeProfile   `json:"profile,omitempty"`
-	Agent             ID                `json:"agent"`
-	Version           string            `json:"version,omitempty"` // "" when the binary was not found
-	Binary            string            `json:"binary,omitempty"`  // absolute path
-	Runtime           string            `json:"runtime,omitempty"` // RuntimeApp: Binary is the desktop app's bundled runtime, no CLI
-	Roots             map[string]string `json:"roots"`             // name → absolute path on that machine
-	Present           bool              `json:"present"`           // the main root exists
+	DesktopEngine string            `json:"desktopEngine,omitempty"`
+	Profile       *RuntimeProfile   `json:"profile,omitempty"`
+	Agent         ID                `json:"agent"`
+	Version       string            `json:"version,omitempty"` // "" when the binary was not found
+	Binary        string            `json:"binary,omitempty"`  // absolute path
+	Runtime       string            `json:"runtime,omitempty"` // RuntimeApp: Binary is the desktop app's bundled runtime, no CLI
+	Roots         map[string]string `json:"roots"`             // name → absolute path on that machine
+	// MainRoot names the main root in Roots (Spec.MainRoot); see Main.
+	MainRoot string `json:"mainRoot,omitempty"`
+	Present  bool   `json:"present"` // the main root exists
 }
 
 // RuntimeApp marks Install.Binary as the desktop app's bundled runtime.
@@ -187,6 +259,20 @@ const RuntimeApp = "app"
 
 // Root returns the path of a named root.
 func (in Install) Root(name string) string { return in.Roots[name] }
+
+// Main returns the path of the main root. An install that does not name it (one decoded
+// from an older peer) has a single root, which is the main one.
+func (in Install) Main() string {
+	if in.MainRoot != "" {
+		return in.Roots[in.MainRoot]
+	}
+	if len(in.Roots) == 1 {
+		for _, p := range in.Roots {
+			return p
+		}
+	}
+	return ""
+}
 
 // Module is what every agent module implements.
 type Module interface {

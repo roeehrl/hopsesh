@@ -33,17 +33,27 @@ func FromProcs(ps []Proc) Table {
 type Kind string
 
 const (
-	KindHopsesh   Kind = "hopsesh" // a tab of hopsesh's own Terminal window
-	KindITerm2    Kind = "iterm2"
-	KindTerminal  Kind = "terminal" // macOS Terminal
-	KindWT        Kind = "wt"       // Windows Terminal
-	KindClaudeApp Kind = "claude-app"
-	KindCodexApp  Kind = "codex-app"
-	KindIDE       Kind = "ide" // VS Code, Cursor, Windsurf, Zed, JetBrains… (Host.App names it)
-	KindTmux      Kind = "tmux"
-	KindSSH       Kind = "ssh"
-	KindUnknown   Kind = "unknown"
+	KindHopsesh  Kind = "hopsesh" // a tab of hopsesh's own Terminal window
+	KindITerm2   Kind = "iterm2"
+	KindTerminal Kind = "terminal" // macOS Terminal
+	KindWT       Kind = "wt"       // Windows Terminal
+	KindIDE      Kind = "ide"      // VS Code, Cursor, Windsurf, Zed, JetBrains… (Host.App names it)
+	KindTmux     Kind = "tmux"
+	KindSSH      Kind = "ssh"
+	KindUnknown  Kind = "unknown"
 )
+
+// appSuffix ends the kind of an agent's desktop app.
+const appSuffix = "-app"
+
+// KindApp is the kind of an agent's desktop app ("claude-app").
+func KindApp(agent string) Kind { return Kind(agent + appSuffix) }
+
+// AppAgent is the agent whose desktop app k is, if it is one.
+func (k Kind) AppAgent() (string, bool) {
+	a, ok := strings.CutSuffix(string(k), appSuffix)
+	return a, ok && a != ""
+}
 
 // Host is what runs a process: its kind, the app's name for people ("iTerm2", "VS Code",
 // "Cursor"), and the host process's pid (0 when none was found). For an app with helper
@@ -151,12 +161,12 @@ var unixNames = []rule{
 	{name: "tmux", prefix: true, kind: KindTmux, app: "tmux"}, // "tmux", Linux "tmux: server"
 	{name: "sshd", prefix: true, kind: KindSSH, app: "ssh"},   // sshd, sshd-session
 	{name: "mosh-server", kind: KindSSH, app: "mosh"},
-	{name: "Claude", kind: KindClaudeApp, app: "Claude"},
-	{name: "Claude Helper", prefix: true, kind: KindClaudeApp, app: "Claude"},
-	{name: "Codex", kind: KindCodexApp, app: "Codex"},
-	{name: "Codex Helper", prefix: true, kind: KindCodexApp, app: "Codex"},
-	{name: "Codex (", prefix: true, kind: KindCodexApp, app: "Codex"}, // Codex (Service), Codex (Renderer)
-	{name: "ChatGPT", kind: KindCodexApp, app: "ChatGPT"},             // the ChatGPT app runs Codex
+	{name: "Claude", kind: KindApp("claude"), app: "Claude"},
+	{name: "Claude Helper", prefix: true, kind: KindApp("claude"), app: "Claude"},
+	{name: "Codex", kind: KindApp("codex"), app: "Codex"},
+	{name: "Codex Helper", prefix: true, kind: KindApp("codex"), app: "Codex"},
+	{name: "Codex (", prefix: true, kind: KindApp("codex"), app: "Codex"}, // Codex (Service), Codex (Renderer)
+	{name: "ChatGPT", kind: KindApp("codex"), app: "ChatGPT"},             // the ChatGPT app runs Codex
 	// Editors: the macOS app and its helpers, then the Linux program.
 	{name: "Code", kind: KindIDE, app: "VS Code"},
 	{name: "Code Helper", prefix: true, kind: KindIDE, app: "VS Code"},
@@ -196,7 +206,7 @@ var windowsNames = []rule{
 	{name: "openconsole", kind: KindWT, app: "Windows Terminal", underWT: true},
 	{name: "tmux", kind: KindTmux, app: "tmux"},
 	{name: "sshd", prefix: true, kind: KindSSH, app: "ssh"},
-	{name: "chatgpt", kind: KindCodexApp, app: "ChatGPT"},
+	{name: "chatgpt", kind: KindApp("codex"), app: "ChatGPT"},
 	{name: "code", kind: KindIDE, app: "VS Code"},
 	{name: "code - insiders", kind: KindIDE, app: "VS Code Insiders"},
 	{name: "vscodium", kind: KindIDE, app: "VSCodium"},

@@ -2,7 +2,7 @@
 // the session moves back, whether the agents' hooks can actually do it, and the moved /
 // original / returned indicators every view shares. Titles are never changed: status
 // lives in hopsesh's own views.
-import { api, h, dialog, ask, toast, fail, errText, state, here, sys, icon, ICONS, scanEntry, selected, onRefusal } from "./core.js";
+import { api, h, dialog, ask, toast, fail, errText, state, here, sys, icon, ICONS, scanEntry, selected, onRefusal, agentInfo } from "./core.js";
 
 // ---- CLI requirement -------------------------------------------------------------
 // The skill tells agents to run hopsesh and the protection hooks run it, so installing
@@ -29,8 +29,10 @@ export async function loadHookHealth(force = false) {
   return checking;
 }
 
-const AGENT = { claude: "Claude Code", codex: "Codex" };
-const agentName = id => AGENT[id] || id;
+const agentName = id => agentInfo(id)?.name || id;
+// inSharedApp: the agent runs inside a desktop app shared by every session (Codex in
+// ChatGPT desktop), whose hooks are reviewed there.
+const inSharedApp = (x) => !!(x.app && agentInfo(x.agent)?.desktop?.shared);
 
 // healthNotice is the Sessions view's one card for what protection still needs: a short
 // checklist (the command, then every detected agent, even one that can't take the hook,
@@ -89,8 +91,8 @@ export function healthNotice(onChange) {
     : waits.length ? "Protection is turned off in an agent" : "Some agents can't be protected yet";
   const lead = allSet ? "Moved sessions are protected on this machine."
     : todo.length ? (session?.ran ? "Some steps did not finish; each says why." : why + " This needs:")
-    : waiting ? (waiting.app && waiting.agent === "codex"
-      ? `In ${waiting.app} desktop, open Codex and choose Review hooks (or run /hooks in the terminal), then trust the two hopsesh hooks. hopsesh never approves hooks for you.`
+    : waiting ? (inSharedApp(waiting)
+      ? `In ${waiting.app} desktop, open ${agentName(waiting.agent)} and choose Review hooks (or run /hooks in the terminal), then trust the two hopsesh hooks. hopsesh never approves hooks for you.`
       : `hopsesh set up its hook; ${agentName(waiting.agent)} runs a new hook only after you approve it. hopsesh never approves hooks for you.`)
     : "Each agent says what it needs.";
   const run = async () => {
@@ -129,7 +131,7 @@ function trustHelp(p, onChange) {
   const d = dialog(h("h2", { style: "margin:0;font-size:16px" }, `Approve the hopsesh hooks in ${agentName(p.agent)}`),
     h("p", { style: "margin:0;line-height:1.5" }, `${agentName(p.agent)} runs a new or changed hook only after you approve it, so hopsesh can't block or warn there yet.`),
     h("ol", { style: "margin:0;padding-left:18px;line-height:1.6" },
-      h("li", {}, p.app && p.agent === "codex" ? `Open ${p.app} desktop, open Codex and choose Review hooks; in the terminal, run ` : `Open ${agentName(p.agent)}. In the app, answer its Review hooks prompt; in the terminal, run `, h("code", {}, "/hooks"), "."),
+      h("li", {}, inSharedApp(p) ? `Open ${p.app} desktop, open ${agentName(p.agent)} and choose Review hooks; in the terminal, run ` : `Open ${agentName(p.agent)}. In the app, answer its Review hooks prompt; in the terminal, run `, h("code", {}, "/hooks"), "."),
       h("li", {}, "Check that each of the two hopsesh hooks runs ", h("code", {}, "hopsesh notice-hook"), ", then trust it (Allow all, or select both)."),
       h("li", {}, "Come back here and choose Check again.")),
     h("p", { class: "muted", style: "margin:0;font-size:12px" }, `${agentName(p.agent)} asks again whenever a hook changes. hopsesh never approves hooks for you.`),

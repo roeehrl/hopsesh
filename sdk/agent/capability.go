@@ -184,22 +184,10 @@ func IsExperimental(m Module, c Capability) bool {
 // DefaultInstall resolves a Spec's roots and first binary from a machine's facts.
 func DefaultInstall(s Spec, h Host) Install {
 	f := h.Facts()
-	in := Install{Accounts: s.Accounts, Agent: s.ID, Roots: map[string]string{}}
+	in := Install{Accounts: s.Accounts, Agent: s.ID, Roots: map[string]string{}, MainRoot: s.MainRoot().Name}
+	getenv := func(k string) string { return f.Env[k] }
 	for _, r := range s.Roots {
-		p := ""
-		for _, e := range r.Env {
-			if v := f.Env[e]; v != "" {
-				p = v
-				break
-			}
-		}
-		if p == "" {
-			p = r.Default[f.OS]
-			if p == "" {
-				p = r.Default["*"]
-			}
-		}
-		in.Roots[r.Name] = Expand(p, f.Home, in.Roots, h.Path())
+		in.Roots[r.Name] = Expand(r.Locate(f.OS, getenv), f.Home, in.Roots, h.Path())
 	}
 	if len(s.Binaries) > 0 {
 		if b, ok := f.Binaries[s.Binaries[0].Name]; ok {
@@ -207,7 +195,7 @@ func DefaultInstall(s Spec, h Host) Install {
 		}
 	}
 	if len(s.Roots) > 0 {
-		if fi, err := h.FS().Stat(in.Roots[s.Roots[0].Name]); err == nil && fi.IsDir() {
+		if fi, err := h.FS().Stat(in.Main()); err == nil && fi.IsDir() {
 			in.Present = true
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Changing a session's folder: `hopsesh cd [<machine>:]<session> <dir>` continues a session
@@ -24,25 +25,19 @@ func cdCmd() *cobra.Command {
 session: its id, every message, tool call and reasoning block stay as the agent wrote
 them. Each agent does it its own way:
 
-  Claude Code  what its own /cd does: the transcript and its side folder move to the new
-               folder's project folder, and a relocated record is added.
-  Codex        Codex resumes the thread in the new folder (as codex resume -C does, with
-               no turn) and records the folder itself. Codex's own /cd is not used: it
-               starts a new thread.
-
+` + cdHows() + `
 The folder must be a checkout of the session's repository (another worktree or clone),
 unless you pass --other-repo. The agent loads the new folder's instructions and settings
 when the session resumes, and asks to trust the folder if it is new to it.
 
-When the session is open and its agent can change its folder from inside it (Claude
-Code's /cd), hopsesh tells you what to type there and waits until the session has moved.
+When the session is open and its agent can change its folder from inside it (its own
+/cd), hopsesh tells you what to type there and waits until the session has moved.
 Otherwise quit it first, or pass --stop-local and hopsesh quits it.
 
 On another machine (studio:<session>), <dir> is a folder there, and hopsesh there plans and
 makes the change: it must be set up there (hopsesh hosts setup) and receive sessions.
 
-hopsesh undo reverses it, there too: Claude Code's files move back; Codex is asked to change
-the folder back.`,
+` + cdUndos(),
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error { return changeDir(cmd, args[0], args[1]) },
 	}
@@ -241,4 +236,68 @@ func (r *run) changeDirOn(cmd *cobra.Command, ref app.Ref, dir string) error {
 	r.printf("Done: %q is in %s on %s now, the same session (%s). Undo: hopsesh undo %s\n", c.Entry.Session.Title, c.Plan.To, rd.Machine, c.Entry.Session.Key.Session, id)
 	r.printf("Resume it there, from here:\n  hopsesh terminals run %s --resume %s\n", rd.Machine, c.Entry.Session.Key.Session)
 	return nil
+}
+
+// cdHows lists how each agent changes a session's folder, for the help: its name, then its
+// module's words wrapped beside it.
+func cdHows() string {
+	type row struct{ name, how string }
+	var rows []row
+	width := 0
+	for _, m := range localModules() {
+		if d, ok := m.(agent.DirChangeHelp); ok && agent.Has(m, agent.CapChangeDir) {
+			how, _ := d.ChangeDirHelp()
+			rows = append(rows, row{m.Spec().Name, how})
+			width = max(width, len(m.Spec().Name))
+		}
+	}
+	var b strings.Builder
+	for _, r := range rows {
+		indent := "  " + strings.Repeat(" ", width) + "  "
+		for i, line := range wrapWords(r.how, 90-len(indent)) {
+			if i == 0 {
+				b.WriteString("  " + r.name + strings.Repeat(" ", width-len(r.name)) + "  " + line + "\n")
+			} else {
+				b.WriteString(indent + line + "\n")
+			}
+		}
+	}
+	return b.String()
+}
+
+// cdUndos says how undo reverses each agent's folder change, for the help (a paragraph).
+func cdUndos() string {
+	var undos []string
+	for _, m := range localModules() {
+		if d, ok := m.(agent.DirChangeHelp); ok && agent.Has(m, agent.CapChangeDir) {
+			if _, undo := d.ChangeDirHelp(); undo != "" {
+				undos = append(undos, undo)
+			}
+		}
+	}
+	text := "hopsesh undo reverses it, there too: the folder changes back."
+	if len(undos) > 0 {
+		text = "hopsesh undo reverses it, there too: " + strings.Join(undos, "; ") + "."
+	}
+	return strings.Join(wrapWords(text, 91), "\n")
+}
+
+// wrapWords breaks text into lines of at most width bytes, between words.
+func wrapWords(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, w := range strings.Fields(text) {
+		if line != "" && len(line)+1+len(w) > width {
+			lines = append(lines, line)
+			line = ""
+		}
+		if line != "" {
+			line += " "
+		}
+		line += w
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
 }

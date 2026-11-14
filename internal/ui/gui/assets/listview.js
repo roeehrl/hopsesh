@@ -4,7 +4,7 @@
 // chips, and the text filter. It is saved in the config ([list], SaveList); the text
 // filter is not. The list is one tree: group headers, then their sessions, with the
 // keyboard of the WAI-ARIA tree pattern.
-import { accountGroupLabel, accountKey, accountKeyLegacy, api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle, agentInfo, machineStatus, count, ago, toast, dialog, fail, bytes } from "./core.js";
+import { accountGroupLabel, accountKey, accountKeyLegacy, api, h, fill, icon, ICONS, state, sys, keys, here, cloudOf, cloudTitle, agentInfo, isAppPlace, machineStatus, count, ago, toast, dialog, fail, bytes } from "./core.js";
 import { openMenu, openPopover, update, closeAll, isOpen, openEl, refill } from "./menu.js";
 import { tabs as terminalTabs } from "./term.js";
 import { statusKey, placesOf, key as entryKey } from "./actions.js";
@@ -64,7 +64,7 @@ const at = (e) => (e.lastActive ? new Date(e.lastActive).getTime() : 0);
 const locationOf = (e) => (e.cloud ? "clouds" : e.machine === here() ? "here" : "machines");
 function hasOf(e) {
   const out = [];
-  if (placesOf(e).some((p) => !["claude-app", "codex-app"].includes(p.kind))) out.push("tab");
+  if (placesOf(e).some((p) => !isAppPlace(p.kind))) out.push("tab");
   if (e.mirror) out.push("mirror");
   if (e.unpushed || e.dirty) out.push("unpushed");
   return out;

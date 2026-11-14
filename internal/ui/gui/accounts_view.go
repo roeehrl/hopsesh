@@ -57,13 +57,37 @@ type ToolRowDTO struct {
 	Cells       []CellDTO `json:"cells"`
 }
 
-// Tools (CellDTO.Tool), the grid's columns.
-const (
-	ToolClaudeTerminal = "claude-terminal"
-	ToolClaudeDesktop  = "claude-desktop"
-	ToolCodexTerminal  = "codex-terminal"
-	ToolCodexApp       = "codex-app"
-)
+// ToolDTO is a column of the grid: an agent's command-line tool or its desktop app.
+type ToolDTO struct {
+	ID   string `json:"id"` // CellDTO.Tool: "claude-terminal", "claude-desktop", "codex-app"
+	Name string `json:"name"`
+}
+
+// accountTools are the grid's columns for one agent: its terminal, then its desktop app.
+func accountTools(s agent.Spec) []ToolDTO {
+	out := []ToolDTO{{ID: string(s.ID) + "-terminal", Name: s.Name + " · terminal"}}
+	if d := s.Desktop; d != nil {
+		f := strings.Fields(d.Tool)
+		word := "app"
+		if len(f) > 1 {
+			word = strings.ToLower(f[len(f)-1])
+		}
+		out = append(out, ToolDTO{ID: string(s.ID) + "-" + word, Name: d.Tool})
+	}
+	return out
+}
+
+// accountModules are the enabled agents the Accounts screen shows: those on machines that
+// say who they are signed in as.
+func accountModules(core *app.App) []agent.Module {
+	var out []agent.Module
+	for _, m := range core.Modules() {
+		if m.Spec().MainRoot().Name != "" && agent.Has(m, agent.CapAccount) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
 
 // CellDTO is a tool on a machine: its version, then who it is signed in as in each folder.
 type CellDTO struct {
@@ -135,6 +159,11 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 		out.Move = []app.FolderMove{}
 	}
 	v := newPeople()
+	mods := accountModules(core)
+	// Plans are named for every agent: a disabled one's accounts still read "Claude Max".
+	for _, mod := range core.Reg.All() {
+		v.plans[mod.Spec().ID] = mod.Spec().Plans
+	}
 	// Accounts with an email: whoever any tool on any machine is signed in as.
 	for _, p := range profiles {
 		if acct := p.Account; acct != nil && acct.LoggedIn && acct.Email != "" {
@@ -190,8 +219,12 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 	type folderKey struct{ machine, profile string }
 	counts := map[folderKey]map[string]int{}
 	unrecorded := map[folderKey]int{}
+	shown := map[agent.ID]bool{}
+	for _, mod := range mods {
+		shown[mod.Spec().ID] = true
+	}
 	for _, e := range inv.Entries {
-		if e.Agent != "claude" && e.Agent != "codex" {
+		if !shown[e.Agent] {
 			continue
 		}
 		fk := folderKey{e.Machine, e.Session.Key.Profile}
@@ -229,17 +262,12 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 			v.local = m.Name
 		}
 		row := ToolRowDTO{Machine: m.Name, Local: m.Local, OS: m.OS, Presence: m.Presence, PresenceWhy: m.PresenceWhy, Hopsesh: m.Hopsesh, Checked: m.CheckedAt, Scanned: true, Status: m.Status}
-		var claude, codex []agent.Install
+		installs := map[agent.ID][]agent.Install{}
 		for _, st := range m.Agents {
-			switch st.Agent {
-			case "claude":
-				claude = append(claude, st.Install)
-			case "codex":
-				codex = append(codex, st.Install)
-			}
+			installs[st.Agent] = append(installs[st.Agent], st.Install)
 		}
 		signIn := func(id agent.ID, in agent.Install) SignInDTO {
-			s := SignInDTO{Folder: "default", Path: short(m, in.Root("home")), Status: "unknown", Profile: in.ProfileID()}
+			s := SignInDTO{Folder: "default", Path: short(m, in.Main()), Status: "unknown", Profile: in.ProfileID()}
 			if in.Profile == nil {
 				return s
 			}
@@ -270,74 +298,92 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 			}
 			return agent.Install{}, false
 		}
-		// Claude Code in the terminal: every folder.
-		cb, hasClaude := base(claude)
-		cell := CellDTO{Tool: ToolClaudeTerminal, SignIns: []SignInDTO{}}
-		if hasClaude && cb.Binary != "" {
-			cell.Installed, cell.Version = true, "Claude Code "+cb.Version
-			for _, in := range claude {
-				cell.SignIns = append(cell.SignIns, signIn("claude", in))
-			}
+		type appCell struct {
+			installed bool
+			person    string // who the app is signed in as, when it has its own sign-in
 		}
-		row.Cells = append(row.Cells, cell)
-		// Claude desktop: its own sign-in, in the default folder.
-		desk := CellDTO{Tool: ToolClaudeDesktop, SignIns: []SignInDTO{}}
-		var deskPerson string
-		if hasClaude && strings.HasSuffix(cb.Desktop, ".app") || hasClaude && strings.HasSuffix(strings.ToLower(cb.Desktop), ".exe") {
-			desk.Installed = true
-			desk.Version = "Claude desktop " + cb.DesktopVersion
-			if cb.DesktopEngine != "" {
-				desk.Version += ", running its own Claude Code " + cb.DesktopEngine
-			}
-			s := SignInDTO{Folder: "default", Path: "~/.claude", Status: "unknown"}
-			if da := cb.DesktopAccount; da != nil {
-				s.Status = "signed-in"
-				s.Person = v.ofRun("claude", *da)
-				s.Email = v.email(s.Person)
-				deskPerson = s.Person
-				v.where(s.Person, m, "Claude desktop")
-			} else if m.Presence != app.PresenceLogin && !m.Local {
-				s.Detail = "its sign-in is seen by hopsesh running on " + m.Name
-			} else {
-				s.Detail = "Claude desktop hasn't said who is signed in: open it once, signed in"
-			}
-			desk.SignIns = append(desk.SignIns, s)
+		apps := map[agent.ID]appCell{}
+		type terminal struct {
+			name string
+			cell CellDTO
 		}
-		row.Cells = append(row.Cells, desk)
-		// Codex in the terminal, and the Codex app: one sign-in per folder, shared.
-		xb, hasCodex := base(codex)
-		cx := CellDTO{Tool: ToolCodexTerminal, SignIns: []SignInDTO{}}
-		if hasCodex && xb.Binary != "" {
-			cx.Installed = true
-			if xb.Runtime == agent.RuntimeApp {
-				cx.Note = "No Codex CLI; the app's Codex " + xb.Version + " is used"
-			} else {
-				cx.Version = "Codex " + xb.Version
+		var terminals []terminal
+		for _, mod := range mods {
+			spec := mod.Spec()
+			id := spec.ID
+			tools := accountTools(spec)
+			// The agent in the terminal: every folder.
+			b, has := base(installs[id])
+			cell := CellDTO{Tool: tools[0].ID, SignIns: []SignInDTO{}}
+			if has && b.Binary != "" {
+				cell.Installed = true
+				if b.Runtime == agent.RuntimeApp {
+					cell.Note = "No " + spec.Name + " CLI; the app's " + spec.Name + " " + b.Version + " is used"
+				} else {
+					cell.Version = spec.Name + " " + b.Version
+				}
+				for _, in := range installs[id] {
+					cell.SignIns = append(cell.SignIns, signIn(id, in))
+				}
 			}
-			for _, in := range codex {
-				cx.SignIns = append(cx.SignIns, signIn("codex", in))
+			row.Cells = append(row.Cells, cell)
+			terminals = append(terminals, terminal{spec.Name, cell})
+			d := spec.Desktop
+			if d == nil {
+				continue
 			}
+			desk := CellDTO{Tool: tools[1].ID, SignIns: []SignInDTO{}}
+			ac := appCell{}
+			if has && (strings.HasSuffix(b.Desktop, ".app") || strings.HasSuffix(strings.ToLower(b.Desktop), ".exe")) {
+				desk.Installed, ac.installed = true, true
+				if d.OwnSignIn {
+					desk.Version = d.Product + " " + b.DesktopVersion
+					// Its own sign-in, always in the default folder.
+					if b.DesktopEngine != "" {
+						desk.Version += ", running its own " + spec.Name + " " + b.DesktopEngine
+					}
+					s := SignInDTO{Folder: "default", Path: defaultRoot(spec, m), Status: "unknown"}
+					if da := b.DesktopAccount; da != nil {
+						s.Status = "signed-in"
+						s.Person = v.ofRun(id, *da)
+						s.Email = v.email(s.Person)
+						ac.person = s.Person
+						v.where(s.Person, m, d.Tool)
+					} else if m.Presence != app.PresenceLogin && !m.Local {
+						s.Detail = "its sign-in is seen by hopsesh running on " + m.Name
+					} else {
+						s.Detail = d.Product + " hasn't said who is signed in: open it once, signed in"
+					}
+					desk.SignIns = append(desk.SignIns, s)
+					// Two accounts writing to one folder: the terminal's and the app's.
+					for _, t := range cell.SignIns {
+						if t.Folder == "default" && t.Person != "" && ac.person != "" && t.Person != ac.person {
+							out.Notes = append(out.Notes, NoteDTO{Machine: m.Name, Title: machineWords(m) + ": two accounts write to " + s.Path,
+								Text: "The terminal is " + nonEmpty(t.Email, "one account") + " and " + d.Product + " is " + nonEmpty(v.email(ac.person), "another") + ", and both keep sessions in " + s.Path + ". Every session shows the account that ran it; opening one continues it as the account of the tool you choose."})
+						}
+					}
+				} else {
+					// The terminal's sign-in in the default folder, shared.
+					desk.Version = d.Product + " " + shortVersion(b.DesktopVersion)
+					if b.DesktopEngine != "" {
+						desk.Version += ", running " + spec.Name + " " + b.DesktopEngine
+					}
+					s := signIn(id, b)
+					desk.SignIns = append(desk.SignIns, s)
+					desk.Note = "same sign-in as the terminal"
+					if s.Person != "" {
+						v.where(s.Person, m, d.Tool)
+					}
+				}
+			}
+			apps[id] = ac
+			row.Cells = append(row.Cells, desk)
 		}
-		row.Cells = append(row.Cells, cx)
-		capp := CellDTO{Tool: ToolCodexApp, SignIns: []SignInDTO{}}
-		if hasCodex && strings.HasSuffix(xb.Desktop, ".app") {
-			capp.Installed = true
-			capp.Version = "ChatGPT desktop " + shortVersion(xb.DesktopVersion)
-			if xb.DesktopEngine != "" {
-				capp.Version += ", running Codex " + xb.DesktopEngine
-			}
-			s := signIn("codex", xb)
-			capp.SignIns = append(capp.SignIns, s)
-			capp.Note = "same sign-in as the terminal"
-			if s.Person != "" {
-				v.where(s.Person, m, "Codex app")
-			}
-		}
-		row.Cells = append(row.Cells, capp)
-		for _, c := range []CellDTO{cell, cx} {
-			for _, s := range c.SignIns {
+		// Where each account is used: the apps above, then the terminals.
+		for _, t := range terminals {
+			for _, s := range t.cell.SignIns {
 				if s.Person != "" {
-					tool := map[string]string{ToolClaudeTerminal: "Claude Code", ToolCodexTerminal: "Codex"}[c.Tool] + " in the terminal"
+					tool := t.name + " in the terminal"
 					if s.Folder != "default" {
 						tool += " in the " + s.Folder + " folder"
 					}
@@ -345,23 +391,17 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 				}
 			}
 		}
-		// Two accounts writing to ~/.claude: the terminal's and desktop's.
-		for _, s := range cell.SignIns {
-			if s.Folder == "default" && s.Person != "" && deskPerson != "" && s.Person != deskPerson {
-				out.Notes = append(out.Notes, NoteDTO{Machine: m.Name, Title: machineWords(m) + ": two accounts write to ~/.claude",
-					Text: "The terminal is " + nonEmpty(s.Email, "one account") + " and Claude desktop is " + nonEmpty(v.email(deskPerson), "another") + ", and both keep sessions in ~/.claude. Every session shows the account that ran it; opening one continues it as the account of the tool you choose."})
-			}
-		}
 		out.Machines = append(out.Machines, row)
 		// Folders.
 		canRun := m.Local || m.Presence == app.PresenceLogin
-		for _, group := range [][]agent.Install{claude, codex} {
-			for _, in := range group {
+		for _, mod := range mods {
+			spec := mod.Spec()
+			for _, in := range installs[spec.ID] {
 				if in.Profile == nil {
 					continue
 				}
 				p := current(in.Profile)
-				f := FolderDTO{Machine: m.Name, Local: m.Local, Profile: p.ID, Generation: p.Generation, Agent: in.Agent, AgentName: map[agent.ID]string{"claude": "Claude Code", "codex": "Codex"}[in.Agent],
+				f := FolderDTO{Machine: m.Name, Local: m.Local, Profile: p.ID, Generation: p.Generation, Agent: in.Agent, AgentName: spec.Name,
 					Name: "default", Path: short(m, p.Root), Default: p.Default, Command: p.Command, Counts: []CountDTO{}, Error: p.Error, CanRun: canRun && in.Present, Tags: p.Tags,
 					SignedIn: p.Account != nil && p.Account.LoggedIn}
 				if f.Tags == nil {
@@ -374,11 +414,12 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 				if p.Account != nil && p.Account.LoggedIn {
 					who = nonEmpty(p.Account.Email, "signed in")
 				}
+				d, ac := spec.Desktop, apps[spec.ID]
 				switch {
-				case in.Agent == "claude" && p.Default && desk.Installed:
-					f.Tools = "Terminal (" + nonEmpty(who, "not signed in") + ") and Claude desktop (" + nonEmpty(v.email(deskPerson), "its own sign-in") + ")"
-				case in.Agent == "codex" && p.Default && capp.Installed:
-					f.Tools = "Terminal and ChatGPT desktop share one sign-in (" + nonEmpty(who, "not signed in") + ")"
+				case d != nil && d.OwnSignIn && p.Default && ac.installed:
+					f.Tools = "Terminal (" + nonEmpty(who, "not signed in") + ") and " + d.Product + " (" + nonEmpty(v.email(ac.person), "its own sign-in") + ")"
+				case d != nil && !d.OwnSignIn && p.Default && ac.installed:
+					f.Tools = "Terminal and " + d.Product + " share one sign-in (" + nonEmpty(who, "not signed in") + ")"
 				default:
 					f.Tools = "Terminal only (" + nonEmpty(who, "not signed in") + ")"
 				}
@@ -394,6 +435,17 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 	}
 	out.People = v.list()
 	return out, nil
+}
+
+// defaultRoot is where the agent keeps sessions when nothing says otherwise ("~/.claude"),
+// as people see it on m.
+func defaultRoot(s agent.Spec, m *app.Machine) string {
+	r := s.MainRoot()
+	os := m.OS
+	if m.Host() != nil && m.Host().Facts.OS != "" {
+		os = m.Host().Facts.OS
+	}
+	return r.DefaultFor(os)
 }
 
 func machineWords(m *app.Machine) string {
@@ -420,11 +472,12 @@ type people struct {
 	persons map[string]string // agent \x00 person → id
 	tools   map[string]map[string][]string
 	ranOn   map[string]map[string]bool
-	local   string // this machine's name
+	local   string              // this machine's name
+	plans   map[agent.ID]string // agent.Spec.Plans
 }
 
 func newPeople() *people {
-	return &people{byID: map[string]*PersonDTO{}, keys: map[string]string{}, persons: map[string]string{}, tools: map[string]map[string][]string{}, ranOn: map[string]map[string]bool{}}
+	return &people{byID: map[string]*PersonDTO{}, keys: map[string]string{}, persons: map[string]string{}, tools: map[string]map[string][]string{}, ranOn: map[string]map[string]bool{}, plans: map[agent.ID]string{}}
 }
 
 func (v *people) add(id, email string, unknown bool, a agent.ID) *PersonDTO {
@@ -447,7 +500,7 @@ func (v *people) add(id, email string, unknown bool, a agent.ID) *PersonDTO {
 func (v *people) signedIn(a agent.ID, acct *agent.Account) string {
 	id := "email:" + strings.ToLower(acct.Email)
 	p := v.add(id, acct.Email, false, "")
-	if l := planLabel(a, acct.Label); l != "" && !slices.Contains(p.Labels, l) {
+	if l := planLabel(v.plans[a], acct.Label); l != "" && !slices.Contains(p.Labels, l) {
 		p.Labels = append(p.Labels, l)
 	}
 	if acct.Key != "" {
@@ -613,14 +666,15 @@ func initials(email string) string {
 	return out + strings.ToUpper(label[:1])
 }
 
-// planLabel names an account's plan for people ("Claude Max", "ChatGPT Pro").
-func planLabel(a agent.ID, label string) string {
+// planLabel names an account's plan for people ("Claude Max", "ChatGPT Pro"): plans names
+// what a bare plan belongs to (agent.Spec.Plans).
+func planLabel(plans, label string) string {
 	label = strings.TrimSpace(label)
 	if label == "" {
 		return ""
 	}
-	if a == "claude" && !strings.HasPrefix(strings.ToLower(label), "claude") {
-		label = "Claude " + label
+	if plans != "" && !strings.HasPrefix(strings.ToLower(label), strings.ToLower(plans)) {
+		label = plans + " " + label
 	}
 	f := strings.Fields(label)
 	for i, w := range f {

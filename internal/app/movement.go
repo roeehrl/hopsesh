@@ -310,7 +310,8 @@ func (a *App) publishMovement(inv *Inventory, e *Entry) {
 }
 
 func (a *App) agentName(id agent.ID) string {
-	if m, ok := a.Module(id); ok {
+	// Any compiled-in agent, enabled or not: a disabled one is still named.
+	if m, ok := a.Reg.Get(id); ok {
 		return m.Spec().Name
 	}
 	return string(id)
@@ -670,24 +671,11 @@ func (a *App) noticeScope(ctx context.Context, id agent.ID, profile string) (age
 		if err != nil {
 			return empty, err
 		}
-		if len(mod.Spec().Roots) == 0 {
+		r := mod.Spec().MainRoot()
+		if r.Name == "" {
 			return empty, fmt.Errorf("agent has no local root")
 		}
-		r := mod.Spec().Roots[0]
-		for _, env := range r.Env {
-			if root = os.Getenv(env); root != "" {
-				break
-			}
-		}
-		if root == "" {
-			root = r.Default[runtime.GOOS]
-			if root == "" {
-				root = r.Default["*"]
-			}
-		}
-		if strings.HasPrefix(root, "~/") {
-			root = filepath.Join(home, root[2:])
-		}
+		root = agent.Expand(r.Locate(runtime.GOOS, os.Getenv), home, nil, agent.PathFor(runtime.GOOS))
 		if !filepath.IsAbs(root) {
 			return empty, fmt.Errorf("default agent root is not absolute")
 		}

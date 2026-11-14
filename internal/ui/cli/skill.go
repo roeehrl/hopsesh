@@ -19,15 +19,7 @@ import (
 // machines (the skill names the clouds itself); the app renders the same files.
 func (r *run) skillFiles() (map[string][]byte, string) {
 	bin := integrate.SkillBin()
-	var names, ids []string
-	for _, m := range r.app.Modules() {
-		if len(m.Spec().Roots) == 0 {
-			continue
-		}
-		names = append(names, m.Spec().Name)
-		ids = append(ids, string(m.Spec().ID))
-	}
-	files, _ := skill.Render(skill.NewParams(bin, version.Version, names, ids))
+	files, _ := skill.Render(skill.SpecParams(bin, version.Version, r.app.Specs()))
 	return files, bin
 }
 
@@ -35,7 +27,7 @@ func skillCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skill",
 		Short: "Let your agents use hopsesh: install, update or remove the hopsesh skill",
-		Long: `The hopsesh skill teaches your agents (Claude Code, Codex) to list your sessions, bring one
+		Long: `The hopsesh skill teaches your agents (` + strings.Join(localNames(), ", ") + `) to list your sessions, bring one
 here or continue it in another agent with hopsesh: it always shows you the plan first and
 acts only after you say yes. The same files go into every installed agent's skills folder,
 and hopsesh reports any copy that drifted.
@@ -93,7 +85,7 @@ and hopsesh reports any copy that drifted.
 				return err
 			}
 			r.printSkill(rep)
-			r.printf("Try it: ask your agent \"what sessions do I have on my other machines?\" or \"continue this in Codex\".\n")
+			r.printf("Try it: ask your agent \"what sessions do I have on my other machines?\" or \"continue this in %s\".\n", otherAgentName())
 			r.app.Cfg.SkillPrompt = ""
 			_ = config.Save(r.app.Cfg)
 			return nil
@@ -175,7 +167,7 @@ func (r *run) offerSkill() {
 		if r.app.Cfg.SkillPrompt == "declined" || len(rep.Copies) == 0 {
 			return
 		}
-		r.printf("\nYour agents can use hopsesh for you (\"bring my laptop session here\", \"continue this in Codex\"): they show the plan and act only after you say yes.\n")
+		r.printf("\nYour agents can use hopsesh for you (\"bring my laptop session here\", \"continue this in %s\"): they show the plan and act only after you say yes.\n", otherAgentName())
 		if !r.confirm("Install the hopsesh skill for your agents?") {
 			r.app.Cfg.SkillPrompt = "declined"
 			_ = config.Save(r.app.Cfg)

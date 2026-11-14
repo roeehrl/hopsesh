@@ -80,7 +80,9 @@ func (*Module) Spec() agent.Spec {
 			"darwin":  {"/Applications/Claude.app", "~/Applications/Claude.app"},
 			"windows": {"~/AppData/Local/AnthropicClaude/claude.exe"},
 		}},
-		Clouds: []agent.Cloud{cloud()},
+		Desktop: &agent.Desktop{Tool: "Claude desktop", Product: "Claude desktop", OwnSignIn: true},
+		Plans:   "Claude",
+		Clouds:  []agent.Cloud{cloud()},
 		// In hopsesh's tabs Claude Code draws with synchronized output (DEC 2026), which
 		// xterm.js supports, so a redraw never shows half a frame.
 		TerminalEnv: []string{"CLAUDE_CODE_FORCE_SYNC_OUTPUT=1"},
@@ -397,6 +399,9 @@ func (m *Module) Verify(_ context.Context, h agent.Host, mp agent.MovePlan, stag
 	}
 	return fmt.Errorf("no transcript was staged")
 }
+
+// RemoteControlInSession is Claude Code's own command that turns remote control on.
+func (m *Module) RemoteControlInSession() string { return "/remote-control" }
 
 // Resume is `claude [--desktop] --resume <id> [--fork-session] [--remote-control [name]]`.
 func (m *Module) Resume(in agent.Install, key agent.SessionKey, p agent.Placement, o agent.ResumeOptions) agent.Command {

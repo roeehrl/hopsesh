@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
+
+	"github.com/roeehrl/hopsesh/internal/agents/all"
 )
 
 var update = flag.Bool("update", false, "rewrite plugin/ from the templates, for the newest version in CHANGELOG.md")
@@ -33,7 +35,8 @@ func TestPlugin(t *testing.T) {
 	newest := string(m[1])
 	manifests := []string{"plugin/.claude-plugin/plugin.json", "plugin/plugin.json"}
 	if *update {
-		files, err := Render(NewParams("hopsesh", newest, []string{"Claude Code", "Codex"}, []string{"claude", "codex"}))
+		// The release ships the skill for every compiled-in agent that keeps sessions.
+		files, err := Render(SpecParams("hopsesh", newest, all.Registry().Specs()))
 		if err != nil {
 			t.Fatal(err)
 		}

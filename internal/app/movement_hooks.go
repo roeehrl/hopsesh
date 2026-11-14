@@ -157,7 +157,7 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 			out = append(out, st)
 			continue
 		}
-		defaultRoot, defaultRootErr := filepath.EvalSymlinks(in.Root("home"))
+		defaultRoot, defaultRootErr := filepath.EvalSymlinks(in.Main())
 		for _, in := range installs {
 
 			hookHost, err := m.For(ctx, mod.Spec(), in, nil)
@@ -173,7 +173,7 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 			// default root may have acquired a registered profile since setup.
 			if hi.File != nil {
 				legacy := []*agent.HookFile{integrator.MovementHooks(hookHost, in, bin).File}
-				if defaultRootErr == nil && defaultRoot == in.Root("home") && in.Profile != nil {
+				if defaultRootErr == nil && defaultRoot == in.Main() && in.Profile != nil {
 					unregistered := in
 					unregistered.Profile = nil
 					legacy = append(legacy, integrator.MovementHooks(hookHost, unregistered, bin).File,
@@ -193,7 +193,7 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 			// A module may only choose a file directly under this known local root.
 			var old []byte
 			err = errors.New("hook settings path is outside the selected root")
-			if filepath.Dir(st.Path) == filepath.Clean(in.Root("home")) {
+			if filepath.Dir(st.Path) == filepath.Clean(in.Main()) {
 				old, err = readMovementHookFile(st.Path)
 			}
 			if err == nil {
@@ -254,7 +254,7 @@ func (a *App) movementHookInstalls(ctx context.Context, m *host.Machine, mod age
 		if err != nil {
 			return err
 		}
-		root := in.Root("home")
+		root := in.Main()
 		if !seen[root] {
 			seen[root] = true
 			out = append(out, in)
@@ -287,7 +287,7 @@ func (a *App) movementHookProfile(ctx context.Context, m *host.Machine, mod agen
 	if err != nil {
 		return base, err
 	}
-	root := base.Root("home")
+	root := base.Main()
 	if want == "" {
 		if !filepath.IsAbs(root) {
 			return base, errors.New("default agent root is not absolute")
@@ -326,7 +326,7 @@ func (a *App) movementHookProfile(ctx context.Context, m *host.Machine, mod agen
 	if !st.IsDir() {
 		return base, errors.New("agent root is not a directory")
 	}
-	base.Roots = map[string]string{"home": root}
+	base = mod.Spec().PinMain(base, root)
 	base.Profile = selected
 	base.Accounts = mod.Spec().Accounts
 	h, err := m.For(ctx, mod.Spec(), base, nil)
@@ -338,7 +338,7 @@ func (a *App) movementHookProfile(ctx context.Context, m *host.Machine, mod agen
 		return base, err
 	}
 	// Pin canonical root even when the unregistered default was a symlink.
-	in.Roots["home"] = root
+	in.Roots[mod.Spec().MainRoot().Name] = root
 	in.Profile = selected
 	return in, nil
 }

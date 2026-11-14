@@ -51,7 +51,7 @@ var iconSVG string
 // Spec declares Codex.
 func (*Module) Spec() agent.Spec {
 	return agent.Spec{
-		Accounts:      &agent.ProfileSpec{RootEnv: []string{"CODEX_HOME", "CODEX_SQLITE_HOME"}, Unset: []string{"OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "CODEX_APP_SERVER_ADDRESS"}, Login: []string{"login"}, LoginElsewhere: []string{"login", "--device-auth"}, Inherit: map[string][]string{"config.toml": {"cli_auth_credentials_store"}}},
+		Accounts:      &agent.ProfileSpec{RootEnv: []string{"CODEX_HOME", "CODEX_SQLITE_HOME"}, Unset: []string{"OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL", "CODEX_APP_SERVER_ADDRESS"}, Login: []string{"login"}, LoginElsewhere: []string{"login", "--device-auth"}, Inherit: map[string][]string{"config.toml": {"cli_auth_credentials_store"}}, InheritsSignIn: true},
 		ID:            id,
 		DesktopScheme: "codex",
 		Name:          "Codex",
@@ -80,7 +80,8 @@ func (*Module) Spec() agent.Spec {
 		Icon: agent.Icon{SVG: iconSVG, Apps: map[string][]string{
 			"darwin": {"/Applications/ChatGPT.app", "~/Applications/ChatGPT.app", "/Applications/Codex.app", "~/Applications/Codex.app"},
 		}},
-		Clouds: []agent.Cloud{cloud()},
+		Desktop: &agent.Desktop{Tool: "Codex app", Product: "ChatGPT desktop", Shared: true},
+		Clouds:  []agent.Cloud{cloud()},
 		Kinds: []agent.SessionKind{
 			{ID: kindVoice, Name: "Voice conversations", Note: "Threads the Codex app started from a voice conversation."},
 			{ID: kindWork, Name: "Work threads", Note: "Threads from the Codex app's Work mode."},

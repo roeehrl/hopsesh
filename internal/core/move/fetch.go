@@ -83,6 +83,8 @@ type FetchInput struct {
 	// Prompt is the first prompt the cloud session got, when hopsesh started it (a cloud
 	// that brings back no prompt of its own shows its title in its place).
 	Prompt string
+	// Takers names the agents that write sessions, for people ("Claude Code or Codex").
+	Takers string
 }
 
 // FetchPlan is the cloud part of a fetch plan.
@@ -283,7 +285,11 @@ func planFetchWrite(in FetchInput, p *Plan, f *agent.Fetched, opt Options, check
 	if _, own := in.Module.(agent.Writer); !own && in.Continue == nil {
 		// A cloud-only module (Copilot's log, Amp's thread) has no sessions of its own here: its
 		// text goes into the local agent the user picks.
-		check("err", fmt.Sprintf("Choose the agent here that gets the %s's messages (Claude Code or Codex), or bring the code only", fp.Noun))
+		takers := ""
+		if in.Takers != "" {
+			takers = " (" + in.Takers + ")"
+		}
+		check("err", fmt.Sprintf("Choose the agent here that gets the %s's messages%s, or bring the code only", fp.Noun, takers))
 		return
 	}
 	if _, ok := tm.(agent.Writer); !ok {

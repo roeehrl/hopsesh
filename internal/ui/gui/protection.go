@@ -79,23 +79,21 @@ func (a *App) ProtectionAll() []ProtectionRowDTO {
 	return out
 }
 
-// needsOf names what a machine's protection still needs ("Codex hook", "skill").
-func needsOf(p *app.Protection) []string {
+// needsOf names what a machine's protection still needs ("Codex hook", "skill"); name
+// names an agent.
+func needsOf(p *app.Protection, name func(agent.ID) string) []string {
 	var out []string
 	if !p.Command {
 		out = append(out, "the hopsesh command")
 	}
 	for _, h := range p.Hooks {
-		name := map[agent.ID]string{"claude": "Claude Code", "codex": "Codex"}[h.Agent]
-		if name == "" {
-			name = string(h.Agent)
-		}
+		agentName := name(h.Agent)
 		switch {
 		case !h.Supported:
 		case !h.Installed:
-			out = append(out, name+" hook")
+			out = append(out, agentName+" hook")
 		case h.Trust != nil && (h.Trust.State == agent.HookNeedsReview || h.Trust.State == agent.HookDisabled || h.Trust.State == agent.HookMissing):
-			out = append(out, name+" hook approval")
+			out = append(out, agentName+" hook approval")
 		}
 	}
 	if p.Skill.State != "" && p.Skill.State != "current" {
@@ -165,7 +163,7 @@ func (a *App) MachineNotices() []MachineNoticeDTO {
 				if r.Machine != m.Name || r.Protection == nil {
 					continue
 				}
-				if needs := needsOf(r.Protection); len(needs) > 0 {
+				if needs := needsOf(r.Protection, a.agentName); len(needs) > 0 {
 					sum := sha256.Sum256([]byte(strings.Join(needs, "\x00")))
 					add(MachineNoticeDTO{Machine: m.Name, Kind: "protection", Title: "Protection on " + m.Name + " needs " + strings.Join(needs, ", ") + ".", Text: "Set it up there from here: hopsesh on " + m.Name + " installs the hooks and the skill. It never approves hooks for you.", Action: "Set up on " + m.Name, Fingerprint: "prot:" + m.Name + ":" + hex.EncodeToString(sum[:6])})
 				}
@@ -224,4 +222,12 @@ func (a *App) SetUpProtection(machine string, rules bool) (*app.Protection, erro
 		a.guardsChanged()
 	}
 	return &p, err
+}
+
+// agentName names an agent for people ("Claude Code"), its id when no module has it.
+func (a *App) agentName(id agent.ID) string {
+	if m, ok := a.core.Reg.Get(id); ok {
+		return m.Spec().Name
+	}
+	return string(id)
 }

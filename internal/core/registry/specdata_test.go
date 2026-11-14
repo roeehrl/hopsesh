@@ -26,6 +26,7 @@ func TestSpecDataCoversSpec(t *testing.T) {
 		{agent.Feed{}, FeedData{}, nil},
 		{agent.WatchCode{}, CodeData{}, nil},
 		{agent.SessionKind{}, KindData{}, nil},
+		{agent.Desktop{}, DesktopData{}, nil},
 	} {
 		st, dt := reflect.TypeOf(c.sdk), reflect.TypeOf(c.data)
 		for i := range st.NumField() {

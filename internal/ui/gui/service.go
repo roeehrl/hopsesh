@@ -162,6 +162,65 @@ type AgentDTO struct {
 	Runtime string `json:"runtime,omitempty"`
 	// Kinds are sessions hidden unless shown (voice conversations, Work threads).
 	Kinds []AgentKindDTO `json:"kinds"`
+	AgentFacts
+}
+
+// AgentFacts are what the window needs to know of an agent, from its module, so the
+// window keeps no table of agents of its own.
+type AgentFacts struct {
+	Short string `json:"short"` // "Claude"
+	// Local: it keeps sessions on machines (not cloud-only).
+	Local bool `json:"local"`
+	// Accounts: it takes account folders; InheritsSignIn: a new one keeps its sign-in
+	// where the default folder does (Codex).
+	Accounts       bool `json:"accounts"`
+	InheritsSignIn bool `json:"inheritsSignIn"`
+	// DefaultRoot is its default folder as people write it ("~/.claude").
+	DefaultRoot string `json:"defaultRoot,omitempty"`
+	// AppName names its desktop app ("Claude", "ChatGPT"); Desktop is how that app signs
+	// in and runs sessions.
+	AppName string      `json:"appName,omitempty"`
+	Desktop *DesktopDTO `json:"desktop,omitempty"`
+	// Tools are its columns on the Accounts screen.
+	Tools []ToolDTO `json:"tools"`
+	// HookReview: it runs a new hook only after the user approves it there (Codex).
+	HookReview bool `json:"hookReview"`
+	// ResumeAcrossAccounts: a session continues under another account (agent.Spec).
+	ResumeAcrossAccounts bool `json:"resumeAcrossAccounts"`
+	// RemoteControlTyped is what to type in a session to turn remote control on there.
+	RemoteControlTyped string `json:"remoteControlTyped,omitempty"`
+}
+
+// DesktopDTO is agent.Desktop.
+type DesktopDTO struct {
+	Tool      string `json:"tool"`
+	Product   string `json:"product"`
+	OwnSignIn bool   `json:"ownSignIn"`
+	Shared    bool   `json:"shared"`
+}
+
+// agentFacts are a module's AgentFacts on an OS.
+func agentFacts(m agent.Module, goos string) AgentFacts {
+	s := m.Spec()
+	f := AgentFacts{Short: s.Short(), Local: s.MainRoot().Name != "", Accounts: s.Accounts != nil, AppName: appicon.Name(s.Icon.Apps),
+		Tools: []ToolDTO{}, ResumeAcrossAccounts: s.ResumeAcrossAccounts}
+	if d := s.Desktop; d != nil {
+		f.Desktop = &DesktopDTO{Tool: d.Tool, Product: d.Product, OwnSignIn: d.OwnSignIn, Shared: d.Shared}
+	}
+	if s.Accounts != nil {
+		f.InheritsSignIn = s.Accounts.InheritsSignIn
+	}
+	if r := s.MainRoot(); r.Name != "" {
+		f.DefaultRoot = r.DefaultFor(goos)
+	}
+	if f.Local && agent.Has(m, agent.CapAccount) {
+		f.Tools = accountTools(s)
+	}
+	_, f.HookReview = m.(agent.HookTrustReporter)
+	if rc, ok := m.(agent.RemoteControlTyper); ok {
+		f.RemoteControlTyped = rc.RemoteControlInSession()
+	}
+	return f
 }
 
 // AgentKindDTO is a kind of session hidden by default, and whether the user shows it.
@@ -187,13 +246,13 @@ type Info struct {
 	// Companion is MyCNC Host here, which the window recommends and links to.
 	Companion      app.Companion `json:"companion"`
 	DesktopManaged bool          `json:"desktopManaged"`
-	Version        string `json:"version"`
-	OS             string `json:"os"` // runtime.GOOS: the window words things for its system
-	Host           string `json:"host"`
-	ReposDir       string `json:"reposDir"`
-	AuditDir       string `json:"auditDir"`
-	HasHosts       bool   `json:"hasHosts"`
-	ConfigError    string `json:"configError,omitempty"`
+	Version        string        `json:"version"`
+	OS             string        `json:"os"` // runtime.GOOS: the window words things for its system
+	Host           string        `json:"host"`
+	ReposDir       string        `json:"reposDir"`
+	AuditDir       string        `json:"auditDir"`
+	HasHosts       bool          `json:"hasHosts"`
+	ConfigError    string        `json:"configError,omitempty"`
 	// ConfigNewer: a newer hopsesh wrote the configuration; the window offers to update
 	// hopsesh first, and setting the file aside only as a second, confirmed choice.
 	ConfigNewer bool       `json:"configNewer,omitempty"`
@@ -272,7 +331,7 @@ func (a *App) info(fast bool) Info {
 	if fast {
 		for _, m := range a.core.Reg.All() {
 			s := m.Spec()
-			info.Agents = append(info.Agents, AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: a.core.Cfg.AgentEnabled(string(s.ID)), Capabilities: agent.Capabilities(m), Tested: s.Tested, Icon: "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(s.Icon.SVG))})
+			info.Agents = append(info.Agents, AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: a.core.Cfg.AgentEnabled(string(s.ID)), Capabilities: agent.Capabilities(m), Tested: s.Tested, Icon: "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(s.Icon.SVG)), AgentFacts: agentFacts(m, runtime.GOOS)})
 		}
 	} else {
 		info.Agents = a.agentsLocked()
@@ -340,7 +399,7 @@ func (a *App) agentsLocked() []AgentDTO {
 		s := m.Spec()
 		ac := a.core.Cfg.Agents[string(s.ID)]
 		d := AgentDTO{ID: s.ID, Name: s.Name, Stability: s.Stability, Enabled: !ac.Disabled, RemoteControl: ac.RemoteControl,
-			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s), Clouds: []AgentCloudDTO{}, Kinds: []AgentKindDTO{}}
+			Import: ac.Import, Tested: s.Tested, Capabilities: agent.Capabilities(m), Icon: a.iconLocked(s), Clouds: []AgentCloudDTO{}, Kinds: []AgentKindDTO{}, AgentFacts: agentFacts(m, runtime.GOOS)}
 		for _, k := range s.Kinds {
 			d.Kinds = append(d.Kinds, AgentKindDTO{ID: k.ID, Name: k.Name, Note: k.Note, Shown: ac.Shows([]string{k.ID})})
 		}
@@ -359,11 +418,7 @@ func (a *App) agentsLocked() []AgentDTO {
 			d.Clouds = append(d.Clouds, ac)
 		}
 		if st, ok := here[s.ID]; ok && (st.Install.Present || st.Install.Binary != "") {
-			d.Version, d.Runtime = st.Install.Version, st.Install.Runtime
-			for _, r := range s.Roots {
-				d.Folder = st.Install.Root(r.Name)
-				break
-			}
+			d.Version, d.Runtime, d.Folder = st.Install.Version, st.Install.Runtime, st.Install.Main()
 		}
 		out = append(out, d)
 	}

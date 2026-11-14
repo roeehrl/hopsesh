@@ -358,14 +358,8 @@ func appName(core *app.App, m *app.Machine, e app.Entry) string {
 	return name
 }
 
-// appKind is the place an agent's desktop app is: the Codex app (ChatGPT.app) runs every
-// Codex thread in one shared process, so it is shown and opened, never quit.
-func appKind(id agent.ID) presence.Kind {
-	if id == "codex" {
-		return presence.KindCodexApp
-	}
-	return presence.KindClaudeApp
-}
+// appKind is the place an agent's desktop app is.
+func appKind(id agent.ID) presence.Kind { return presence.KindApp(string(id)) }
 
 // placesOf is where a live session's processes run (besides hopsesh's own tabs): each
 // process by its first known ancestor, counted by place; a process the module says is

@@ -261,7 +261,13 @@ func (a *App) TurnOnRemoteControl(machine, key string) error {
 		return err
 	}
 	one.Entries = []app.Entry{e}
-	if e.Agent != "claude" {
+	var typed string
+	if mod, ok := a.core.Reg.Get(e.Agent); ok {
+		if rc, ok := mod.(agent.RemoteControlTyper); ok {
+			typed = rc.RemoteControlInSession()
+		}
+	}
+	if typed == "" {
 		return fmt.Errorf("hopsesh can't turn on %s's remote control", e.AgentName)
 	}
 	if machine != app.LocalName() || a.Terms == nil {
@@ -272,7 +278,7 @@ func (a *App) TurnOnRemoteControl(machine, key string) error {
 		return err
 	}
 	if id == "" {
-		return errors.New("the session isn't in a hopsesh Terminal tab here: type /remote-control where it runs")
+		return errors.New("the session isn't in a hopsesh Terminal tab here: type " + typed + " where it runs")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -284,5 +290,5 @@ func (a *App) TurnOnRemoteControl(machine, key string) error {
 	if !ok {
 		return errors.New("the tab has closed")
 	}
-	return s.Type("/remote-control\r")
+	return s.Type(typed + "\r")
 }

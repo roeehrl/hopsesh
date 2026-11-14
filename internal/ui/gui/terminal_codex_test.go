@@ -4,7 +4,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
+	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -52,7 +54,7 @@ func TestOwnedCodexCommandPreservesScopeAndExternalLaunch(t *testing.T) {
 			if tc.install != nil {
 				tc.install(&i)
 			}
-			a := &App{inv: &app.Inventory{Machines: []*app.Machine{{Name: app.LocalName(), Local: true, Agents: []app.AgentState{{Agent: "codex", Install: i}}}}}}
+			a := &App{core: app.New(config.Defaults(), all.Registry(), t.TempDir(), nil), inv: &app.Inventory{Machines: []*app.Machine{{Name: app.LocalName(), Local: true, Agents: []app.AgentState{{Agent: "codex", Install: i}}}}}}
 			c, m := base, meta
 			c.Argv = append([]string{}, base.Argv...)
 			c.Argv[1] = tc.verb
@@ -72,5 +74,16 @@ func TestOwnedCodexCommandPreservesScopeAndExternalLaunch(t *testing.T) {
 				t.Fatal("duplicate override")
 			}
 		})
+	}
+}
+
+// An agent whose module does not adjust owned tabs keeps its command.
+func TestOwnedCommandOtherAgentUnchanged(t *testing.T) {
+	in := agent.Install{Agent: "claude", Present: true, Version: "2.1.300", Binary: "/bin/claude"}
+	a := &App{core: app.New(config.Defaults(), all.Registry(), t.TempDir(), nil), inv: &app.Inventory{Machines: []*app.Machine{{Name: app.LocalName(), Local: true, Agents: []app.AgentState{{Agent: "claude", Install: in}}}}}}
+	c := agent.Command{Argv: []string{"/bin/claude", "resume", "x"}}
+	meta := TabMeta{Kind: TabSession, Machine: app.LocalName(), Key: agent.SessionKey{Agent: "claude", Session: "x"}.String()}
+	if got := a.ownedSessionCommand(c, meta); !reflect.DeepEqual(got, c) {
+		t.Fatalf("changed: %+v", got)
 	}
 }
