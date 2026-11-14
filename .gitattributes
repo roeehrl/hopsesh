@@ -1,3 +1,9 @@
 # The vendored xterm.js files are checked byte for byte against their hashes (VERSIONS):
 # never convert their line endings.
 internal/ui/gui/assets/terminal/vendor/** -text
+
+# OpenCode's captured fixtures and exports are compared byte for byte (exports, the schema,
+# string edits in tests): never convert their line endings.
+agents/opencode/testdata/** -text
+testbundle/opencode/** -text
+internal/testkit/fakeopencode/*.sql -text
