@@ -128,8 +128,14 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 		return nil, err
 	}
 	if p.ResumeHere {
-		// Nothing moves: the session continues where it is.
-		return &Result{Command: launch.Shell(p.Resume, "", launch.DefaultShell()), Run: p.Resume}, nil
+		// Nothing moves: the session continues where it is, with a command checked there.
+		res := &Result{Command: launch.Shell(p.Resume, "", launch.DefaultShell()), Run: p.Resume}
+		if in.Target.Machine != nil && in.Target.Module != nil {
+			if h, err := in.Target.Machine.For(ctx, in.Target.Module.Spec(), in.Target.Install, nil); err == nil {
+				finishResume(ctx, p, in.Target, h, res)
+			}
+		}
+		return res, nil
 	}
 	if p.OperationID == "" {
 		return applyPlan(ctx, p, in, env)
@@ -213,6 +219,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 		original.sourceReplica = r.SourceReplica
 		original.sourceState = r.SourceState
 		original.native, original.nativeIn = p.native, p.nativeIn
+		original.resumeOpts = p.resumeOpts
 		*p = *original
 		res := r.Result
 		if res == nil {
@@ -262,7 +269,11 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 		if e = j.RecoverReceiptsWith(ctx, sessions); e != nil {
 			return res, e
 		}
-		res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
+		h, e := in.Target.Machine.For(ctx, in.Target.Module.Spec(), in.Target.Install, nil)
+		if e != nil {
+			return res, e
+		}
+		finishResume(ctx, p, in.Target, h, res)
 		if e = j.SealWith(ctx, sessions); errors.Is(e, journal.ErrUnstamped) {
 			res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+e.Error())
 		} else if e != nil {

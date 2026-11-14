@@ -31,6 +31,9 @@ func applyNoWork(ctx context.Context, p *Plan, in Input, env Env) (*Result, erro
 		return res, err
 	}
 	res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
+	if h, err := in.Target.Machine.For(ctx, in.Target.Module.Spec(), in.Target.Install, nil); err == nil {
+		finishResume(ctx, p, in.Target, h, res) // the command checked there, where it can be
+	}
 	return res, j.SealWith(ctx, reachOf(ctx, p, in))
 }
 func recordSync(ctx context.Context, p *Plan, in Input, j *journal.Journal, res *Result) error {

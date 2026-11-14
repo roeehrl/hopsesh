@@ -730,7 +730,9 @@ func applyContinue(ctx context.Context, p *Plan, in Input, env Env) (*Result, er
 			res.Warnings = append(res.Warnings, "after writing: "+err.Error())
 		}
 	}
-	res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
+	// The command checked on the target now that the session is there (an agent that
+	// installs its own sessions picks a program there, or refuses to).
+	finishResume(ctx, p, tgt, h, res)
 	if err := j.SealWith(ctx, reachOf(ctx, p, in)); err != nil {
 		res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+err.Error())
 	}
