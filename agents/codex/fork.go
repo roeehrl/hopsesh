@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
@@ -59,8 +60,16 @@ func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.In
 	if cm.ForkedFromID != pm.ID || cm.ID == pm.ID || child.Key.Agent != parent.Key.Agent || child.Key.Profile != parent.Key.Profile || string(parent.Key.Session) != pm.ID || string(child.Key.Session) != cm.ID {
 		return nil, fmt.Errorf("%w: native fork parent is not declared", agent.ErrDiverged)
 	}
-	if cm.HistoryBase != nil {
-		return nil, fmt.Errorf("%w: paginated fork ancestry is not materialized", agent.ErrUnsupported)
+	if b := cm.HistoryBase; b != nil {
+		// A by-reference fork's inherited records are the parent's own, up to the
+		// ordinal it names: its reading (withInherited) checks that byte range.
+		if b.ThreadID != pm.ID || b.EndOrdinalExclusive == nil || *b.EndOrdinalExclusive > math.MaxInt32 ||
+			cm.ForkedFromOrdinalExclusive != nil && *cm.ForkedFromOrdinalExclusive != *b.EndOrdinalExclusive {
+			return nil, fmt.Errorf("%w: paginated fork names another base than its parent", agent.ErrDiverged)
+		}
+		pf.Close()
+		cf.Close()
+		return m.inherited(ctx, h, in, parent, child, int(*b.EndOrdinalExclusive))
 	}
 	boundary := cm.ForkedFromOrdinalExclusive
 	if boundary != nil && *boundary < 2 {
@@ -114,6 +123,12 @@ func (m *Module) VerifyNativeFork(ctx context.Context, h agent.Host, in agent.In
 	}
 	pf.Close()
 	cf.Close()
+	return m.inherited(ctx, h, in, parent, child, last)
+}
+
+// inherited pairs the child's nodes from records before last with the parent's, which
+// must be the same.
+func (m *Module) inherited(ctx context.Context, h agent.Host, in agent.Install, parent, child agent.Summary, last int) ([]agent.NativeInheritance, error) {
 	ps, err := m.Read(ctx, h, in, parent, ir.Cursor{})
 	if err != nil {
 		return nil, err

@@ -133,7 +133,9 @@ type meta struct {
 	SubagentHistoryStartOrdinal *uint64         `json:"subagent_history_start_ordinal"`
 	HistoryMode                 string          `json:"history_mode"`
 	HistoryBase                 *struct {
-		ThreadID string `json:"thread_id"`
+		ThreadID            string  `json:"thread_id"`
+		EndOrdinalExclusive *uint64 `json:"end_ordinal_exclusive"`
+		EndByteOffset       *int64  `json:"end_byte_offset"`
 	} `json:"history_base"`
 	Git *struct {
 		Branch string `json:"branch"`
