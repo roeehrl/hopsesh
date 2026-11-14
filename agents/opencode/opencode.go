@@ -86,6 +86,9 @@ func detectDesktop(h agent.Host, in *agent.Install) {
 		return
 	}
 	for _, app := range desktopApps {
+		if !strings.HasPrefix(app, "~/") && !agent.SystemPrograms() {
+			continue // a test: never this machine's real desktop app
+		}
 		app = agent.Expand(app, h.Facts().Home, nil, h.Path())
 		plist, err := h.FS().ReadFile(h.Path().Join(app, "Contents", "Info.plist"), 1<<20)
 		if err != nil || !plistID.Match(plist) {
