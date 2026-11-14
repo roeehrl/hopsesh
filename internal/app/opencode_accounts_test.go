@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // An OpenCode account folder holds its own data, state and config folders, copies only
@@ -106,6 +107,36 @@ func TestOpenCodeAccountFolderGetsItsOwnPort(t *testing.T) {
 	for _, x := range ps {
 		if x.Name == "Broken" {
 			t.Error("the failed folder was registered")
+		}
+	}
+}
+
+// The notice hook finds a session's anchor (and its lineage) under the main root of its
+// account folder: the folder itself for a one-root agent and for an unregistered or
+// default folder, OpenCode's data root inside an added one.
+func TestNoticeMainOfAnAccountFolder(t *testing.T) {
+	oc, ok := all.Registry().Get("opencode")
+	if !ok {
+		t.Fatal("no OpenCode")
+	}
+	cl, _ := all.Registry().Get("claude")
+	root := filepath.Join(string(filepath.Separator)+"h", ".hopsesh", "accounts", "opencode", "work")
+	if runtime.GOOS == "windows" {
+		root = `C:\h\.hopsesh\accounts\opencode\work`
+	}
+	for _, c := range []struct {
+		name  string
+		spec  agent.Spec
+		scope agent.RuntimeProfile
+		want  string
+	}{
+		{"added OpenCode folder", oc.Spec(), agent.RuntimeProfile{ID: "w", Root: root}, filepath.Join(root, "data", "opencode")},
+		{"default OpenCode folder", oc.Spec(), agent.RuntimeProfile{ID: "d", Default: true, Root: "/h/.local/share/opencode"}, "/h/.local/share/opencode"},
+		{"unregistered default", oc.Spec(), agent.RuntimeProfile{Root: "/h/.local/share/opencode"}, "/h/.local/share/opencode"},
+		{"added Claude Code folder", cl.Spec(), agent.RuntimeProfile{ID: "c", Root: "/h/claude-work"}, "/h/claude-work"},
+	} {
+		if got := noticeMain(c.spec, c.scope); got != c.want {
+			t.Errorf("%s: %s, want %s", c.name, got, c.want)
 		}
 	}
 }
