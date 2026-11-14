@@ -162,7 +162,7 @@ func main() {
 		if *world == "empty" {
 			err = os.MkdirAll(h, 0o700)
 		} else {
-			err = testkit.DemoHome(h)
+			err = testkit.DemoHomeClaudeCodex(h)
 		}
 		if err != nil {
 			log.Fatal(err)
@@ -194,7 +194,7 @@ func main() {
 			return err
 		}
 		testkit.Apply(testkit.Env(h))
-		if err := testkit.DemoHome(h); err != nil {
+		if err := testkit.DemoHomeClaudeCodex(h); err != nil {
 			return err
 		}
 		if err := cloudWorld(h); err != nil {
