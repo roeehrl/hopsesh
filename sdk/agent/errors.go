@@ -15,6 +15,10 @@ var (
 	ErrAccountMismatch = errors.New("signed in to a different account")
 	ErrDiverged        = errors.New("both copies changed")
 	ErrDenied          = errors.New("denied by the host")
+	// ErrRestartsService is a resume that would restart the agent's background service,
+	// which other windows share (OpenCode's, when no program of its version is here). A
+	// person may agree: the caller asks, then resumes with ResumeOptions.RestartService.
+	ErrRestartsService = errors.New("it would restart the agent's background service")
 )
 
 // FormatError is native data a module could not read.
