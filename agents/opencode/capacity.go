@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
@@ -63,7 +64,7 @@ func (r sqlReader) capacity(ctx context.Context, s *agent.Summary, c *ir.Capacit
 			return err
 		}
 		if len(after.Rows) > 0 {
-			c.Existing += int(after.Rows[0].Int("n"))
+			c.Existing += clampInt(after.Rows[0].Int("n"))
 		}
 	} else {
 		rows, err := r.sq.Query(ctx, r.db, anyAssistantQuery)
@@ -123,4 +124,15 @@ func (r sqlReader) catalogWindow(ctx context.Context, model modelRef) (string, i
 		return cached.Digest, mm.Limit.Input, nil
 	}
 	return cached.Digest, mm.Limit.Context, nil
+}
+
+// clampInt is n as an int, held within int's range (a count from SQL is an int64).
+func clampInt(n int64) int {
+	switch {
+	case n > int64(math.MaxInt):
+		return math.MaxInt
+	case n < 0:
+		return 0
+	}
+	return int(n)
 }

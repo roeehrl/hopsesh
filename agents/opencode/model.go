@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -281,9 +282,10 @@ func rowMessage(msgID, typ string, seq int64, data string, parts []json.RawMessa
 // mergeParts is an assistant's content: its part rows in ordinal order, then the items
 // still inline in the message (an older build may have written both).
 func mergeParts(parts, inline []json.RawMessage) []json.RawMessage {
-	out := make([]json.RawMessage, 0, len(parts)+len(inline))
-	out = append(out, parts...)
-	return append(out, inline...)
+	if out := slices.Concat(parts, inline); out != nil {
+		return out
+	}
+	return []json.RawMessage{}
 }
 
 // partData is a session_part row's data with the row's type, as OpenCode decodes it.
