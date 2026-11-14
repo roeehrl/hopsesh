@@ -24,8 +24,9 @@ import (
 
 const sid = "0b6c6a8e-1d2f-4c3b-9a7e-5f4d3c2b1a01"
 
-// home is a machine with Claude Code (one session, from the fixtures) and Codex (no
-// sessions yet), in temporary folders.
+// home is a machine with Claude Code (one session, from the fixtures), Codex and OpenCode
+// (no sessions yet), in temporary folders. OpenCode is there by its data folder, not by a
+// desktop app this machine may or may not have.
 func home(t *testing.T) (repo string) {
 	t.Helper()
 	h := t.TempDir()
@@ -41,6 +42,7 @@ func home(t *testing.T) (repo string) {
 	repo = filepath.Join(h, "git", "demo")
 	os.MkdirAll(repo, 0o700)
 	os.MkdirAll(filepath.Join(h, ".codex", "sessions"), 0o700)
+	os.MkdirAll(filepath.Join(h, ".local", "share", "opencode"), 0o700)
 	fix := "../../../agents/claude/testdata/2.1.284"
 	err := filepath.Walk(fix, func(p string, fi os.FileInfo, err error) error {
 		if err != nil || fi.IsDir() {
