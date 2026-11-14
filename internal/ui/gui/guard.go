@@ -119,7 +119,10 @@ func (a *App) HookHealth(force bool) (HookHealthDTO, error) {
 	d.CLIReady = CLIReady(d.CLI)
 	hooks, err := core.NoticeHooks(ctx)
 	d.Hooks = hooks
-	d.Problems = hookProblems(hooks, d.Mode)
+	d.Problems = hookProblems(hooks, d.Mode, func(id agent.ID) bool {
+		m, ok := core.Module(id)
+		return ok && agent.ApprovesHooks(m)
+	})
 	if err != nil && len(hooks) == 0 && d.CLIReady { // without the command, that card says it
 		d.Problems = append(d.Problems, HookProblem{State: "unknown", Message: "hopsesh could not check the protection hooks: " + err.Error()})
 	}
@@ -204,7 +207,11 @@ func (a *App) OpenAgentApp(id string) (string, error) {
 	return name, openApp(p)
 }
 
-func hookProblems(hooks []app.MovementHookStatus, mode string) []HookProblem {
+// hookProblems are the hooks that leave originals unprotected or unchecked. approves says
+// whether an agent runs a hook only after the user approves it (Codex): an installed hook
+// of an agent that asks no approval (OpenCode), which hopsesh could not ask about (its
+// service is stopped), counts as protecting, as the machine's status counts it.
+func hookProblems(hooks []app.MovementHookStatus, mode string, approves func(agent.ID) bool) []HookProblem {
 	if mode == config.OriginalOff {
 		return []HookProblem{}
 	}
@@ -220,12 +227,14 @@ func hookProblems(hooks []app.MovementHookStatus, mode string) []HookProblem {
 			p.State, p.Message = "settings", h.Reason
 		case !h.Installed:
 			p.State, p.Message, p.Fix = "not-installed", "The protection hook is not installed, so originals are not protected.", "Install the hook in Settings › General."
+		case h.Trust != nil && h.Trust.State == agent.HookUnknown && !approves(h.Agent):
+			continue
 		case h.Trust != nil && h.Trust.State != agent.HookTrusted:
 			p.State, p.Fix = h.Trust.State, h.Trust.Fix
 			p.Message = map[string]string{
 				agent.HookNeedsReview: "The agent has not trusted the hopsesh hooks yet, so it skips them: originals are not blocked or advised.",
 				agent.HookDisabled:    "The hopsesh hooks are turned off in the agent, so originals are not protected.",
-				agent.HookMissing:     "The agent does not see the hopsesh hooks.",
+				agent.HookMissing:     strings.TrimSpace("The agent does not run the hopsesh hooks, so originals are not protected. " + h.Trust.Detail),
 				agent.HookUnknown:     "hopsesh could not ask the agent whether it trusts the hooks. " + h.Trust.Detail,
 			}[h.Trust.State]
 		default:
