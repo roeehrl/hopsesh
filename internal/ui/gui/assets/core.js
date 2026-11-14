@@ -137,6 +137,9 @@ export function bytes(n) {
   if (n >= 1 << 10) return Math.round(n / 1024) + "\u00a0KB";
   return n + "\u00a0B";
 }
+// sizeOf is a session's size for people: on disk ("812 KB"), or "24 messages" for an agent
+// that counts messages (OpenCode keeps sessions in a database); "" when unknown.
+export const sizeOf = (e) => e?.messages ? count(e.messages, "message") : e?.sizeKB ? bytes(e.sizeKB * 1024) : "";
 
 // rich is a module's or the backend's text with its `command` spans as code: DOM nodes
 // built from the text, never markup.

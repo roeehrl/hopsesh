@@ -111,12 +111,13 @@ type EntryDTO struct {
 	MainBranch   string     `json:"mainBranch"`
 	Unpushed     int        `json:"unpushed"`
 	Dirty        int        `json:"dirty"`
-	SizeKB       int64      `json:"sizeKB"`
-	Copies       []CopyDTO  `json:"copies,omitempty"` // every copy, across machines and agents
-	HereNewest   bool       `json:"hereNewest"`       // the newest copy is on this machine
-	StaleHere    bool       `json:"staleHere"`        // an older copy is on this machine
-	ContinueIn   []AgentOpt `json:"continueIn"`       // other agents here it can continue in
-	Needs        bool       `json:"needs"`            // the agent waits for the person (an approval)
+	SizeKB       int64      `json:"sizeKB"`             // on disk (0 for an agent that counts messages)
+	Messages     int64      `json:"messages,omitempty"` // its size for an agent that counts settled messages instead (OpenCode)
+	Copies       []CopyDTO  `json:"copies,omitempty"`   // every copy, across machines and agents
+	HereNewest   bool       `json:"hereNewest"`         // the newest copy is on this machine
+	StaleHere    bool       `json:"staleHere"`          // an older copy is on this machine
+	ContinueIn   []AgentOpt `json:"continueIn"`         // other agents here it can continue in
+	Needs        bool       `json:"needs"`              // the agent waits for the person (an approval)
 	// App names the agent's desktop app ("Claude") when that app, not a terminal, runs the
 	// open session.
 	App string `json:"app,omitempty"`
@@ -580,9 +581,14 @@ func entryDTO(core *app.App, inv *app.Inventory, it app.Item, targets []AgentOpt
 	d := EntryDTO{Cached: e.Cached, ObservedAt: e.ObservedAt, Returns: e.Returns, Movement: e.Movement, Departure: e.Departure, Arrival: e.Arrival, Guard: guardFor(core, e, inv), Profile: e.Profile, Machine: e.Machine, Agent: e.Agent, AgentName: e.AgentName, Key: s.Key.String(), Title: title, TitleSource: source,
 		Session: string(s.Key.Session), Path: s.Path, AgentVersion: s.AgentVersion, CanRename: core.CanRename(e), CanChangeDir: core.CanChangeDir(inv, e), Places: []PlaceDTO{},
 		Status: statusWords(core, e), Live: e.Live.State == agent.Live, LastActive: s.LastActivity.Format(time.RFC3339),
-		ContextOverflow: s.ContextOverflow, LastPrompt: s.LastPrompt, CWD: s.CWD, SizeKB: s.Size / 1024, ContinueIn: []AgentOpt{},
+		ContextOverflow: s.ContextOverflow, LastPrompt: s.LastPrompt, CWD: s.CWD, ContinueIn: []AgentOpt{},
 		Needs:   e.Live.State == agent.Live && strings.HasPrefix(e.Live.Status, "waiting"),
 		Journey: journey(e.Lineage), LineageError: e.LineageError, CanArchiveLineage: e.CanArchiveLineage, History: history(core, e.Lineage), Location: string(e.Location.Kind), Cloud: cloudEntryDTO(core, e), Mirror: mirrorDTO(s.Mirror), Owner: inv.Logins().OwnerOf(e)}
+	if e.SizeUnit == app.SizeMessages {
+		d.Messages = s.Size
+	} else {
+		d.SizeKB = s.Size / 1024
+	}
 	if e.Machine == app.LocalName() && !e.Location.IsCloud() {
 		if mod, ok := core.Module(e.Agent); ok && agent.Has(mod, agent.CapApp) {
 			d.CanApp = true
