@@ -280,7 +280,9 @@ func schemaHost(t *testing.T, edit func(string) string, extra ...string) *agentt
 	}
 	dir := t.TempDir()
 	schema := filepath.Join(dir, "schema.sql")
-	if err := os.WriteFile(schema, []byte(edit(string(b))), 0o600); err != nil {
+	// A checkout on Windows may end the fixture's lines with CRLF; the edits look for LF.
+	text := strings.ReplaceAll(string(b), "\r\n", "\n")
+	if err := os.WriteFile(schema, []byte(edit(text)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	files := []string{schema}

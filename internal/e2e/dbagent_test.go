@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -343,6 +344,12 @@ func TestVirtualSessionReplaceAndKeepBoth(t *testing.T) {
 	}
 }
 
+// resumesDB reports whether a move's result resumes a session of the stand-in agent: its
+// command, not the text for this machine's shell (PowerShell quotes each word on Windows).
+func resumesDB(res *move.Result, id agent.SessionID) bool {
+	return slices.Equal(res.Run.Argv, []string{"dbagent", "-s", string(id)}) && strings.Contains(res.Command, string(id))
+}
+
 // Continuing another agent's session in one that keeps sessions in a database journals the
 // session its program makes, under an id the agent mints, so undo deletes it while unused;
 // a writer that picks its own id is followed.
@@ -379,7 +386,7 @@ func TestContinueIntoVirtualSession(t *testing.T) {
 			for id := range sessions {
 				made = id
 			}
-			if ownIDs == (made == asked) || !strings.Contains(res.Command, "dbagent -s "+string(made)) {
+			if ownIDs == (made == asked) || !resumesDB(res, made) {
 				t.Fatalf("made %s (asked %s); resumes with %s", made, asked, res.Command)
 			}
 			j, err := journal.Load(state, res.Journal)
@@ -457,7 +464,7 @@ func TestContinueIntoVirtualSessionRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if m.Imports() != 1 || len(dbSessions(t, here, m)) != 1 || !strings.Contains(res.Command, "dbagent -s "+string(made)) {
+			if m.Imports() != 1 || len(dbSessions(t, here, m)) != 1 || !resumesDB(res, made) {
 				t.Fatalf("recovered: %d imports, resumes with %s (made %s)", m.Imports(), res.Command, made)
 			}
 			j, err := journal.Load(env.StateDir, res.Journal)

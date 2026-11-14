@@ -194,7 +194,7 @@ func (r *run) flags(args []string) []string {
 		case "--directory":
 			r.dir = take()
 		case "--max-count", "-n":
-			fmt.Sscan(take(), &r.maxCount)
+			_, _ = fmt.Sscan(take(), &r.maxCount) // not a number: the default
 		case "--session", "-s":
 			r.resume = take()
 		case "--print-logs", "--continue", "-c":

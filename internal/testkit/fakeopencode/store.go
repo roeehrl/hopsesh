@@ -295,7 +295,7 @@ func importDoc(db *sql.DB, doc *value, dir string, now time.Time, version string
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	if _, err := getRow(tx, sid); err == nil {
 		return "", errExists
 	} else if !errors.Is(err, errNotFound) {
@@ -439,7 +439,7 @@ func remove(db *sql.DB, sid string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	if _, err := getRow(tx, sid); err != nil {
 		return err
 	}
@@ -541,7 +541,7 @@ func move(db *sql.DB, sid, dir, home string, getenv lookup, now time.Time, stand
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	r, err := getRow(tx, sid)
 	if err != nil {
 		return err
@@ -638,7 +638,7 @@ func fork(db *sql.DB, sid, before string, now time.Time) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	r, err := getRow(tx, sid)
 	if err != nil {
 		return "", err
@@ -748,7 +748,7 @@ func interrupt(db *sql.DB, sid string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	if _, err := getRow(tx, sid); err != nil {
 		return err
 	}

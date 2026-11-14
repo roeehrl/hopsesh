@@ -192,7 +192,8 @@ func TestRemoteSQLTierSelection(t *testing.T) {
 	t.Run("none", func(t *testing.T) {
 		f := &fakeTools{probe: "", reply: func([]string) agent.Result { t.Fatal("ran a reader"); return agent.Result{} }}
 		m := remoteMachine("linux", f)
-		if m.SQL() != nil || m.SQL() != nil || len(f.calls) != 1 {
+		first, again := m.SQL(), m.SQL() // asked twice, probed once
+		if first != nil || again != nil || len(f.calls) != 1 {
 			t.Fatalf("a machine without tools has a reader (%d probes)", len(f.calls))
 		}
 	})
@@ -395,7 +396,8 @@ func TestRemoteSQLLongBatch(t *testing.T) {
 func TestRemoteSQLProbeFailureIsKept(t *testing.T) {
 	f := &failingProbe{}
 	m := remoteMachine("linux", f)
-	if m.SQL() != nil || m.SQL() != nil || f.calls != 1 {
+	first, again := m.SQL(), m.SQL() // asked twice, probed once
+	if first != nil || again != nil || f.calls != 1 {
 		t.Fatalf("%d probes", f.calls)
 	}
 	m.sqlFailed = time.Now().Add(-sqlProbeRetry - time.Second)

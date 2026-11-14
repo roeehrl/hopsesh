@@ -34,7 +34,7 @@ func (r *run) session(verb string, args []string) int {
 		} else if err != nil {
 			return r.fail("Error: %v", err)
 		}
-		r.Stdout.Write(append(doc.pretty(), '\n'))
+		_, _ = r.Stdout.Write(append(doc.pretty(), '\n'))
 		return 0
 	case "import":
 		return r.importFile(db, args)
@@ -132,7 +132,7 @@ func (r *run) list(db *sql.DB) int {
 		table = append(table, fmt.Sprintf("%s\t%s\t%s", s.id, s.title.String, msTime(s.updated).Local().Format("1/2/2006, 3:04:05 PM")))
 	}
 	if r.format == "json" {
-		r.Stdout.Write(append(out.pretty(), '\n'))
+		_, _ = r.Stdout.Write(append(out.pretty(), '\n'))
 		return 0
 	}
 	for _, l := range table {
