@@ -330,6 +330,21 @@ func recoverHookDir(fsys HookDirFS, pa Path, d *HookDir) error {
 	return fsys.Rename(prev, d.Path)
 }
 
+// HookDirInterrupted reports whether a replace of the folder stopped between its two
+// renames (a crash, or a failure on Windows): the folder is gone and its old copy waits in
+// Staging. The next InstallHookDir or RemoveHookDir puts it back first.
+func HookDirInterrupted(fsys HookDirFS, pa Path, d *HookDir) bool {
+	_, prev, err := hookDirStaging(pa, d)
+	if err != nil {
+		return false
+	}
+	if _, err := fsys.ReadDir(d.Path); !errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	_, err = fsys.ReadDir(prev)
+	return err == nil
+}
+
 // replaceHookDir writes files into a new copy in Staging, moves the folder there, moves
 // the new copy in, then deletes the old one. With no files the folder only moves out.
 // A failure puts the old folder back; a crash between the renames is undone by the next

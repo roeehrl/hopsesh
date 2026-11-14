@@ -540,14 +540,22 @@ func TestMovementHookFolder(t *testing.T) {
 			return len(have) == len(want) && bytes.Equal(have["index.js"], want["index.js"]) && bytes.Equal(have["config.json"], want["config.json"])
 		}}
 	ctx := context.Background()
+	// Removing what was never installed writes nothing, not even the lock.
+	if changed, err := movementHookDir(ctx, "remove", &MovementHookStatus{Supported: true}, in, d); err != nil || changed {
+		t.Fatalf("remove of nothing: %v %v", changed, err)
+	}
+	if _, err := os.Stat(config); !os.IsNotExist(err) {
+		t.Fatalf("remove of nothing wrote the config folder: %v", err)
+	}
 	for _, step := range []struct {
 		action    string
 		supported bool
 		installed bool
-	}{{"status", true, false}, {"install", false, false}, {"install", true, true}, {"status", true, true}, {"remove", true, false}} {
+		changed   bool
+	}{{"status", true, false, false}, {"install", false, false, false}, {"install", true, true, true}, {"install", true, true, false}, {"status", true, true, false}, {"remove", true, false, true}} {
 		st := MovementHookStatus{Supported: step.supported}
-		if err := movementHookDir(ctx, step.action, &st, in, d); err != nil || st.Installed != step.installed || st.Path != d.Path {
-			t.Fatalf("%s: %+v %v", step.action, st, err)
+		if changed, err := movementHookDir(ctx, step.action, &st, in, d); err != nil || st.Installed != step.installed || st.Path != d.Path || changed != step.changed || st.Reason != "" {
+			t.Fatalf("%s: %+v %v %v", step.action, st, changed, err)
 		}
 	}
 	if _, err := os.Stat(d.Path); !os.IsNotExist(err) {
@@ -556,15 +564,41 @@ func TestMovementHookFolder(t *testing.T) {
 	if entries, _ := os.ReadDir(d.Staging); len(entries) != 1 || entries[0].Name() != ".hopsesh-notice-lock" {
 		t.Fatalf("staging holds more than the lock: %v", entries)
 	}
+	// A folder whose own files differ from this hopsesh's still runs, and status says so.
+	st := MovementHookStatus{Supported: true}
+	if _, err := movementHookDir(ctx, "install", &st, in, d); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(d.Path, "index.js"), []byte("// older\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lax := *d
+	lax.Has = func(have map[string][]byte) bool { return bytes.Equal(have["config.json"], want["config.json"]) }
+	st = MovementHookStatus{Supported: true}
+	if _, err := movementHookDir(ctx, "status", &st, in, &lax); err != nil || !st.Installed || !strings.Contains(st.Reason, "install the hooks again") {
+		t.Fatalf("older files: %+v %v", st, err)
+	}
+	// A replace that stopped between its renames: status says so; the next install finishes.
+	if err := os.Rename(d.Path, filepath.Join(d.Staging, ".hopsesh.hopsesh-old")); err != nil {
+		t.Fatal(err)
+	}
+	st = MovementHookStatus{Supported: true}
+	if _, err := movementHookDir(ctx, "status", &st, in, d); err != nil || st.Installed || !strings.Contains(st.Reason, "stopped halfway") {
+		t.Fatalf("interrupted: %+v %v", st, err)
+	}
+	st = MovementHookStatus{Supported: true}
+	if _, err := movementHookDir(ctx, "install", &st, in, d); err != nil || !st.Installed {
+		t.Fatalf("install after an interruption: %+v %v", st, err)
+	}
 	outside := *d
 	outside.Path = filepath.Join(root, "elsewhere", "hopsesh")
-	st := MovementHookStatus{Supported: true}
-	if err := movementHookDir(ctx, "install", &st, in, &outside); err == nil || !strings.Contains(err.Error(), "outside") {
+	st = MovementHookStatus{Supported: true}
+	if _, err := movementHookDir(ctx, "install", &st, in, &outside); err == nil || !strings.Contains(err.Error(), "outside") {
 		t.Fatalf("a folder outside its root: %v", err)
 	}
 	inside := *d
 	inside.Staging = filepath.Join(d.Path, "staging")
-	if err := movementHookDir(ctx, "install", &st, in, &inside); err == nil {
+	if _, err := movementHookDir(ctx, "install", &st, in, &inside); err == nil {
 		t.Fatal("staged inside the folder")
 	}
 }

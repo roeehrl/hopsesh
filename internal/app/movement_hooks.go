@@ -185,9 +185,10 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 			}
 			st := MovementHookStatus{Agent: mod.Spec().ID, Profile: in.ProfileID(), ProfileLabel: profileLabel(in.Profile), Enabled: a.Cfg.MovementNoticesOn() && hi.DisabledReason == "", Supported: hi.Reason == "", Reason: strings.TrimSpace(hi.Reason + " " + hi.DisabledReason), Evidence: hi.Evidence}
 			st.coverage(in)
+			changed := false
 			switch {
 			case hi.Dir != nil:
-				err = movementHookDir(ctx, action, &st, in, hi.Dir)
+				changed, err = movementHookDir(ctx, action, &st, in, hi.Dir)
 			case hi.File != nil:
 				err = movementHookFile(ctx, action, &st, in, hi.File)
 			default:
@@ -200,6 +201,11 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 				if tr, ok := mod.(agent.HookTrustReporter); ok {
 					if command, e := agent.NoticeHookCommand(bin, mod.Spec().ID, in.ProfileID(), dirs...); e == nil {
 						trust := tr.HookTrust(ctx, hookHost, in, []string{command})
+						if changed && trust.State == agent.HookMissing {
+							// The agent loads a changed hook folder (a plugin) on its own, a
+							// moment later: what it said may be from before.
+							trust = agent.HookTrust{State: agent.HookUnknown, Detail: strings.TrimSpace("hopsesh just installed the plugin; the agent usually loads it within seconds (check with hopsesh notices status). It said: " + trust.Detail)}
+						}
 						st.Trust = &trust
 					}
 				}
@@ -246,43 +252,66 @@ func movementHookFile(ctx context.Context, action string, st *MovementHookStatus
 }
 
 // movementHookDir reads (and for install or remove, replaces) a hook folder hopsesh owns
-// whole (an agent plugin). Changes hold the machine's hook lock, a file in the folder's
-// staging folder, so two hopsesh never share the staging copies.
-func movementHookDir(ctx context.Context, action string, st *MovementHookStatus, in agent.Install, d *agent.HookDir) error {
+// whole (an agent plugin), and reports whether it changed it. Changes hold the machine's
+// hook lock, a file in the folder's staging folder, so two hopsesh never share the
+// staging copies.
+func movementHookDir(ctx context.Context, action string, st *MovementHookStatus, in agent.Install, d *agent.HookDir) (bool, error) {
 	st.Path = d.Path
 	pa := agent.PathFor(runtime.GOOS)
 	// A module may only choose a folder inside the root it names, staged in that root.
 	if !d.In(in, pa) {
-		return errors.New("hook folder is outside the selected root")
+		return false, errors.New("hook folder is outside the selected root")
 	}
 	fsys := localHookDirFS{}
 	files, err := agent.ReadHookDir(fsys, pa, d)
 	if err != nil {
-		return err
+		return false, err
 	}
 	st.Installed = d.Has(files)
-	if _, err = d.Merge(files); err != nil {
-		return err
+	want, err := d.Merge(files)
+	if err != nil {
+		return false, err
 	}
+	interrupted := len(files) == 0 && agent.HookDirInterrupted(fsys, pa, d)
 	if action == "status" || action == "install" && !st.Supported {
-		return nil
+		switch {
+		case interrupted:
+			st.Reason = strings.TrimSpace(st.Reason + " An install or removal of the hook folder stopped halfway; install the hooks again to finish it.")
+		case st.Installed && !hookFilesIn(files, want):
+			st.Reason = strings.TrimSpace(st.Reason + " The hook folder holds hopsesh files other than this hopsesh's (an older hopsesh's, or edited); install the hooks again to replace them.")
+		}
+		return false, nil
+	}
+	if action == "remove" && len(files) == 0 && !interrupted {
+		return false, nil // nothing there: no lock, no staging folder
 	}
 	unlock, err := lockHookDir(ctx, d.Staging)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer unlock()
+	var changed bool
 	if action == "remove" {
-		_, err = agent.RemoveHookDir(fsys, pa, d)
+		changed, err = agent.RemoveHookDir(fsys, pa, d)
 	} else {
-		_, err = agent.InstallHookDir(fsys, pa, d)
+		changed, err = agent.InstallHookDir(fsys, pa, d)
 	}
 	if err != nil {
-		return err
+		return changed, err
 	}
 	files, err = agent.ReadHookDir(fsys, pa, d)
 	st.Installed = err == nil && d.Has(files)
-	return err
+	return changed, err
+}
+
+// hookFilesIn reports whether every file of want is in have as it is in want.
+func hookFilesIn(have, want map[string][]byte) bool {
+	for name, b := range want {
+		if got, ok := have[name]; !ok || !bytes.Equal(got, b) {
+			return false
+		}
+	}
+	return true
 }
 
 // lockHookDir takes the machine's hook lock for a hook folder staged in staging.
@@ -348,9 +377,19 @@ func (localHookDirFS) WriteFile(p string, b []byte, perm fs.FileMode) error {
 	return os.WriteFile(p, b, perm)
 }
 
-func (localHookDirFS) MkdirAll(p string) error      { return os.MkdirAll(p, 0o755) }
-func (localHookDirFS) Rename(from, to string) error { return os.Rename(from, to) }
-func (localHookDirFS) RemoveAll(p string) error     { return os.RemoveAll(p) }
+func (localHookDirFS) MkdirAll(p string) error  { return os.MkdirAll(p, 0o755) }
+func (localHookDirFS) RemoveAll(p string) error { return os.RemoveAll(p) }
+
+// Rename moves a folder. On Windows a file the agent's folder watcher or an antivirus
+// holds open fails it for a moment, so it is tried again for up to two seconds.
+func (localHookDirFS) Rename(from, to string) error {
+	err := os.Rename(from, to)
+	for i := 0; err != nil && runtime.GOOS == "windows" && i < 40 && !errors.Is(err, fs.ErrNotExist); i++ {
+		time.Sleep(50 * time.Millisecond)
+		err = os.Rename(from, to)
+	}
+	return err
+}
 
 // Include registered roots even if the environment's default is absent. The
 // endpoint ID, not an alias or machine label, decides which registrations are local.

@@ -76,6 +76,12 @@ exec hopsesh notices status --agent opencode --json
 stdout '"state": "missing"'
 exec opencode run -s ses_e29a40000ffeProtectedOrig0 'commit it'
 ! stderr 'Blocked'
+# Installed while the service runs, the plugin may not be loaded yet (OpenCode reloads a
+# changed plugin folder on its own): hopsesh does not blame the config at once.
+exec hopsesh notices remove --agent opencode
+exec hopsesh notices install --agent opencode
+stdout 'installed; trust not verified'
+stdout 'hopsesh just installed the plugin'
 rm $HOME/.config/opencode/opencode.json
 env FAKE_OPENCODE_SERVICE=
 

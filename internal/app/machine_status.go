@@ -891,7 +891,8 @@ func remoteHookDir(fsys host.FS, pa agent.Path, d *agent.HookDir, approves bool)
 	case approves:
 		return Check{State: CheckOK, Text: trustAtLogin}
 	}
-	return Check{State: CheckOK, Text: "installed"}
+	// A config there can still remove the plugin: only its own agent says whether it loads.
+	return Check{State: CheckOK, Text: "installed", Reason: "whether the agent loads it isn't checked from here (hopsesh notices status there says)"}
 }
 
 // readOnlyHookDirFS reads a hook folder through a machine's FS; nothing is written.

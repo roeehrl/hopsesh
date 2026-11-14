@@ -268,7 +268,7 @@ func TestHookFolderReadOverSSH(t *testing.T) {
 	argv, _ := json.Marshal(map[string][]string{"argv": {prog, "notice-hook", "--agent", "opencode"}})
 	os.WriteFile(filepath.Join(plugin, "config.json"), argv, 0o600)
 	os.WriteFile(filepath.Join(plugin, "index.js"), []byte("export default {}\n"), 0o600)
-	if c, _ := remoteHooks(fsys, pa, hi, false); c.State != CheckOK || c.Text != "installed" {
+	if c, _ := remoteHooks(fsys, pa, hi, false); c.State != CheckOK || c.Text != "installed" || !strings.Contains(c.Reason, "loads it") {
 		t.Fatalf("installed: %+v", c)
 	}
 	if c, _ := remoteHooks(fsys, pa, hi, true); c.Text != trustAtLogin {
