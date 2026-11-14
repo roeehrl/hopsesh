@@ -157,6 +157,14 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		// A saved row is for browsing; its lineage is an outline. Plan from a fresh read.
 		return nil, move.Input{}, fmt.Errorf("this session on %s was not read just now; refresh %s and try again", e.Machine, e.Machine)
 	}
+	// hopsesh cannot tell how this session relates to its earlier copies, so it cannot add
+	// to one of them. Continuing in another agent, or keeping both, still works from what
+	// the session holds now: as a separate conversation, the original left as it is.
+	separate := e.LineageError != "" && !e.CanArchiveLineage && !opt.Fork &&
+		(target != "" && target != e.Agent || opt.Conflict == move.ConflictKeepBoth)
+	if separate {
+		opt.Fork, opt.TargetSession, opt.NewReplica = true, "", false
+	}
 	if e.LineageError != "" && (e.CanArchiveLineage || !opt.Fork) {
 		if !e.CanArchiveLineage {
 			return nil, move.Input{}, fmt.Errorf("cannot transfer until its ancestry can be verified: %s; if the parent conversation is archived, unarchive it and refresh", e.LineageError)
@@ -268,6 +276,10 @@ func (a *App) Plan(ctx context.Context, inv *Inventory, e Entry, target agent.ID
 		opt.OpenBlockedOriginal = a.openBlockedOriginal(ctx, returnInventory, e)
 	}
 	p, err := move.Build(ctx, in, opt)
+	if err == nil && separate {
+		p.Warnings = append(p.Warnings, "hopsesh could not check this session against its earlier copies ("+e.LineageError+
+			"), so it continues as a separate conversation from what the session holds now.")
+	}
 	return p, in, err
 }
 

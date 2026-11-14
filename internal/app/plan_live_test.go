@@ -160,3 +160,28 @@ func TestPlanRejectsUnverifiableDestinationAndPropagatesCancellation(t *testing.
 		})
 	}
 }
+
+// A session whose earlier copies hopsesh cannot check (here its native history was
+// compacted) is not moved onto one of them; keeping both makes a separate conversation
+// from what it holds now, and says so.
+func TestPlanDivergedLineageKeepsBoth(t *testing.T) {
+	f, _, inv, source := planLiveFixture(t)
+	source.LineageError = "both copies changed: history was compacted or rewound; keep them as separate conversations"
+	if _, _, err := f.a.Plan(context.Background(), inv, source, "claude", move.Options{TargetDir: source.Session.CWD}); err == nil || !strings.Contains(err.Error(), "cannot transfer until its ancestry can be verified") {
+		t.Fatalf("a plain move of a diverged session must still be refused: %v", err)
+	}
+	p, _, err := f.a.Plan(context.Background(), inv, source, "claude", move.Options{TargetDir: source.Session.CWD, Conflict: move.ConflictKeepBoth, TargetSession: f.original.Key.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Options.Fork || p.Options.TargetSession != "" || !slices.ContainsFunc(p.Warnings, func(w string) bool { return strings.Contains(w, "continues as a separate conversation") }) {
+		t.Fatalf("keep-both of a diverged session: fork %v, target %q, warnings %q", p.Options.Fork, p.Options.TargetSession, p.Warnings)
+	}
+	if p.Continue != nil && p.Continue.Relation == move.RelationAppend {
+		t.Fatal("a diverged session must not be added to an earlier copy")
+	}
+	source.CanArchiveLineage = true
+	if _, _, err := f.a.Plan(context.Background(), inv, source, "claude", move.Options{TargetDir: source.Session.CWD, Conflict: move.ConflictKeepBoth}); err == nil {
+		t.Fatal("damaged lineage must still be refused")
+	}
+}
