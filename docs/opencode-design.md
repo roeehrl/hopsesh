@@ -457,8 +457,9 @@ plain JavaScript (`index.js`, `hopsesh.js`), the instruction entry's key is `hop
 (OpenCode refuses a slash), the rules live in `{config}/.hopsesh/rules.json` (the plugin's
 `config.json` names that file), the plugin also checks again after a failure only once 10 s
 have passed and keeps a verdict 30 s for tool calls, a subagent's session follows its root
-session's verdict, and HookTrust asks only a running service (a private server answers
-before it loads plugins). The text below is the plan.
+session's verdict, HookTrust asks only a running service (a private server answers
+before it loads plugins), and only `-hopsesh` and `-*` remove the plugin (a selector `x.*`
+matches ids that start with `x.`). The text below is the plan.
 
 **Files** in `{config}/plugins/hopsesh/`, owned by hopsesh:
 - `index.ts`: `Plugin.define({id:"hopsesh", setup})`.
@@ -492,7 +493,7 @@ profile. Installed only when the **service** version is ≥ 2.1.0 (the plugin ru
 `Plugin.define` on 2.1/2.2 is verified in PR 6 before the floor is final.
 
 **Trust (`HookTrust`).** Trusted when `opencode api GET /api/plugin` (JSON) lists `hopsesh` as loaded,
-no config remove entry matches it (`-hopsesh`, `-*`, `-<prefix>.*`), and managed policy does not deny
+no config remove entry matches it (`-hopsesh`, `-*`), and managed policy does not deny
 plugins. Hot reload of plugin directories is UNVERIFIED; if it does not happen, HookTrust reports
 "loads after the next OpenCode service restart" (hopsesh never restarts it).
 
@@ -1278,29 +1279,40 @@ left:
   `config.json` per install: the notice hook's argv (spawned with no shell), the rules file,
   a 5 s timeout and a 30 s verdict cache. It asks the notice hook on every prompt (`session.hook
   ("prompt")`, never throwing) and on `session.created`/`moved`/`forked`, keeps a verdict per
-  root session (a subagent's session follows its root, found with `session.get`), and asks again
-  on a tool call with no fresh verdict (a restart, a resumed turn). While blocked,
+  root session (a subagent's session follows its root, found with `session.get`, which returns
+  the session itself: the Promise API unwraps `{data}`; a lookup that fails is not kept, and a
+  subagent's `session.created` records its `parentID` and checks nothing), and asks again on a
+  tool call with no fresh verdict (a restart, a resumed turn). While blocked,
   `tool.hook("execute.before")` throws the reason (every tool, read-only ones too: a prompt
   cannot be refused), `permission.hook("evaluate")` denies, and the instruction entry
   `hopsesh-notice` (keys are `[a-z0-9._-]`, no slash) tells the model why; an allowed verdict
   takes an earlier entry out. A hook that fails, prints nothing or takes over 5 s lets the call
   through, is logged to the server's stderr, and is counted in the plugin's storage (`kv`
   under `plugin:<hex id>:failures`, which `HookTrust` reads); the plugin then asks again only
-  after 10 s, so a hanging hopsesh does not stall every call. A config without an argv
-  registers nothing.
+  after 10 s, so a hanging hopsesh does not stall every call. A failed check keeps a block
+  less than 30 s old (one failure does not lift it). A config without an argv registers
+  nothing.
 - **The notice hook's JSON for OpenCode:** `{session_id, directory, event}` in (no transcript:
   the core finds the anchor from the id; the folder is not used), and always a verdict out:
   `{"block":false}`, `{"block":false,"context":…}` or `{"block":true,"reason":…}` on either
   event. A failure prints nothing, which the plugin counts.
 - **Trust.** `HookTrust` asks `opencode api GET /api/plugin` only while the service runs (a
   private server lists nothing: it answers before loading plugins, confirmed on 2.3.0), for the
-  home folder, asking again for up to three seconds while the list lacks OpenCode's own
-  plugins. hopsesh's plugin listed `active` in its folder is trusted; absent is `HookMissing`
-  ("a config entry removes it, `-hopsesh` or `-*`, or a policy denies plugins": hopsesh never
+  home folder, asking again (three asks a second apart, the service probed before each) while
+  the list is empty or lacks hopsesh's plugin (OpenCode reloads a changed plugin folder a
+  moment after the change). hopsesh's plugin is found by its folder first (a plugin that
+  failed to load is listed with its folder and no id), then by its id. Listed `active` in
+  its folder it is trusted; absent is `HookMissing` ("a config entry removes it, `-hopsesh` or
+  `-*`, a policy denies plugins, or OpenCode has not reloaded its plugins": hopsesh never
   reads OpenCode's config, so it cannot say which); `failed` is `HookMissing` with OpenCode's
-  error and log ref; another folder's `hopsesh` is `HookMissing`. With the service stopped
-  trust is unknown ("loads when it starts"), and the machine counts the original as
-  protected, as for an installed hook it cannot ask about. A removal in one project's
+  error and log ref (on one line, without control characters); another folder's `hopsesh`
+  is `HookMissing`. Right after an install that changed the folder, `HookMissing` is shown
+  as unknown ("just installed; it usually loads within seconds"). With the service stopped
+  trust is unknown ("loads when it starts"), and the machine, and now the GUI's guard too,
+  count the original as protected, as for an installed hook it cannot ask about (the GUI
+  still shows an unknown hook as a problem for an agent that runs hooks only once approved,
+  Codex). Over SSH an installed plugin reads "installed", with the note that whether
+  OpenCode loads it is not checked from there. A removal in one project's
   `.opencode/opencode.json` is not seen (the list is the home folder's). The plugin itself is
   not hot-reload-tested (source says a change in a plugin folder reloads it).
 - **Floor.** The plugin is offered for OpenCode 2.2.7 and newer (loading and hook
@@ -1312,7 +1324,12 @@ left:
   core's `app.Rules`), owned by hopsesh and written by `skill install --add-rules`; the plugin
   reads it on each permission: every command of a shell call matching an allow prefix after
   the exact `bin` → allow, any matching an ask prefix → ask, else OpenCode's own rules; a deny
-  the user configured never reaches the plugin. The rules do nothing without the plugin; the
+  the user configured never reaches the plugin. OpenCode splits a shell call at `&&`, `;`, `|`
+  and `$(…)`, but a redirection stays in its command, so a command with `<`, `>`, `|`, `&`,
+  `;`, a backtick, `$(` or a second line is never allowed. Left: an "ask" the user configured
+  can still become "allow" for hopsesh's read-only commands; the hook gets only the combined
+  effect, and its `source` names the tool call, not the rule, so the plugin cannot tell a
+  user's ask from OpenCode's default. The rules do nothing without the plugin; the
   skill report says "present" either way (PR 8 could say so).
 - **Skill.** OpenCode now has an `Integration`: it shares Codex's `~/.agents/skills` copy
   (`skill.txtar` reads "(Codex, OpenCode)"); a second copy in `~/.claude/skills` is one skill
@@ -1326,9 +1343,40 @@ left:
   the agent" reads oddly for a loaded plugin; the guard shows "set up (not checked yet)" for an
   agent that asks no approval. The failure count is in `HookTrust.Failures` and the detail,
   shown by `notices status`, not yet by the GUI; it is never reset.
+- **Notices.** The notice goes on the root session (a subagent's check asks about the root);
+  a block also goes on the subagent's session, and comes off it when the block ends. Unlike
+  Claude Code's `additionalContext`, which stays in the transcript, a notice that is not a
+  block is shown only until the next check: hopsesh marks it delivered when the plugin gets
+  it (not when the model has read it), the next answer carries no text, and the plugin takes
+  the entry out. A move event during a prompt's check runs its own check (checks are shared
+  per root and event). The event subscription is made again when it ends (waiting 1 s, up to
+  a minute), and the plugin remembers at most 2000 sessions' verdicts, parents and notices.
+- **The plugin folder** is hopsesh's only when its `config.json` runs a hopsesh notice hook
+  for OpenCode (`notice-hook --agent opencode`): `notices install` refuses another
+  `plugins/hopsesh` folder and `notices remove` leaves it. Installed (`Has`) means this
+  install's `config.json` and hopsesh's three files present; an older or edited copy of those
+  files still runs, so it reads installed, and `notices status` adds that install replaces
+  them (no upgrade refreshes the plugin by itself; PR 8 could offer it in the GUI). A file
+  added to the folder (a `.DS_Store`) changes nothing; an install drops it. A removal where
+  nothing was installed writes nothing (no lock, no `{config}/.hopsesh`). A replace that
+  stopped between its two renames reads "stopped halfway; install again" in status (the
+  next install or removal finishes it), and on Windows a rename the agent's watcher or an
+  antivirus holds is tried again for up to two seconds.
+- **Codex** changes with the trust split, beyond the warning above: the GUI's needs list
+  says "Codex hook" for a missing hook (not "Codex hook approval"), `notices status` says
+  "NOT RUNNING: not seen by the agent" and prints the agent's detail whenever the hook is
+  not trusted, and the GUI's message for a hook the agent does not run now carries the
+  agent's detail (OpenCode's load error and log ref, for one). Its "Set up protection"
+  action still cannot fix a config that removes the plugin (PR 8).
+- **Drift.** The 2.2.7 floor is declared in `driftmanifest/targets.go` (it gates the plugin),
+  with `GET /api/plugin`, the plugin API and kv storage in the target's surface, OpenCode's
+  plugin supervisor, host, folder source, config source, Promise adapter and session events
+  in its code paths, and plugin, instruction and permission changes in its release grep.
 - **Leftovers.** An instruction entry stays in a session if the plugin is removed while the
   session is blocked (OpenCode keeps entries; the next allowed verdict would take it out).
-  The staging folder keeps its lock file.
+  The staging folder keeps its lock file. The stand-in finds a session's root by
+  `parent_id` in its database, so the plugin's own `session.get` is checked only by the
+  plugin tests and the real-binary check.
 - **Stand-in.** It finds plugins in `{config}` and the working folder's `.opencode`, applies a
   config's removals and `plugin.use` policies, lists them from a running service (OpenCode's
   own plugins first; `-*` does not remove those), and with `$FAKE_OPENCODE_TOOL` plays a `run
@@ -1339,9 +1387,11 @@ left:
   holds what the plugin writes to the notice hook (`opencode-plugin-notice.schema.json`; the
   checker also has the module decode it), with a prompt's and an event's call as the plugin
   makes them (the folder scrubbed). The bundle's README describes the stand-in's plugins.
-- **Plugin tests (PR 9).** `plugin/hopsesh.test.js` (Bun's test runner; 24 tests: verdict
-  cache, cache-miss check, prompt hook never throws, allow/ask/deny, timeout and failures fail
-  open and are counted, subagent root, setup) runs from `go test ./agents/opencode` where Bun is
+- **Plugin tests (PR 9).** `plugin/hopsesh.test.js` (Bun's test runner; 31 tests: verdict
+  cache, cache-miss check, prompt hook never throws, allow/ask/deny and redirections, timeout
+  and failures fail open and are counted, a failed check keeps a fresh block, subagent root
+  with `session.get`'s real shape and a failed lookup not kept, notices on the root, an answer
+  split inside a character, setup, events and a subscription made again) runs from `go test ./agents/opencode` where Bun is
   installed and skips otherwise. Bun is not installed on this Mac: they ran under Node with a
   `bun:test` stand-in (not committed), all passing. CI has no Bun yet: PR 9 adds it
   (`oven-sh/setup-bun`) so they run there.
@@ -1364,7 +1414,20 @@ left:
   /api/skill --standalone` answered empty lists (before loading), and `GET /api/model
   --standalone`, which waits for plugins, did load them. 11 commands reached the real binary
   through the guard (2 runs, a session list, an export, 2 api probes, 5 `--version`), every
-  other one `--standalone`; the harness was not committed (PR 9).
+  other one `--standalone`; the harness was not committed (PR 9). Re-run after the review
+  fixes, on another fresh copy behind the same guard, with the plugin's `config.json` in the
+  project-local copy pointed at a wrapper that logs each notice-hook call and a 1 ms verdict
+  cache (so every tool call asks): a new session's model started a subagent with the task
+  tool, which ran `hopsesh version`; all six notice-hook calls carried the root session's id,
+  none the subagent's (whose `parent_id` is the root), and the subagent's `session.created`
+  started no check. After `hopsesh pull … --in claude`, a prompt in the subagent's own session
+  had its `echo` refused with the root's reason (`✗ echo PR6-SUBAGENT failed`), and one in the
+  root likewise; both sessions then held the `hopsesh-notice` block entry. No warning or error
+  in OpenCode's log; the user's config folder listing was the same before and after. 8
+  commands reached the real binary through the guard (3 runs, 5 `--version`; `service status`
+  was answered by the guard itself). Also checked there: `notices remove` with nothing installed
+  wrote no `.hopsesh` folder, and a `plugins/hopsesh` folder without hopsesh's `config.json`
+  was neither replaced nor removed.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
@@ -1459,3 +1522,14 @@ one-line PR after D10's condition is met.
   differently: a cache miss in `execute.before` asks the notice-hook, which reads hopsesh's own lineage.
   That survives restarts without a second copy of the verdict that could go stale.
 - **Remote snapshot tier and the old Q2/Q3.** Dropped as the reviews recommended; no decision remains.
+- **Keep a user-configured "ask" over hopsesh's allow rules (PR 6 safety review, item 7).** Not
+  followed: OpenCode's `permission.evaluate` hook gets the combined effect, and its `source`
+  names the tool call, not the rule, so a user's ask and OpenCode's default ask look the same.
+  The redirection part of that item is followed.
+- **Report HookUnknown after a changed install (PR 6 safety review, item 4).** Followed in the
+  app rather than the module: `HookTrust` does not know an install just happened, so the app
+  shows a `HookMissing` that follows an install which changed a hook folder as unknown ("just
+  installed"); the module asks again for a few seconds while hopsesh's plugin is absent.
+- **Report an outdated plugin, or refresh it on upgrade (PR 6 safety review, item 5).** Followed
+  in part: an older copy of hopsesh's plugin files reads installed, and `notices status` says
+  an install replaces them; nothing refreshes it by itself yet.
