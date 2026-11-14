@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/roeehrl/hopsesh/blob/main/testbundle/schemas/opencode-plugin-notice.schema.json",
+  "title": "hopsesh's OpenCode plugin: notice-hook input",
+  "description": "What hopsesh's OpenCode plugin (agents/opencode/plugin/hopsesh.js) writes to the standard input of `hopsesh notice-hook --agent opencode`: the session (its root session, for a subagent's), the folder its OpenCode server runs in, and the event (UserPromptSubmit for a prompt or a tool call, SessionStart after session.created, session.moved or session.forked). hopsesh answers one JSON object: {\"block\":false}, {\"block\":false,\"context\":...} or {\"block\":true,\"reason\":...}. The file lives in opencode/<OpenCode version>/notice/<event>/.",
+  "type": "object",
+  "required": ["session_id", "directory", "event"],
+  "properties": {
+    "session_id": {"type": "string", "pattern": "^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$"},
+    "directory": {"type": "string", "minLength": 1},
+    "event": {"type": "string", "enum": ["UserPromptSubmit", "SessionStart"]}
+  },
+  "additionalProperties": false
+}

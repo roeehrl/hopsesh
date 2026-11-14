@@ -41,6 +41,7 @@ hopsesh-testbundle-<version>/
     registry/*.json
     notify/*.json
     export/*.json
+    notice/<Event>/*.json
 ```
 
 `<agent>` is a module id (`claude`, `codex`, …) and `<agent version>` the agent's own version
@@ -68,7 +69,13 @@ As `opencode` it plays OpenCode 2.3.0 with a SQLite database of its own, where O
 it (`$XDG_DATA_HOME/opencode/opencode.db`, or `$OPENCODE_DB`): `--version`, `debug paths`,
 `service status`, `session list|export|import|delete`, `auth list --format json`, and the
 `opencode api` calls hopsesh makes (sessions: list, get, rename, delete, move, fork,
-interrupt, messages; `/api/session/active`, `/api/info`, `/api/plugin`). Its exports match
+interrupt, messages; `/api/session/active`, `/api/info`, `/api/plugin`: the plugins a running
+service loaded from `{config}` and the working folder's `.opencode`, less those a config's
+`"plugins"` removes or a `plugin.use` policy denies; a private server lists none, as 2.3.0's
+answers before loading them). With `$FAKE_OPENCODE_TOOL` set, `run -s <id>` plays a turn whose
+model makes that one shell call through hopsesh's plugin (asking the notice hook its
+`config.json` names): refused with hopsesh's reason while the session is blocked, as 2.3.0's
+`run` prints a failed tool. Its exports match
 the 2.3.0 exports captured in a sandbox byte for byte (sessions without media). Its import
 decodes the file with OpenCode 2.3.0's schemas: a wrong shape is `Bad Request`, members the
 schemas do not declare are dropped, `Session already exists` goes to standard error with
@@ -96,6 +103,7 @@ testbundle/<agent>/<agent version>/<slot>/[<Event>/]<name>.json
 | `codex` | `hooks/<Event>/` | JSON on hook command standard input, under its `hook_event_name` | `codex-hook.schema.json` |
 | `codex` | `notify/` | the JSON Codex passes to its `notify` program | `codex-notify.schema.json` |
 | `opencode` | `export/` | a session as `opencode session export <id>` prints it; OpenCode 2.3.0's schemas must decode it without dropping a member, and it must import into the stand-in and export again unchanged | `opencode-transfer.schema.json` |
+| `opencode` | `notice/<Event>/` | what hopsesh's OpenCode plugin writes to `hopsesh notice-hook --agent opencode`, under its `event` (`UserPromptSubmit`, `SessionStart`); hopsesh must read it as that session and event | `opencode-plugin-notice.schema.json` |
 
 The rules:
 
