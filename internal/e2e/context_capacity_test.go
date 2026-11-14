@@ -12,87 +12,43 @@ import (
 
 	"github.com/roeehrl/hopsesh/agents/claude"
 	"github.com/roeehrl/hopsesh/agents/codex"
+	"github.com/roeehrl/hopsesh/agents/opencode"
 	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/journal"
 	"github.com/roeehrl/hopsesh/internal/core/lineage"
 	"github.com/roeehrl/hopsesh/internal/core/move"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakeopencode"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 	"github.com/roeehrl/hopsesh/sdk/ir"
 )
 
 // These cases run in the existing macOS/Linux/Windows context scenario matrix.
-// Native readers, writers, archives, receipts and undo all participate.
+// Native readers, writers, archives, receipts and undo all participate. OpenCode is the
+// stand-in 2.3.0 (not on Windows: it runs as a link to the test binary).
 func TestContextReadableTransferBothDirections(t *testing.T) {
-	for _, from := range []string{"claude", "codex"} {
-		t.Run(from, func(t *testing.T) {
+	for _, pair := range [][2]string{{"claude", "codex"}, {"codex", "claude"}, {"claude", "opencode"}, {"codex", "opencode"}, {"opencode", "claude"}, {"opencode", "codex"}} {
+		from, to := pair[0], pair[1]
+		t.Run(from+">"+to, func(t *testing.T) {
 			ctx := context.Background()
 			root := t.TempDir()
+			ocBin := ""
+			if from == "opencode" || to == "opencode" {
+				ocBin = ocOnPath(t, root)
+			}
 			a, b := newLocation(t, "A", root), newLocation(t, "B", root)
-			var src, dst agent.Module = claude.New(), codex.New()
-			si, di := a.in, codexInstall(b)
-			if from == "codex" {
-				src, dst, si, di = codex.New(), claude.New(), codexInstall(a), b.in
-			}
-			seedJournal, err := journal.New(t.TempDir(), journal.KindContinue, "context source fixture")
-			if err != nil {
-				t.Fatal(err)
-			}
-			h, err := a.m.For(ctx, src.Spec(), si, seedJournal)
-			if err != nil {
-				t.Fatal(err)
-			}
-			w, err := src.(agent.Writer).Write(ctx, h, si, ir.WriteRequest{Mode: ir.WriteNew, Header: ir.Header{CWD: a.repo}, Items: []ir.Item{{Role: ir.RoleUser, Node: "initial", Text: "Investigate the worker payout presentation."}, {Role: ir.RoleAgent, Node: "reply", Text: "I will check the payout records."}}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			original, _ := os.ReadFile(w.Path)
-			parent := ""
-			for _, line := range strings.Split(string(original), "\n") {
-				var r map[string]any
-				_ = json.Unmarshal([]byte(line), &r)
-				if id, ok := r["uuid"].(string); ok {
-					parent = id
+			mods := map[string]agent.Module{"claude": claude.New(), "codex": codex.New(), "opencode": opencode.New()}
+			installs := map[string]func(location) agent.Install{"claude": func(l location) agent.Install { return l.in }, "codex": codexInstall, "opencode": ocInstall}
+			for _, l := range []location{a, b} {
+				if ocBin != "" {
+					l.m.Facts.Binaries["opencode"] = agent.BinaryFact{Path: ocBin, Version: "opencode v2.3.0"}
+					os.MkdirAll(ocInstall(l).Main(), 0o700)
 				}
 			}
-			var extra strings.Builder
-			write := func(v any) { raw, _ := json.Marshal(v); extra.Write(raw); extra.WriteByte('\n') }
+			src, dst := mods[from], mods[to]
+			si, di := installs[from](a), installs[to](b)
 			summary := "## Worker task\nKeep the mounted proxy enabled.\n\n### Outstanding work\nVerify settled payouts; never count forfeited alpha as paid."
-			if from == "codex" {
-				write(map[string]any{"type": "compacted", "payload": map[string]any{"message": summary}})
-			}
-			message := func(i int, role, text string, compact bool) {
-				if from == "claude" {
-					id := fmt.Sprintf("context-%d", i)
-					write(map[string]any{"type": role, "uuid": id, "parentUuid": parent, "sessionId": w.SessionID, "cwd": a.repo, "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "isCompactSummary": compact, "message": map[string]any{"role": role, "content": text}})
-					parent = id
-				} else {
-					kind := "input_text"
-					if role == "assistant" {
-						kind = "output_text"
-					}
-					write(map[string]any{"type": "response_item", "payload": map[string]any{"type": "message", "role": role, "content": []any{map[string]any{"type": kind, "text": text}}}})
-				}
-			}
-			if from == "claude" {
-				message(0, "user", summary, true)
-			}
-			for i := 1; i <= 100; i++ {
-				role := "user"
-				if i%2 == 0 {
-					role = "assistant"
-				}
-				message(i, role, strings.Repeat("Historical worker evidence.\n", 150), false)
-			}
 			const current = "Current request: fix the final payout label and run the payout tests."
-			message(101, "user", current, false)
-			if from == "claude" {
-				write(map[string]any{"type": "last-prompt", "leafUuid": parent, "sessionId": w.SessionID, "lastPrompt": current})
-			}
-			if err = os.WriteFile(w.Path, append(original, []byte(extra.String())...), 0600); err != nil {
-				t.Fatal(err)
-			}
-			before, _ := os.ReadFile(w.Path)
-			s := findRouteSession(t, a, src, si, agent.SessionKey{Agent: src.Spec().ID, Session: agent.SessionID(w.SessionID)})
+			s, unchanged := pressuredSession(t, a, src, si, summary, current)
 			in := move.Input{Source: move.Side{Machine: a.m, Module: src, Install: si}, Session: s, Target: move.Side{Machine: b.m, Module: dst, Install: di}}
 			p, err := move.Build(ctx, in, move.Options{TargetDir: b.repo})
 			if err != nil {
@@ -121,7 +77,7 @@ func TestContextReadableTransferBothDirections(t *testing.T) {
 				}
 			}
 			if requests != 1 || copy.LastPrompt != current || p.Continue.Report.Used > p.Continue.Report.Budget {
-				t.Fatal("request identity, last prompt or capacity changed")
+				t.Fatalf("request identity, last prompt or capacity changed: %d requests, last prompt %q, %d of %d", requests, copy.LastPrompt, p.Continue.Report.Used, p.Continue.Report.Budget)
 			}
 			graph, err := lineage.Read(host.LocalFS(), copy.Path)
 			if err != nil || graph == nil || graph.Validate() != nil {
@@ -131,21 +87,128 @@ func TestContextReadableTransferBothDirections(t *testing.T) {
 			if err != nil || !strings.Contains(string(archive), "never count forfeited alpha") {
 				t.Fatal("portable summary archive missing")
 			}
-			after, _ := os.ReadFile(w.Path)
-			if string(before) != string(after) {
-				t.Fatal("conversion changed the source transcript")
+			if !unchanged() {
+				t.Fatal("conversion changed the source session")
 			}
 			j, err := journal.Load(env.StateDir, result.Journal)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err = j.Undo(ctx, journal.Files(func(string) (host.FS, error) { return host.LocalFS(), nil }), false); err != nil {
+			reach := journal.Files(func(string) (host.FS, error) { return host.LocalFS(), nil })
+			if to == "opencode" {
+				reach = ocReach(opencode.New(), b)
+			}
+			if err = j.Undo(ctx, reach, false); err != nil {
 				t.Fatal(err)
 			}
 			if _, err = os.Stat(copy.Path); !os.IsNotExist(err) {
 				t.Fatal("undo retained the converted transcript")
 			}
+			if to == "opencode" && sessionThere(t, b, copy.Key.Session) {
+				t.Fatal("undo left the OpenCode session")
+			}
 		})
+	}
+}
+
+// pressuredSession makes a session at l in module m's agent whose history is an earlier
+// summary, 100 long messages and a current request: too long for any target's incoming
+// allowance. unchanged reports whether the session is still as made.
+func pressuredSession(t *testing.T, l location, m agent.Module, in agent.Install, summary, current string) (agent.Summary, func() bool) {
+	t.Helper()
+	ctx := context.Background()
+	from := string(m.Spec().ID)
+	long := strings.Repeat("Historical worker evidence.\n", 150)
+	if from == "opencode" {
+		seedJournal, err := journal.New(t.TempDir(), journal.KindContinue, "context source fixture")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := l.m.For(ctx, m.Spec(), in, seedJournal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		const id agent.SessionID = "ses_e29a0000000eContextSrc0000"
+		if _, err := m.(agent.Writer).Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteNew, SessionID: string(id), Header: ir.Header{CWD: l.repo},
+			Items: []ir.Item{{Role: ir.RoleUser, Node: "initial", Text: "Investigate the worker payout presentation."}, {Role: ir.RoleAgent, Node: "reply", Text: "I will check the payout records."}}}); err != nil {
+			t.Fatal(err)
+		}
+		ocCompaction(t, l, id, summary)
+		for i := 1; i <= 50; i++ {
+			ocTurn(t, l, id, long, long)
+		}
+		useOpenCode(t, l, id, current)
+		s := findRouteSession(t, l, m, in, agent.SessionKey{Agent: "opencode", Session: id})
+		before, err := fakeopencode.Export(ocDB(l), string(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s, func() bool {
+			after, err := fakeopencode.Export(ocDB(l), string(id))
+			return err == nil && string(after) == string(before)
+		}
+	}
+	seedJournal, err := journal.New(t.TempDir(), journal.KindContinue, "context source fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := l.m.For(ctx, m.Spec(), in, seedJournal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := m.(agent.Writer).Write(ctx, h, in, ir.WriteRequest{Mode: ir.WriteNew, Header: ir.Header{CWD: l.repo}, Items: []ir.Item{{Role: ir.RoleUser, Node: "initial", Text: "Investigate the worker payout presentation."}, {Role: ir.RoleAgent, Node: "reply", Text: "I will check the payout records."}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, _ := os.ReadFile(w.Path)
+	parent := ""
+	for _, line := range strings.Split(string(original), "\n") {
+		var r map[string]any
+		_ = json.Unmarshal([]byte(line), &r)
+		if id, ok := r["uuid"].(string); ok {
+			parent = id
+		}
+	}
+	var extra strings.Builder
+	write := func(v any) { raw, _ := json.Marshal(v); extra.Write(raw); extra.WriteByte('\n') }
+	if from == "codex" {
+		write(map[string]any{"type": "compacted", "payload": map[string]any{"message": summary}})
+	}
+	message := func(i int, role, text string, compact bool) {
+		if from == "claude" {
+			id := fmt.Sprintf("context-%d", i)
+			write(map[string]any{"type": role, "uuid": id, "parentUuid": parent, "sessionId": w.SessionID, "cwd": l.repo, "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "isCompactSummary": compact, "message": map[string]any{"role": role, "content": text}})
+			parent = id
+		} else {
+			kind := "input_text"
+			if role == "assistant" {
+				kind = "output_text"
+			}
+			write(map[string]any{"type": "response_item", "payload": map[string]any{"type": "message", "role": role, "content": []any{map[string]any{"type": kind, "text": text}}}})
+		}
+	}
+	if from == "claude" {
+		message(0, "user", summary, true)
+	}
+	for i := 1; i <= 100; i++ {
+		role := "user"
+		if i%2 == 0 {
+			role = "assistant"
+		}
+		message(i, role, long, false)
+	}
+	message(101, "user", current, false)
+	if from == "claude" {
+		write(map[string]any{"type": "last-prompt", "leafUuid": parent, "sessionId": w.SessionID, "lastPrompt": current})
+	}
+	if err = os.WriteFile(w.Path, append(original, []byte(extra.String())...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(w.Path)
+	s := findRouteSession(t, l, m, in, agent.SessionKey{Agent: m.Spec().ID, Session: agent.SessionID(w.SessionID)})
+	return s, func() bool {
+		after, _ := os.ReadFile(w.Path)
+		return string(before) == string(after)
 	}
 }
 

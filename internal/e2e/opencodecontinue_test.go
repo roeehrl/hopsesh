@@ -44,7 +44,7 @@ func ocTurn(t *testing.T, l location, sid agent.SessionID, prompt, reply string)
 	}
 	defer db.Close()
 	now := time.Now().UnixMilli()
-	id := "msg_ffffffffffff" + strings.Repeat("a", 10) + time.Now().Format("150405.000")[7:]
+	id := ocMessageID("a")
 	if _, err := db.Exec(`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
 		VALUES (?, ?, 'assistant', (SELECT max(seq) + 1 FROM session_message WHERE session_id = ?), ?, ?,
 		json_object('time', json_object('created', ?, 'completed', ?), 'agent', 'build', 'model', json_object('id', 'qwen', 'providerID', 'omlx'),
@@ -643,5 +643,27 @@ func TestBringCloudWorkIntoOpenCode(t *testing.T) {
 	defer inv3.Close()
 	if _, err := inv3.Find(app.ParseRef("opencode/" + sid)); err == nil {
 		t.Fatal("undo left the brought session")
+	}
+}
+
+// ocCompaction adds a completed compaction to an OpenCode session, as OpenCode's own
+// compaction leaves it: its summary, which the next turns build on.
+func ocCompaction(t *testing.T, l location, sid agent.SessionID, summary string) {
+	t.Helper()
+	db, err := fakeopencode.Open(ocDB(l))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UnixMilli()
+	id := ocMessageID("c")
+	if _, err := db.Exec(`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+		VALUES (?, ?, 'compaction', (SELECT max(seq) + 1 FROM session_message WHERE session_id = ?), ?, ?,
+		json_object('time', json_object('created', ?, 'completed', ?), 'status', 'completed', 'reason', 'auto', 'summary', ?))`,
+		id, string(sid), string(sid), now, now, now, now, summary); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE session_v2 SET time_updated = max(time_updated + 1, ?) WHERE id = ?`, now, string(sid)); err != nil {
+		t.Fatal(err)
 	}
 }

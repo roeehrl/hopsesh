@@ -3,11 +3,13 @@ package e2e
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,10 +40,25 @@ const (
 // two locations whose machines have it.
 func ocWorld(t *testing.T) (string, location, location) {
 	t.Helper()
+	root := t.TempDir()
+	bin := ocOnPath(t, root)
+	var ls []location
+	for _, name := range []string{"box", "here"} {
+		l := newLocation(t, name, root)
+		l.m.Facts.Binaries["opencode"] = agent.BinaryFact{Path: bin, Version: "opencode v2.3.0"}
+		ls = append(ls, l)
+	}
+	return filepath.Join(root, "agents.log"), ls[0], ls[1]
+}
+
+// ocOnPath puts the stand-in opencode (this test binary) first on PATH, with the agents'
+// variables unset, HOME at root, its calls logged to root/agents.log and its background
+// service stopped, and returns its path.
+func ocOnPath(t *testing.T, root string) string {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in runs as a symbolic link to the test binary")
 	}
-	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
 	if err := os.MkdirAll(bin, 0o700); err != nil {
 		t.Fatal(err)
@@ -51,18 +68,11 @@ func ocWorld(t *testing.T) (string, location, location) {
 		t.Fatal(err)
 	}
 	testkit.UnsetAgentEnv(t)
-	log := filepath.Join(root, "agents.log")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+testPath())
 	t.Setenv("HOME", root)
-	t.Setenv("FAKE_AGENT_LOG", log)
+	t.Setenv("FAKE_AGENT_LOG", filepath.Join(root, "agents.log"))
 	t.Setenv("FAKE_OPENCODE_SERVICE", "")
-	var ls []location
-	for _, name := range []string{"box", "here"} {
-		l := newLocation(t, name, root)
-		l.m.Facts.Binaries["opencode"] = agent.BinaryFact{Path: filepath.Join(bin, "opencode"), Version: "opencode v2.3.0"}
-		ls = append(ls, l)
-	}
-	return log, ls[0], ls[1]
+	return filepath.Join(bin, "opencode")
 }
 
 func ocInstall(l location) agent.Install {
@@ -100,7 +110,7 @@ func useOpenCode(t *testing.T, l location, sid agent.SessionID, text string) {
 	}
 	defer db.Close()
 	now := time.Now().UnixMilli()
-	id := "msg_ffffffffffff" + strings.Repeat("u", 10) + time.Now().Format("150405.000")[7:]
+	id := ocMessageID("u")
 	if _, err := db.Exec(`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
 		VALUES (?, ?, 'user', (SELECT max(seq) + 1 FROM session_message WHERE session_id = ?), ?, ?, json_object('time', json_object('created', ?), 'text', ?))`,
 		id, string(sid), string(sid), now, now, now, text); err != nil {
@@ -109,6 +119,15 @@ func useOpenCode(t *testing.T, l location, sid agent.SessionID, text string) {
 	if _, err := db.Exec(`UPDATE session_v2 SET time_updated = max(time_updated + 1, ?) WHERE id = ?`, now, string(sid)); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// ocMessages numbers the messages tests add to the stand-in's sessions: message ids are
+// keys of the whole database.
+var ocMessages atomic.Int64
+
+// ocMessageID is a new message id, after every message the fixtures hold, marked by kind.
+func ocMessageID(kind string) string {
+	return fmt.Sprintf("msg_ffffffffffff%s%013d", kind, ocMessages.Add(1))
 }
 
 func ocSessions(t *testing.T, l location, m *opencode.Module) map[agent.SessionID]agent.Summary {
