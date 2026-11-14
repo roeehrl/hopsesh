@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/roeehrl/hopsesh/agents/claude"
+	"github.com/roeehrl/hopsesh/agents/opencode"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/devtools/schemalite"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -43,6 +44,24 @@ var slots = []slot{
 	{agent: "codex", dir: "hooks", kind: "hook", schema: "codex-hook.schema.json", event: "hook_event_name"},
 	{agent: "codex", dir: "notify", kind: "notify", schema: "codex-notify.schema.json"},
 	{agent: "opencode", dir: "export", kind: "export", schema: "opencode-transfer.schema.json", more: openCodeExport},
+	{agent: "opencode", dir: "notice", kind: "notice", schema: "opencode-plugin-notice.schema.json", event: "event", more: openCodeNotice},
+}
+
+// openCodeNotice checks that hopsesh reads a call of its OpenCode plugin as the plugin
+// meant: the session and the event, and no transcript (OpenCode has none).
+func openCodeNotice(doc []byte) error {
+	call, ok := opencode.New().DecodeNoticeHook(doc)
+	var want struct {
+		Session string `json:"session_id"`
+		Event   string `json:"event"`
+	}
+	if err := json.Unmarshal(doc, &want); err != nil {
+		return err
+	}
+	if !ok || call.Session != want.Session || call.Event != want.Event || call.Path != "" {
+		return fmt.Errorf("hopsesh reads the call as %+v", call)
+	}
+	return nil
 }
 
 // openCodeExport checks an OpenCode export beyond its schema: each message type's members,

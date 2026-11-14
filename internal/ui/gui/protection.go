@@ -92,8 +92,11 @@ func needsOf(p *app.Protection, name func(agent.ID) string) []string {
 		case !h.Supported:
 		case !h.Installed:
 			out = append(out, agentName+" hook")
-		case h.Trust != nil && (h.Trust.State == agent.HookNeedsReview || h.Trust.State == agent.HookDisabled || h.Trust.State == agent.HookMissing):
+		case h.Trust != nil && (h.Trust.State == agent.HookNeedsReview || h.Trust.State == agent.HookDisabled):
 			out = append(out, agentName+" hook approval")
+		case h.Trust != nil && h.Trust.State == agent.HookMissing:
+			// The agent doesn't run it: not an approval for an agent that asks none (OpenCode).
+			out = append(out, agentName+" hook")
 		}
 	}
 	if p.Skill.State != "" && p.Skill.State != "current" {

@@ -58,12 +58,32 @@ func TestHookProblemsNameUntrustedCodexHooks(t *testing.T) {
 		{Agent: "codex", Profile: "p1", Installed: true, Enabled: true, Supported: true, Trust: &agent.HookTrust{State: agent.HookNeedsReview, Fix: "Open Codex and run /hooks"}},
 		{Agent: "amp", Enabled: true, Supported: true},
 	}
-	got := hookProblems(hooks, config.OriginalBlock)
+	approves := func(id agent.ID) bool { return id == "codex" }
+	got := hookProblems(hooks, config.OriginalBlock, approves)
 	if len(got) != 2 || got[0].Agent != "codex" || got[0].State != agent.HookNeedsReview || got[0].Fix == "" || got[1].State != "not-installed" {
 		t.Fatalf("problems: %+v", got)
 	}
-	if len(hookProblems(hooks, config.OriginalOff)) != 0 {
+	if len(hookProblems(hooks, config.OriginalOff, approves)) != 0 {
 		t.Fatal("protection off reports hook problems")
+	}
+}
+
+// An installed hook that could not be checked is a problem only where the agent runs it
+// after an approval (Codex); OpenCode's plugin, with its service stopped, protects. A
+// plugin OpenCode does not run says why.
+func TestHookProblemsUncheckedPlugin(t *testing.T) {
+	unknown := &agent.HookTrust{State: agent.HookUnknown, Detail: "OpenCode isn't running"}
+	hooks := []app.MovementHookStatus{
+		{Agent: "opencode", Installed: true, Enabled: true, Supported: true, Trust: unknown},
+		{Agent: "codex", Installed: true, Enabled: true, Supported: true, Trust: unknown},
+	}
+	approves := func(id agent.ID) bool { return id == "codex" }
+	if got := hookProblems(hooks, config.OriginalBlock, approves); len(got) != 1 || got[0].Agent != "codex" || got[0].State != agent.HookUnknown {
+		t.Fatalf("problems: %+v", got)
+	}
+	hooks[0].Trust = &agent.HookTrust{State: agent.HookMissing, Detail: "OpenCode could not load the hopsesh plugin: boom (err_1 in OpenCode's log)", Fix: "Install hopsesh's hooks again."}
+	if got := hookProblems(hooks[:1], config.OriginalBlock, approves); len(got) != 1 || !strings.Contains(got[0].Message, "err_1") || got[0].Fix == "" {
+		t.Fatalf("problems: %+v", got)
 	}
 }
 
