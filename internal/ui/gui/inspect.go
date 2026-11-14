@@ -363,7 +363,8 @@ func appKind(id agent.ID) presence.Kind { return presence.KindApp(string(id)) }
 
 // placesOf is where a live session's processes run (besides hopsesh's own tabs): each
 // process by its first known ancestor, counted by place; a process the module says is
-// the agent's desktop app is that app's place (kind).
+// the agent's desktop app is that app's place (kind). Another agent's app is no place of
+// this session's (unknown).
 func placesOf(li agent.LiveInfo, t presence.Table, self int, kind presence.Kind) []PlaceDTO {
 	out := []PlaceDTO{}
 	if li.State != agent.Live {
@@ -415,6 +416,11 @@ func placesOf(li agent.LiveInfo, t presence.Table, self int, kind presence.Kind)
 		}
 		if h.Kind == presence.KindHopsesh {
 			continue // a tab of the hopsesh Terminal window: the window counts its tabs
+		}
+		if _, ok := h.Kind.AppAgent(); ok && h.Kind != kind {
+			// Another agent's desktop app (a terminal panel of OpenCode's runs this one):
+			// showing the place would open this agent's own app, so it is not claimed.
+			h = presence.Host{Kind: presence.KindUnknown}
 		}
 		add(string(h.Kind), h.App, p.Waiting)
 	}

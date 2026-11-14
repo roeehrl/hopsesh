@@ -77,6 +77,18 @@ func TestPlacesOf(t *testing.T) {
 	if p := placesOf(agent.LiveInfo{State: agent.Ended, PID: 12}, table, self, presence.KindApp("claude")); len(p) != 0 {
 		t.Errorf("an ended session is open nowhere: %+v", p)
 	}
+	// A claude run in OpenCode desktop's terminal panel (its service starts the shell) is
+	// not in an app hopsesh could show it in: showing it would open Claude's own app.
+	panel := presence.FromProcs([]presence.Proc{
+		{PID: 1, PPID: 0, Name: "launchd"},
+		{PID: 40, PPID: 1, Name: "OpenCode"}, {PID: 41, PPID: 40, Name: "opencode-cli"}, {PID: 42, PPID: 41, Name: "zsh"}, {PID: 43, PPID: 42, Name: "claude"},
+	})
+	if p := placesOf(agent.LiveInfo{State: agent.Live, PID: 43}, panel, self, presence.KindApp("claude")); len(p) != 1 || p[0].Kind != "unknown" {
+		t.Errorf("in another agent's app: %+v", p)
+	}
+	if p := placesOf(agent.LiveInfo{State: agent.Live, PID: 43}, panel, self, presence.KindApp("opencode")); len(p) != 1 || p[0].Kind != "opencode-app" {
+		t.Errorf("in its own agent's app: %+v", p)
+	}
 }
 
 // One turn's tool calls in words.
