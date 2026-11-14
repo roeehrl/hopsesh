@@ -2,6 +2,10 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,5 +128,68 @@ func TestDoneAsksBeforeRestartingTheService(t *testing.T) {
 	}
 	if _, cmd := m.key("n"); cmd != nil || m.exit != nil || m.restartAsk {
 		t.Fatalf("no opened it: %+v", m.exit)
+	}
+}
+
+// y on the done screen opens the session with the person's yes to restart OpenCode's
+// background service, and with the plan's own start (its first prompt), not a bare resume.
+func TestDoneOpensWithTheYesToRestart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in opencode is linked in, which needs a POSIX system here")
+	}
+	const service = "2.2.5" // the stand-in is 2.3.0
+	if b, err := os.ReadFile("/Applications/OpenCode.app/Contents/Resources/opencode-cli.version"); err == nil && strings.TrimSpace(string(b)) == service {
+		t.Skipf("OpenCode desktop here bundles opencode %s, which the module would pick", service)
+	}
+	m := newModel(t)
+	bin := t.TempDir()
+	self, _ := os.Executable()
+	if err := os.Symlink(self, filepath.Join(bin, "opencode")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_OPENCODE_SERVICE", "running")
+	t.Setenv("FAKE_OPENCODE_SERVICE_VERSION", service)
+	log := filepath.Join(t.TempDir(), "agents.log")
+	t.Setenv("FAKE_AGENT_LOG", log)
+	m.Update(m.Init()())
+	defer func() {
+		if m.inv != nil {
+			m.inv.Close()
+		}
+	}()
+	ctx := context.Background()
+	e, err := m.inv.Find(app.ParseRef("Find the codeword"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := m.opts
+	opts.Go = true
+	p, in, err := m.deps.App.Plan(ctx, m.inv, e, "opencode", opts)
+	if err != nil || len(p.Blockers) > 0 {
+		t.Fatal(err, p.Blockers)
+	}
+	res, err := m.deps.App.Apply(ctx, p, in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.RestartsService {
+		t.Fatalf("not held for the restart: %+v", res)
+	}
+	m.mode, m.plan, m.result = modeDone, p, res
+	if _, cmd := m.key("enter"); cmd != nil || m.exit != nil || !m.restartAsk {
+		t.Fatalf("enter opened it: %+v", m.exit)
+	}
+	if _, cmd := m.key("y"); cmd == nil || m.exit == nil || m.mode == modeError {
+		t.Fatalf("y did not open it: %v %+v", m.err, m.exit)
+	}
+	if a0 := m.exit.RunArgv[0]; a0 != "opencode" && a0 != filepath.Join(bin, "opencode") || m.exit.Key != p.Placement.Key {
+		t.Fatalf("opened %+v", m.exit)
+	}
+	if calls, _ := os.ReadFile(log); !strings.Contains(string(calls), "service status") {
+		t.Fatalf("the stand-in was not asked:\n%s", calls)
+	}
+	if i := slices.Index(m.exit.RunArgv, "--prompt"); i < 0 || i+1 >= len(m.exit.RunArgv) || m.exit.RunArgv[i+1] != "Continue." {
+		t.Fatalf("the open lost the plan's prompt: %q", m.exit.RunArgv)
 	}
 }
