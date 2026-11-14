@@ -20,7 +20,9 @@
 // $FAKE_OPENCODE_SERVICE_VERSION (the running service's, default the program's),
 // $FAKE_OPENCODE_ACTIVE (session ids with a turn running in the background service,
 // comma-separated; their rows claim the turn, and a private server lists none), and
-// $FAKE_OPENCODE_AUTH (what `auth list --format json` prints, default []).
+// $FAKE_OPENCODE_AUTH (what `auth list --format json` prints, default []), and
+// $FAKE_OPENCODE_FAIL ("session import", for example: that command fails, changing
+// nothing, as a program that died would).
 package fakeopencode
 
 import (

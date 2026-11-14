@@ -15,6 +15,9 @@ func (r *run) session(verb string, args []string) int {
 	default:
 		return r.fail("the OpenCode stand-in does not play `opencode session %s`", verb)
 	}
+	if r.getenv("FAKE_OPENCODE_FAIL") == "session "+verb {
+		return r.fail("Error: the stand-in was told to fail `opencode session %s`", verb)
+	}
 	r.server()
 	db, err := r.open()
 	if err != nil {
