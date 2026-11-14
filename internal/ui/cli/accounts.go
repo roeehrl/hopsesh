@@ -41,6 +41,9 @@ func accountsCmd() *cobra.Command {
 			if p.Error != "" {
 				status = p.Error
 			}
+			if p.Port != 0 {
+				status += fmt.Sprintf(" · its service on port %d", p.Port)
+			}
 			r.printf("%s  %s  %s  [%s]\n  %s\n  %s\n", p.ID, p.Agent, p.Name, strings.Join(p.Tags, ", "), p.Root, status)
 		}
 		return nil

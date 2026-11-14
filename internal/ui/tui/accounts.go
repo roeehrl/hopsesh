@@ -336,6 +336,9 @@ func (m *model) viewAccounts(b *strings.Builder) {
 		if p.Error != "" {
 			label = p.Error
 		}
+		if p.Port != 0 {
+			label += fmt.Sprintf(" · service port %d", p.Port)
+		}
 		fmt.Fprintf(b, "  %s%s · %s [%s]\n    %s\n    %s\n", mark, p.Name, p.Agent, strings.Join(p.Tags, ", "), truncate(label, max(20, m.width-6)), truncate(p.Root, max(20, m.width-6)))
 	}
 	if a.editing != "" {
