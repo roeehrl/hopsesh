@@ -77,6 +77,10 @@ const maxVersionQuery = `SELECT version FROM session_v2`
 
 const migrationQuery = `SELECT id FROM migration ORDER BY id DESC LIMIT 1`
 
+// pluginStorageQuery reads one entry of a plugin's OpenCode storage (hopsesh's plugin's
+// failure count), and only it, from kv.
+const pluginStorageQuery = `SELECT value FROM kv WHERE key = ?`
+
 // catalogQuery reads the models.dev catalog OpenCode caches, and only it, from kv: the
 // default source's (models-dev:v2:catalog) or a custom one's (models-dev:v2:catalog:<sha1>),
 // whichever OpenCode wrote last; never their ":meta" entries.

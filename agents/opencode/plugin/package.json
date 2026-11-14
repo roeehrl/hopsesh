@@ -1,0 +1,13 @@
+{
+  "name": "hopsesh-opencode-plugin",
+  "description": "hopsesh's protection of moved sessions' originals, and its approval rules, for OpenCode. Written by hopsesh; edits are replaced on the next install.",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "opencode": ">=2.2.7 <3"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": ">=2.2.7 <3"
+  }
+}

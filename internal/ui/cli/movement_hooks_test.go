@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/roeehrl/hopsesh/agents/opencode"
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
@@ -406,5 +407,43 @@ func TestNoticeHookBlocksOriginalUntilReleasedOrReturned(t *testing.T) {
 	write()
 	if out := run("UserPromptSubmit"); out != "" {
 		t.Fatalf("a returned original is still blocked: %q", out)
+	}
+}
+
+// An agent plugin's notice hook (OpenCode) speaks its module's JSON: always an answer, so
+// the plugin can tell "nothing to say" from a hook that failed, and a block on any event.
+func TestNoticeHookAgentProtocol(t *testing.T) {
+	proto := opencode.New()
+	call := func(input string, prepared preparedMovementNotice, err error) (string, bool) {
+		var out bytes.Buffer
+		called := false
+		_ = runNoticeHookWith(context.Background(), strings.NewReader(input), &out, proto, "opencode", "", func(_ context.Context, id agent.ID, profile, session, path, event, _ string) (preparedMovementNotice, error) {
+			called = true
+			if id != "opencode" || session != "ses_a" || path != "" {
+				t.Errorf("identity: %s %q %s %q", id, profile, session, path)
+			}
+			return prepared, err
+		})
+		return out.String(), called
+	}
+	prompt := `{"session_id":"ses_a","directory":"/w","event":"UserPromptSubmit"}`
+	start := `{"session_id":"ses_a","directory":"/w","event":"SessionStart"}`
+	if out, _ := call(prompt, preparedMovementNotice{}, nil); out != "{\"block\":false}\n" {
+		t.Fatalf("nothing to say: %q", out)
+	}
+	if out, _ := call(prompt, preparedMovementNotice{}, errors.New("lookup failed")); out != "" {
+		t.Fatalf("a failure says nothing: %q", out)
+	}
+	written := false
+	if out, _ := call(start, preparedMovementNotice{Text: "Blocked by hopsesh.\x1b[31m", Block: true, Written: func(context.Context) error { written = true; return nil }}, nil); out != "{\"block\":true,\"reason\":\"Blocked by hopsesh. [31m\"}\n" || !written {
+		t.Fatalf("a block on SessionStart: %q %v", out, written)
+	}
+	if out, _ := call(prompt, preparedMovementNotice{Text: "Hopsesh status: moved."}, nil); out != "{\"block\":false,\"context\":\"Hopsesh status: moved.\"}\n" {
+		t.Fatalf("a notice: %q", out)
+	}
+	for _, bad := range []string{`{"hook_event_name":"UserPromptSubmit","session_id":"ses_a"}`, `{"session_id":"ses_a","event":"Stop"}`, `{"event":"SessionStart"}`} {
+		if out, called := call(bad, preparedMovementNotice{Text: "x"}, nil); out != "" || called {
+			t.Errorf("%s: %q %v", bad, out, called)
+		}
 	}
 }
