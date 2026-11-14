@@ -288,10 +288,13 @@ user first.
 
 ### terminal.open
 
-`{"method":"terminal.open","params":{"session":"<ref on this machine>","cols":120,"rows":40,"anyway":false}}`
+`{"method":"terminal.open","params":{"session":"<ref on this machine>","cols":120,"rows":40,"anyway":false,"restartService":false}}`
 runs the session here, in a terminal hopsesh serve owns (feature `terminal.open`). The result
 is `{id, title, dir, state, started}`; `hopsesh terminals attach <machine> <id>` shows it. Use
-it only when the companion can't run the session itself.
+it only when the companion can't run the session itself. When opening it would restart the
+agent's background service (OpenCode, with no program of the running service's version
+here), it is refused with `blocked`, saying why; ask the user, and ask again with
+`restartService` once they agree (a turn that service runs for another window stops).
 
 ## Identity
 

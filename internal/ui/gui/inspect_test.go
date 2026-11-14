@@ -83,7 +83,7 @@ func TestPlacesOf(t *testing.T) {
 		{PID: 1, PPID: 0, Name: "launchd"},
 		{PID: 40, PPID: 1, Name: "OpenCode"}, {PID: 41, PPID: 40, Name: "opencode-cli"}, {PID: 42, PPID: 41, Name: "zsh"}, {PID: 43, PPID: 42, Name: "claude"},
 	})
-	if p := placesOf(agent.LiveInfo{State: agent.Live, PID: 43}, panel, self, presence.KindApp("claude")); len(p) != 1 || p[0].Kind != "unknown" {
+	if p := placesOf(agent.LiveInfo{State: agent.Live, PID: 43}, panel, self, presence.KindApp("claude")); len(p) != 1 || p[0].Kind != "unknown" || p[0].In != "opencode" {
 		t.Errorf("in another agent's app: %+v", p)
 	}
 	if p := placesOf(agent.LiveInfo{State: agent.Live, PID: 43}, panel, self, presence.KindApp("opencode")); len(p) != 1 || p[0].Kind != "opencode-app" {

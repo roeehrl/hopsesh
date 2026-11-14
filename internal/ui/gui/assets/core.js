@@ -137,6 +137,9 @@ export function bytes(n) {
   if (n >= 1 << 10) return Math.round(n / 1024) + "\u00a0KB";
   return n + "\u00a0B";
 }
+// sizeOf is a session's size for people: on disk ("812 KB"), or "24 messages" for an agent
+// that counts messages (OpenCode keeps sessions in a database); "" when unknown.
+export const sizeOf = (e) => e?.messages ? count(e.messages, "message") : e?.sizeKB ? bytes(e.sizeKB * 1024) : "";
 
 // rich is a module's or the backend's text with its `command` spans as code: DOM nodes
 // built from the text, never markup.
@@ -371,6 +374,35 @@ export function dialog(...kids) {
 // RESTART starts the backend's refusal of a resume or a new session that would restart
 // the agent's background service (decision D2): the window asks before going on anyway.
 export const RESTART = "restart-service: ";
+// askRestart asks before going on anyway: the backend's reason (why it would restart the
+// service, and how to avoid that) and what going on does. what is the button's action
+// ("open", "start").
+// asking runs call; when the backend refuses because it would restart the agent's
+// background service, it asks, records the yes (allow) and runs call again. null: the
+// person said no.
+export async function asking(agentName, call, allow, what = "open") {
+  try { return await call(); } catch (e) {
+    const msg = errText(e);
+    if (!msg.startsWith(RESTART)) throw e;
+    if (!await askRestart(agentName, msg, what)) return null;
+    await allow();
+    return call();
+  }
+}
+// onMachine opens session e on its own machine through hopsesh there (method:
+// ContinueOnMachine, or ContinueOriginalAnyway), asking first when that would restart the
+// agent's background service there.
+export const onMachine = (e, method = "ContinueOnMachine") =>
+  asking(e.agentName, () => api(method, e.machine, e.key), () => api("AllowServiceRestart", e.machine, e.key));
+export const askRestart = (agentName, msg, what) => {
+  const name = agentName || "the agent", why = msg.slice(RESTART.length).trim();
+  return ask({
+    title: `Restart ${name}'s background service?`,
+    body: [h("p", { style: "margin:0 0 8px" }, rich(/[.!?]$/.test(why) ? why : why + ".")),
+      h("p", { style: "margin:0" }, `If you go on, ${name} stops its running service and starts it again with that other version. Its windows reconnect; a turn it is running now stops.`)],
+    ok: `Restart it and ${what}`, danger: true,
+  });
+};
 
 export function ask({ title, body, ok, danger = false }) {
   return new Promise((resolve) => {

@@ -122,7 +122,7 @@ func pluginTrust(plugins []pluginInfo, dir string, pa agent.Path) agent.HookTrus
 	found := findPlugin(plugins, dir, pa)
 	switch {
 	case found == nil:
-		return agent.HookTrust{State: agent.HookMissing, Fix: fix,
+		return agent.HookTrust{State: agent.HookMissing, Fix: fix, Excluded: true,
 			Detail: "OpenCode doesn't load the hopsesh plugin: a plugin entry in an OpenCode config removes it (\"-hopsesh\", \"-*\"), a policy denies plugins (plugin.use), or OpenCode has not reloaded its plugins since hopsesh installed it (restart OpenCode)."}
 	case found.State.Status == "failed":
 		detail := "OpenCode could not load the hopsesh plugin: " + oneLine(found.State.Error, 500)
@@ -158,9 +158,15 @@ func samePath(pa agent.Path, a, b string) bool {
 	return a != "" && b != "" && pa.Clean(a) == pa.Clean(b)
 }
 
+// failureWindow is how long after its last failed check the plugin's failures are
+// reported: hopsesh never writes OpenCode's storage to reset the count, so once the
+// checks pass again for a week the warning ends by itself.
+var failureWindow = 7 * 24 * time.Hour
+
 // pluginFailures is the plugin's count of notice-hook calls that failed and let a call
 // through, which it keeps in its OpenCode storage (the kv table, under the plugin's id),
-// and when and why the last one failed.
+// and when and why the last one failed; none when the last one is older than
+// failureWindow.
 func pluginFailures(ctx context.Context, h agent.Host, in agent.Install) (int, string) {
 	r, ok, err := openSQL(ctx, h, in)
 	if !ok || err != nil {
@@ -176,6 +182,9 @@ func pluginFailures(ctx context.Context, h agent.Host, in agent.Install) (int, s
 		Reason string `json:"reason"`
 	}
 	if json.Unmarshal([]byte(rows.Rows[0].String("value")), &f) != nil || f.Count <= 0 {
+		return 0, ""
+	}
+	if at, err := time.Parse(time.RFC3339Nano, f.At); err == nil && time.Since(at) > failureWindow {
 		return 0, ""
 	}
 	return f.Count, fmt.Sprintf("the plugin let %d call(s) through because hopsesh did not answer; the last at %s: %s", f.Count, oneLine(f.At, 64), oneLine(f.Reason, 500))

@@ -77,6 +77,7 @@ hopsesh skill install --force  # skill setup is the user's (rule 4)
 hopsesh skill remove --force  # skill setup is the user's (rule 4)
 hopsesh terminals run --dir  # interactive terminal for the user
 hopsesh terminals run --profile  # interactive terminal for the user
+hopsesh terminals run --restart-service  # interactive terminal for the user, who alone agrees to restart a shared service
 hopsesh unblock --restore  # unblocking is the user's alone
 hopsesh undo --force  # loses later work: the user's decision
 hopsesh update --check  # updating is the user's (rule 4)

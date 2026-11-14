@@ -48,6 +48,12 @@ type MovementHookStatus struct {
 	Runtime string `json:"runtime,omitempty"`
 	CLI     bool   `json:"cli,omitempty"`
 	App     string `json:"app,omitempty"`
+	// Plugin: the hook is a folder hopsesh owns whole that the agent loads as a plugin
+	// (OpenCode), not entries in the agent's settings. Outdated: it is installed but holds
+	// files other than this hopsesh's (an older hopsesh's, or edited); an install replaces
+	// them.
+	Plugin   bool `json:"plugin,omitempty"`
+	Outdated bool `json:"outdated,omitempty"`
 }
 
 // Per-item hook results.
@@ -188,6 +194,7 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 			changed := false
 			switch {
 			case hi.Dir != nil:
+				st.Plugin = true
 				changed, err = movementHookDir(ctx, action, &st, in, hi.Dir)
 			case hi.File != nil:
 				err = movementHookFile(ctx, action, &st, in, hi.File)
@@ -276,9 +283,10 @@ func movementHookDir(ctx context.Context, action string, st *MovementHookStatus,
 	if action == "status" || action == "install" && !st.Supported {
 		switch {
 		case interrupted:
-			st.Reason = strings.TrimSpace(st.Reason + " An install or removal of the hook folder stopped halfway; install the hooks again to finish it.")
+			st.Reason = strings.TrimSpace(st.Reason + " An install or removal of the plugin folder stopped halfway; install the hooks again to finish it.")
 		case st.Installed && !hookFilesIn(files, want):
-			st.Reason = strings.TrimSpace(st.Reason + " The hook folder holds hopsesh files other than this hopsesh's (an older hopsesh's, or edited); install the hooks again to replace them.")
+			st.Outdated = true
+			st.Reason = strings.TrimSpace(st.Reason + " The plugin folder holds hopsesh files other than this hopsesh's (an older hopsesh's, or edited); install the hooks again to replace them.")
 		}
 		return false, nil
 	}

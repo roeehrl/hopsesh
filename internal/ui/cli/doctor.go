@@ -119,6 +119,9 @@ func doctorCmd() *cobra.Command {
 			addProtection := func(where string, p app.Protection) {
 				for _, h := range p.Hooks {
 					name := where + ": " + string(h.Agent) + " hook"
+					if h.Plugin {
+						name = where + ": " + string(h.Agent) + " plugin"
+					}
 					if h.ProfileLabel != "" {
 						name += " (" + h.ProfileLabel + ")"
 					}

@@ -5,7 +5,9 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +20,8 @@ import (
 	"github.com/roeehrl/hopsesh/internal/core/peer"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
 	"github.com/roeehrl/hopsesh/internal/core/serve"
+	"github.com/roeehrl/hopsesh/internal/testkit"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 type lockedBuf struct {
@@ -25,8 +29,12 @@ type lockedBuf struct {
 	b  bytes.Buffer
 }
 
-func (l *lockedBuf) Write(p []byte) (int, error) { l.mu.Lock(); defer l.mu.Unlock(); return l.b.Write(p) }
-func (l *lockedBuf) String() string              { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+func (l *lockedBuf) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
 
 // hopsesh serve answers a peer from the login session and runs a new session in a
 // terminal it owns, which another connection shows, types in and sees end.
@@ -115,4 +123,74 @@ func (d *delayed) Read(p []byte) (int, error) {
 		return n, nil
 	}
 	select {}
+}
+
+// A peer's request to open an OpenCode session, or start one, that would restart the
+// background service here is refused with the code and the reason alone (the hint for an
+// older hopsesh stays in the message); asked again with the person's yes, it opens
+// (decision D2). The stand-in plays OpenCode, its service of another version. It calls
+// OpenTerminal itself: hopsesh serve would put the login shell's PATH, where a real
+// opencode may be, before the stand-in's.
+func TestOpenTerminalAsksBeforeRestartingTheService(t *testing.T) {
+	const service = "2.2.5" // the stand-in is 2.3.0
+	if b, err := os.ReadFile("/Applications/OpenCode.app/Contents/Resources/opencode-cli.version"); err == nil && strings.TrimSpace(string(b)) == service {
+		t.Skipf("OpenCode desktop here bundles opencode %s, which the module would pick", service)
+	}
+	home, _ := filepath.EvalSymlinks(t.TempDir())
+	testkit.UnsetAgentEnv(t)
+	testkit.Setenv(t, testkit.Env(home))
+	if err := testkit.DemoHome(home); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(home, "bin")
+	os.MkdirAll(bin, 0o755)
+	self, _ := os.Executable()
+	if err := os.Symlink(self, filepath.Join(bin, "opencode")); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(home, "agents.log")
+	t.Setenv("PATH", bin+":/usr/bin:/bin")
+	t.Setenv("SHELL", "/bin/sh")
+	t.Setenv("FAKE_AGENT_LOG", log)
+	t.Setenv("FAKE_OPENCODE_SERVICE", "running")
+	t.Setenv("FAKE_OPENCODE_SERVICE_VERSION", service)
+	if p, err := exec.LookPath("opencode"); err != nil || filepath.Dir(p) != bin {
+		t.Fatalf("opencode is %s, not the stand-in (%v)", p, err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := New(cfg, all.Registry(), config.StateDir(), nil)
+	t.Cleanup(func() { _ = a.Catalog.Close() })
+	lg := &Login{tabs: map[string]peer.Terminal{}}
+	lg.Terms = pty.NewManager(pty.Options{MaxTabs: 4, IdleAfter: -1, OnChange: lg.changed})
+	t.Cleanup(lg.Terms.CloseAll)
+	a.Login = lg
+	ctx := context.Background()
+	for _, req := range []peer.TerminalRequest{
+		{Kind: peer.TerminalResume, Agent: "opencode", Session: testkit.DemoOpenCode[0]},
+		{Kind: peer.TerminalNew, Agent: "opencode", Dir: home},
+	} {
+		_, err := a.OpenTerminal(ctx, req)
+		var pe *peer.Error
+		if !errors.As(err, &pe) || pe.Code != peer.CodeRestartsService || !errors.Is(err, agent.ErrRestartsService) ||
+			strings.Contains(err.Error(), "too old") || !strings.Contains(pe.Message, "too old") || !strings.Contains(err.Error(), "runs "+service) {
+			t.Fatalf("%s, not agreed: %v (%+v)", req.Kind, err, pe)
+		}
+		req.RestartService = true
+		tab, err := a.OpenTerminal(ctx, req)
+		if err != nil || tab.ID == "" {
+			t.Fatalf("%s, agreed: %+v %v", req.Kind, tab, err)
+		}
+	}
+	// The stand-in answered the probes and runs the agreed resume.
+	var calls []byte
+	for i := 0; i < 100 && !strings.Contains(string(calls), "-s "+testkit.DemoOpenCode[0]); i++ {
+		time.Sleep(50 * time.Millisecond)
+		calls, _ = os.ReadFile(log)
+	}
+	if !strings.Contains(string(calls), "service status") || !strings.Contains(string(calls), "-s "+testkit.DemoOpenCode[0]) {
+		t.Fatalf("the stand-in did not run it:\n%s", calls)
+	}
 }

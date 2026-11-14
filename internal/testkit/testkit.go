@@ -108,16 +108,6 @@ func OpenCodeEnv(dir string) map[string]string {
 // github.com/example/demo, Claude Code 2.1.284 sessions, Codex 0.153.2 threads and
 // OpenCode 2.3.0 sessions (DemoOpenCode) in it.
 func DemoHome(h string) error {
-	return demoHome(h, true)
-}
-
-// DemoHomeClaudeCodex is DemoHome without OpenCode's sessions: the world the browser specs
-// are written for until they cover OpenCode (PR 8 of the OpenCode plan).
-func DemoHomeClaudeCodex(h string) error {
-	return demoHome(h, false)
-}
-
-func demoHome(h string, opencode bool) error {
 	repo := repoRoot()
 	demo := filepath.Join(h, "git", "demo")
 	if err := os.MkdirAll(demo, 0o700); err != nil {
@@ -164,9 +154,6 @@ func demoHome(h string, opencode bool) error {
 	}
 	if err := copyTree(filepath.Join(repo, "agents", "codex", "testdata", "0.153.2"), filepath.Join(h, ".codex")); err != nil {
 		return err
-	}
-	if !opencode {
-		return nil
 	}
 	return demoOpenCode(filepath.Join(h, ".local", "share", "opencode", "opencode.db"), demo)
 }

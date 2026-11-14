@@ -30,7 +30,9 @@ type SpecData struct {
 	DesktopApps          map[string][]string `json:"desktopApps"`
 	Clouds               []CloudData         `json:"clouds"`
 	TerminalEnv          []string            `json:"terminalEnv"`
-	Kinds                []KindData          `json:"kinds"`
+	// ServiceTurns: the agent's turns run in its background service (agent.Spec).
+	ServiceTurns bool       `json:"serviceTurns,omitempty"`
+	Kinds        []KindData `json:"kinds"`
 	// Desktop is how the agent's desktop app signs in and runs sessions (agent.Desktop).
 	Desktop *DesktopData `json:"desktop,omitempty"`
 	// Plans names what a bare account plan belongs to ("Claude").
@@ -127,7 +129,7 @@ type KindData struct {
 
 // Data returns s as data. Lists and maps are never null, so a reader can iterate them.
 func Data(s agent.Spec) SpecData {
-	d := SpecData{Accounts: s.Accounts, DesktopScheme: s.DesktopScheme, ResumeAcrossAccounts: s.ResumeAcrossAccounts,
+	d := SpecData{Accounts: s.Accounts, DesktopScheme: s.DesktopScheme, ResumeAcrossAccounts: s.ResumeAcrossAccounts, ServiceTurns: s.ServiceTurns,
 		ID: s.ID, Name: s.Name, Vendor: s.Vendor, Stability: s.Stability, Tested: list(s.Tested),
 		LoginEnv: list(s.LoginEnv), Secrets: list(s.Secrets), Worktrees: list(s.Worktrees),
 		Instructions: list(s.Instructions), GlobalInstructions: list(s.GlobalInstructions), Tools: s.Tools,

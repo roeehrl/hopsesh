@@ -780,6 +780,10 @@ func nonEmpty(s, d string) string {
 // versionLess orders agent versions (pre-releases below their release).
 func versionLess(a, b string) bool { return agent.VersionLess(a, b) }
 
+// ResumeOptions are the options the plan resumes its session with (the start prompt, the
+// name), for an interface that opens it again after asking (Result.RestartsService).
+func (p *Plan) ResumeOptions() agent.ResumeOptions { return p.resumeOpts }
+
 // ContinuationHint distinguishes a prepared transcript from an agent turn. Opening
 // an app does not submit a message; a terminal command may include the first prompt.
 func (p *Plan) ContinuationHint() string {

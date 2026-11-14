@@ -685,20 +685,20 @@ func TestFamilyOrder(t *testing.T) {
 }
 
 // A move's preview says a window that has the session open while it is idle cannot be
-// seen, and that a Claude Agent session stays an OpenCode one.
+// seen, what the copy leaves out, and that a Claude Agent session stays an OpenCode one.
 func TestMoveWarnings(t *testing.T) {
 	fh, _ := newMachine(t, setup{})
 	m, h, in := open(t, fh)
 	s := listing(t, m, h, in)[sesFiles]
 	b, _ := m.Bundle(ctx, h, in, s)
-	if len(b.Warnings) != 1 || !strings.Contains(b.Warnings[0], "cannot see an OpenCode window") {
+	if len(b.Warnings) != 2 || !strings.Contains(b.Warnings[0], "cannot see an OpenCode window") || !strings.Contains(b.Warnings[1], "/undo snapshots, archived state") {
 		t.Fatalf("%q", b.Warnings)
 	}
 	if err := fh.ExecSQL(dbPath, `UPDATE session_v2 SET model = '{"id":"claude-sonnet","providerID":"claude-agent"}' WHERE id = ?`, sesFiles); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = m.Bundle(ctx, h, in, s)
-	if len(b.Warnings) != 2 || !strings.Contains(b.Warnings[1], "Claude Agent") {
+	if len(b.Warnings) != 3 || !strings.Contains(b.Warnings[2], "Claude Agent") {
 		t.Fatalf("%q", b.Warnings)
 	}
 }

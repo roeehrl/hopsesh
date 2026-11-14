@@ -575,7 +575,7 @@ func TestMovementHookFolder(t *testing.T) {
 	lax := *d
 	lax.Has = func(have map[string][]byte) bool { return bytes.Equal(have["config.json"], want["config.json"]) }
 	st = MovementHookStatus{Supported: true}
-	if _, err := movementHookDir(ctx, "status", &st, in, &lax); err != nil || !st.Installed || !strings.Contains(st.Reason, "install the hooks again") {
+	if _, err := movementHookDir(ctx, "status", &st, in, &lax); err != nil || !st.Installed || !st.Outdated || !strings.Contains(st.Reason, "install the hooks again") {
 		t.Fatalf("older files: %+v %v", st, err)
 	}
 	// A replace that stopped between its renames: status says so; the next install finishes.

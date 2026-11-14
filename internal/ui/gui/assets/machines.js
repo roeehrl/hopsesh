@@ -114,13 +114,18 @@ setInterval(() => {
   }
 }, 15000);
 
-// storageLine says how much each agent's sessions take on a machine.
+// storageLine says how much each agent's sessions take on a machine: on disk, or, for an
+// agent that keeps them in a database (OpenCode), in messages.
 function storageLine(storage) {
-  const shown = (storage || []).filter((u) => u.bytes > 0);
-  if (!shown.length) return null;
+  const shown = (storage || []).filter((u) => u.bytes > 0), counted = (storage || []).filter((u) => !(u.bytes > 0) && u.messages > 0);
+  if (!shown.length && !counted.length) return null;
   const total = shown.reduce((n, u) => n + u.bytes, 0);
-  return h("span", { class: "muted storage", style: "font-size:12px", title: shown.map((u) => `${u.name}: ${u.sessions} session${u.sessions === 1 ? "" : "s"}, ${bytes(u.bytes)}`).join("\n") },
-    `Sessions take ${bytes(total)}` + (shown.length > 1 ? `: ${shown.map((u) => `${u.name} ${bytes(u.bytes)}`).join(", ")}` : ""));
+  const n = (k, word) => `${k} ${word}${k === 1 ? "" : "s"}`;
+  const parts = shown.length ? [`Sessions take ${bytes(total)}` + (shown.length > 1 ? `: ${shown.map((u) => `${u.name} ${bytes(u.bytes)}`).join(", ")}` : "")] : [];
+  for (const u of counted) parts.push(`${u.name} keeps ${n(u.sessions, "session")} (${n(u.messages, "message")}) in its database`);
+  return h("span", { class: "muted storage", style: "font-size:12px",
+    title: [...shown.map((u) => `${u.name}: ${n(u.sessions, "session")}, ${bytes(u.bytes)}`), ...counted.map((u) => `${u.name}: ${n(u.sessions, "session")}, ${n(u.messages, "message")}`)].join("\n") },
+    parts.join("; "));
 }
 
 function statusCell(m) {
@@ -659,7 +664,10 @@ function machineDetail(r, d, extras = {}) {
         st.agents.map((a) => h("div", { class: "mline" },
           h("span", { class: "msym " + worst(a.hook, a.skill), "aria-hidden": "true" }, symOf({ state: worst(a.hook, a.skill) })),
           h("span", { class: "mlabel", title: a.folder || "" }, agentLabel(a)),
-          h("span", { class: "mtext" }, "Hook: ", a.hook.text, " · Skill: ", a.skill.text),
+          // What is wrong, and how to fix it, as text (a tooltip reaches neither the keyboard
+          // nor touch): the only place this page says why an agent's plugin isn't loaded.
+          h("span", { class: "mtext" }, a.plugin ? "Plugin: " : "Hook: ", a.hook.text, " · Skill: ", a.skill.text,
+            [a.hook, a.skill].filter((c) => c.state !== "ok" && c.reason).map((c) => h("span", { class: "muted" }, " · " + c.reason))),
           h("span", { class: "mfix" })))) : null,
     st.version || r.local ? remoteSection(r.local ? "" : r.name, r.local ? sys.here : r.name) : null,
     r.local ? phoneSection() : null,

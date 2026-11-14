@@ -21,6 +21,9 @@ export default async function setup() {
   const home = process.env.HOPSESH_DEMO_HOME || join(tmpdir(), `hopsesh-real-${process.pid}`);
   const env = JSON.parse(execFileSync("go", ["run", "./internal/devtools/webtest", "-home", home, "-prepare", "-world", laptop ? "empty" : "test"],
     { cwd: root, encoding: "utf8" }));
+  // Stand-ins come first on PATH: opencode for the tests, whose demo home has OpenCode
+  // sessions, so the real app never runs a real OpenCode; codex for the laptop's shots.
+  Object.assign(env, standIns(home, env, laptop ? ["codex"] : ["opencode"]));
   if (laptop) Object.assign(env, laptopWorld(home, env, dirname(exe)));
   const appEnv: Record<string, string | undefined> = { ...process.env, ...env, HOPSESH_E2E_CDP_PORT: port };
   // An empty value is one to unset (testkit.Env): OpenCode reads an empty OPENCODE_DB as set.
@@ -37,19 +40,28 @@ export default async function setup() {
   throw new Error(`the app's debugging port ${port} never answered`);
 }
 
-// laptopWorld seeds demoseed's laptop (with Codex threads) into home and returns the
-// environment changes: the machine is "laptop", and a stand-in codex is on PATH.
-function laptopWorld(home: string, env: Record<string, string>, appDir: string): Record<string, string> {
-  const exe = process.platform === "win32" ? ".exe" : "";
-  const tools = join(tmpdir(), `hopsesh-tools-${process.pid}`);
+const ext = process.platform === "win32" ? ".exe" : "";
+const tools = join(tmpdir(), `hopsesh-tools-${process.pid}`);
+
+// standIns puts the stand-in agent (internal/devtools/fakeagent), as each of names, in
+// home's bin folder and returns PATH with that folder first. (These specs run on Windows,
+// where the app keeps the PATH it is given; elsewhere it would put its login shell's
+// first.)
+function standIns(home: string, env: Record<string, string>, names: string[]): Record<string, string> {
   const bin = join(home, "bin");
   mkdirSync(bin, { recursive: true });
-  execFileSync("go", ["build", "-o", join(tools, "demoseed" + exe), "./internal/devtools/demoseed"], { cwd: root });
-  execFileSync("go", ["build", "-o", join(tools, "fakeagent" + exe), "./internal/devtools/fakeagent"], { cwd: root });
-  copyFileSync(join(tools, "fakeagent" + exe), join(bin, "codex" + exe));
+  execFileSync("go", ["build", "-o", join(tools, "fakeagent" + ext), "./internal/devtools/fakeagent"], { cwd: root });
+  for (const name of names) copyFileSync(join(tools, "fakeagent" + ext), join(bin, name + ext));
   const sep = process.platform === "win32" ? ";" : ":";
-  const out = { HOPSESH_MACHINE: "laptop", PATH: bin + sep + (env.PATH || process.env.PATH || "") };
-  execFileSync(join(tools, "demoseed" + exe), ["-role", "laptop", "-codex"], { env: { ...process.env, ...env, ...out } });
+  return { PATH: bin + sep + (env.PATH || process.env.PATH || "") };
+}
+
+// laptopWorld seeds demoseed's laptop (with Codex threads) into home and returns the
+// environment changes: the machine is "laptop" (the stand-in codex is on PATH already).
+function laptopWorld(home: string, env: Record<string, string>, appDir: string): Record<string, string> {
+  execFileSync("go", ["build", "-o", join(tools, "demoseed" + ext), "./internal/devtools/demoseed"], { cwd: root });
+  const out = { HOPSESH_MACHINE: "laptop", PATH: env.PATH };
+  execFileSync(join(tools, "demoseed" + ext), ["-role", "laptop", "-codex"], { env: { ...process.env, ...env, ...out } });
   // The settings demo/laptop-setup.sh leaves: offers answered, the agents' own marks, a
   // studio machine, and update checks on.
   mkdirSync(env.HOPSESH_CONFIG_DIR, { recursive: true });
@@ -75,7 +87,7 @@ function laptopWorld(home: string, env: Record<string, string>, appDir: string):
   if (process.env.DEMO_SSH_CONFIG) {
     mkdirSync(join(home, ".ssh"), { recursive: true });
     copyFileSync(process.env.DEMO_SSH_CONFIG, join(home, ".ssh", "config"));
-    execFileSync(join(appDir, "hopsesh" + exe), ["trust", "studio", "--yes"], { env: { ...process.env, ...env, ...out }, stdio: "inherit" });
+    execFileSync(join(appDir, "hopsesh" + ext), ["trust", "studio", "--yes"], { env: { ...process.env, ...env, ...out }, stdio: "inherit" });
   }
   // An update on offer (the app reads the last check for a day): Settings shows Install
   // and restart. Nothing is installed; the screenshots never click it.

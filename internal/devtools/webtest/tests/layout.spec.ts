@@ -141,7 +141,9 @@ test("Machines and Activity keep padded section headings and a single page scrol
       // Machines is a Settings tab: its list and details sit in one bordered box.
       const header = page.locator(screen === "machines" ? ".mdetail" : ".card-h").first();
       await expect(header).toBeVisible();
-      expect(await header.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(12);
+      // Polled: the screen draws again as its checks come in (an OpenCode plugin's too),
+      // which can replace the header between finding and reading it.
+      await expect.poll(() => header.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))).toBeGreaterThanOrEqual(12);
       expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(600);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
       await page.locator(".page").evaluate(el => { el.scrollTop = el.scrollHeight; });

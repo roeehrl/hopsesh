@@ -54,40 +54,8 @@ func TestServiceRestartIsAsked(t *testing.T) {
 // make the command again and never reuse that yes; reopening at start and the copied
 // command say how to agree, without the window's marker.
 func TestServiceRestartInTheWindow(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the stand-in opencode is linked in, which needs a POSIX system here")
-	}
-	// The service's version must be one no OpenCode desktop app here bundles: the module
-	// would pick that app's CLI, which is not the stand-in.
 	const service = "2.2.5"
-	for _, app := range []string{"/Applications/OpenCode.app"} {
-		if b, err := os.ReadFile(filepath.Join(app, "Contents", "Resources", "opencode-cli.version")); err == nil && strings.TrimSpace(string(b)) == service {
-			t.Skipf("%s bundles opencode %s", app, service)
-		}
-	}
-	h, _ := filepath.EvalSymlinks(t.TempDir())
-	testkit.UnsetAgentEnv(t)
-	for k, v := range map[string]string{"HOME": h, "USERPROFILE": h, "HOPSESH_CONFIG_DIR": filepath.Join(h, "config"), "HOPSESH_STATE_DIR": filepath.Join(h, "state"),
-		"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "", "HOPSESH_APP_RUNTIMES": "off", "FAKE_AGENT_LOG": filepath.Join(h, "agents.log"),
-		"FAKE_OPENCODE_SERVICE": "running", "FAKE_OPENCODE_SERVICE_VERSION": service} {
-		t.Setenv(k, v)
-	}
-	if err := testkit.DemoHome(h); err != nil {
-		t.Fatal(err)
-	}
-	bin := filepath.Join(h, "bin")
-	os.MkdirAll(bin, 0o700)
-	self, _ := os.Executable()
-	if err := os.Symlink(self, filepath.Join(bin, "opencode")); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+":"+testPath())
-	var lines []string
-	SetTerminal(func(line string) error { lines = append(lines, line); return nil })
-	defer func() { testTerminal = nil }()
-	a := NewApp(all.Registry())
-	defer a.Shutdown()
-	a.Terms.AutoClose = func() bool { return false }
+	a, bin, lines := openCodeWindow(t, service)
 	scan, err := a.Scan()
 	if err != nil {
 		t.Fatal(err)
@@ -103,12 +71,12 @@ func TestServiceRestartInTheWindow(t *testing.T) {
 	_, err = a.ResumeSession(e.Machine, e.Key, WhereHere)
 	marked("in a tab", err)
 	marked("in my terminal", a.ResumeEntry(e.Machine, e.Key, false))
-	if len(lines) != 0 {
-		t.Fatalf("opened unasked: %q", lines)
+	if len(*lines) != 0 {
+		t.Fatalf("opened unasked: %q", *lines)
 	}
 	a.AllowServiceRestart(e.Machine, e.Key)
-	if err := a.ResumeEntry(e.Machine, e.Key, false); err != nil || len(lines) != 1 {
-		t.Fatalf("agreed, in my terminal: %v %q", err, lines)
+	if err := a.ResumeEntry(e.Machine, e.Key, false); err != nil || len(*lines) != 1 {
+		t.Fatalf("agreed, in my terminal: %v %q", err, *lines)
 	}
 	a.AllowServiceRestart(e.Machine, e.Key)
 	r, err := a.ResumeSession(e.Machine, e.Key, WhereHere)
@@ -134,8 +102,8 @@ func TestServiceRestartInTheWindow(t *testing.T) {
 	if tabs := a.TerminalTabs(); len(tabs) != 1 || tabs[0].ID != r.Tab {
 		t.Fatalf("ran again unasked: %+v", tabs)
 	}
-	if err := x.external(r.Tab); !errors.Is(err, agent.ErrRestartsService) || len(lines) != 1 {
-		t.Fatalf("open in my terminal: %v %q", err, lines)
+	if err := x.external(r.Tab); !errors.Is(err, agent.ErrRestartsService) || len(*lines) != 1 {
+		t.Fatalf("open in my terminal: %v %q", err, *lines)
 	}
 	// The copied command and a reopened tab: refused, saying how to agree, unmarked.
 	if _, err := a.ResumeCommand(e.Machine, e.Key); !errors.Is(err, agent.ErrRestartsService) || strings.HasPrefix(err.Error(), restartAsk) {
@@ -166,4 +134,49 @@ func TestServiceRestartInTheWindow(t *testing.T) {
 	if c, err := x.respec(); err != nil || !strings.HasSuffix(c.Argv[0], "opencode") {
 		t.Fatalf("same version, run again: %+v %v", c, err)
 	}
+}
+
+// openCodeWindow is a window on the demo home with the stand-in opencode first on PATH
+// (bin) and OpenCode's background service running service ("": stopped); lines are the
+// commands opened in the user's terminal app.
+func openCodeWindow(t *testing.T, service string) (*App, string, *[]string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in opencode is linked in, which needs a POSIX system here")
+	}
+	// The service's version must be one no OpenCode desktop app here bundles: the module
+	// would pick that app's CLI, which is not the stand-in.
+	for _, app := range []string{"/Applications/OpenCode.app"} {
+		if b, err := os.ReadFile(filepath.Join(app, "Contents", "Resources", "opencode-cli.version")); err == nil && service != "" && strings.TrimSpace(string(b)) == service {
+			t.Skipf("%s bundles opencode %s", app, service)
+		}
+	}
+	h, _ := filepath.EvalSymlinks(t.TempDir())
+	testkit.UnsetAgentEnv(t)
+	for k, v := range map[string]string{"HOME": h, "USERPROFILE": h, "HOPSESH_CONFIG_DIR": filepath.Join(h, "config"), "HOPSESH_STATE_DIR": filepath.Join(h, "state"),
+		"CLAUDE_CONFIG_DIR": "", "CODEX_HOME": "", "HOPSESH_APP_RUNTIMES": "off", "FAKE_AGENT_LOG": filepath.Join(h, "agents.log"),
+		"FAKE_OPENCODE_SERVICE": "", "FAKE_OPENCODE_SERVICE_VERSION": ""} {
+		t.Setenv(k, v)
+	}
+	if service != "" {
+		t.Setenv("FAKE_OPENCODE_SERVICE", "running")
+		t.Setenv("FAKE_OPENCODE_SERVICE_VERSION", service)
+	}
+	if err := testkit.DemoHome(h); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(h, "bin")
+	os.MkdirAll(bin, 0o700)
+	self, _ := os.Executable()
+	if err := os.Symlink(self, filepath.Join(bin, "opencode")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+testPath())
+	lines := &[]string{}
+	SetTerminal(func(line string) error { *lines = append(*lines, line); return nil })
+	t.Cleanup(func() { testTerminal = nil })
+	a := NewApp(all.Registry())
+	t.Cleanup(a.Shutdown)
+	a.Terms.AutoClose = func() bool { return false }
+	return a, bin, lines
 }

@@ -282,6 +282,7 @@ func resumeNow(ctx context.Context, side Side, h agent.Host, pl agent.Placement,
 	c, err := hr.ResumeOn(ctx, h, side.Install, pl.Key, pl, o)
 	if err != nil {
 		res.Warnings = append(res.Warnings, "before you resume it: "+err.Error())
+		res.RestartsService = errors.Is(err, agent.ErrRestartsService)
 		return planned, false
 	}
 	return c, true

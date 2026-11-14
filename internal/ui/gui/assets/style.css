@@ -7,7 +7,7 @@
   --err: #8d2a20; --err-soft: #fbe3e0; --err-dot: #c0432f;
   --needs: #7a4210; --needs-soft: #f7e1c8; --needs-dot: #b8641a;
   --moved: #3c3a7a; --moved-soft: #ecebf6; --moved-dot: #6a67b8;
-  --claude: #83401f; --claude-soft: #f5e6dd; --codex: #2b3651; --codex-soft: #e3e7ef;
+  --claude: #83401f; --claude-soft: #f5e6dd; --codex: #2b3651; --codex-soft: #e3e7ef; --opencode: #4f5216; --opencode-soft: #eef0d8;
   --cloud: #1d4766; --cloud-soft: #e2edf5; --cloud-dot: #2c6a99; --cloud-band: #eef3f7; --cloud-line: #d6e2ec;
   --term: #161614; --term-ink: #e8e6df;
   --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -32,7 +32,7 @@
     --err: #f0948c; --err-soft: #3d1f1c; --err-dot: #e0604e;
     --needs: #f0b77a; --needs-soft: #3d2a17; --needs-dot: #e08a3a;
     --moved: #b9b6f0; --moved-soft: #26254a; --moved-dot: #8f8ce0;
-    --claude: #f0b393; --claude-soft: #3a261d; --codex: #b9c6e6; --codex-soft: #232a3c;
+    --claude: #f0b393; --claude-soft: #3a261d; --codex: #b9c6e6; --codex-soft: #232a3c; --opencode: #d3d68f; --opencode-soft: #2c2e17;
     --cloud: #a9c8e4; --cloud-soft: #1b2b3a; --cloud-dot: #5c9bd0; --cloud-band: #18232d; --cloud-line: #2a3a49;
   }
 }
@@ -45,7 +45,7 @@
     --err: #f0948c; --err-soft: #3d1f1c; --err-dot: #e0604e;
     --needs: #f0b77a; --needs-soft: #3d2a17; --needs-dot: #e08a3a;
     --moved: #b9b6f0; --moved-soft: #26254a; --moved-dot: #8f8ce0;
-    --claude: #f0b393; --claude-soft: #3a261d; --codex: #b9c6e6; --codex-soft: #232a3c;
+    --claude: #f0b393; --claude-soft: #3a261d; --codex: #b9c6e6; --codex-soft: #232a3c; --opencode: #d3d68f; --opencode-soft: #2c2e17;
     --cloud: #a9c8e4; --cloud-soft: #1b2b3a; --cloud-dot: #5c9bd0; --cloud-band: #18232d; --cloud-line: #2a3a49;
 }
 * { box-sizing: border-box; }
@@ -108,6 +108,7 @@ textarea.field { height: auto; padding: 7px 9px; resize: vertical; line-height: 
 .agent-ico.small { width: 14px; height: 14px; border-radius: 3px; margin-left: -3px; }
 .chip.agent-claude { background: var(--claude-soft); color: var(--claude); }
 .chip.agent-codex { background: var(--codex-soft); color: var(--codex); }
+.chip.agent-opencode { background: var(--opencode-soft); color: var(--opencode); }
 .chip.st-working, .chip.st-idle { background: var(--ok-soft); color: var(--ok); }
 .chip.st-needs { background: var(--needs-soft); color: var(--needs); }
 .chip.st-moved { background: var(--moved-soft); color: var(--moved); }
@@ -596,7 +597,7 @@ code { font-family: var(--mono); font-size: .92em; padding: 0 3px; border-radius
 .started { padding: 8px 10px; border-radius: 7px; background: var(--bg); }
 .msg-l { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--ink2); }
 .started .msg-l { font-size: 11px; color: var(--muted); }
-.msg-l.agent-claude { color: var(--claude); } .msg-l.agent-codex { color: var(--codex); }
+.msg-l.agent-claude { color: var(--claude); } .msg-l.agent-codex { color: var(--codex); } .msg-l.agent-opencode { color: var(--opencode); }
 .msg-t { margin-left: auto; font-weight: 400; color: var(--muted); }
 .msg { max-width: none; min-width: 0; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 9px; gap: 7px; }
 .msg.user { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); border-left: 3px solid var(--accent); }

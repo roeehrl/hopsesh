@@ -242,22 +242,23 @@ func TestPluginTrust(t *testing.T) {
 	unloaded := p("", "local", dir, "failed")
 	unloaded.State.Error, unloaded.State.Ref = "Plugin must export a default definition\x1b[31m\nwith an id", "err_5678"
 	for _, c := range []struct {
-		name    string
-		plugins []pluginInfo
-		state   string
-		detail  string
+		name     string
+		plugins  []pluginInfo
+		state    string
+		detail   string
+		excluded bool // installing it again changes nothing
 	}{
-		{"loaded", []pluginInfo{builtin, p("hopsesh", "local", dir, "active")}, agent.HookTrusted, ""},
-		{"loaded, folder written another way", []pluginInfo{p("hopsesh", "local", dir+"/", "active")}, agent.HookTrusted, ""},
-		{"removed or denied", []pluginInfo{builtin}, agent.HookMissing, `"-hopsesh"`},
-		{"failed", []pluginInfo{builtin, failed}, agent.HookMissing, "err_1234"},
-		{"failed to load", []pluginInfo{builtin, unloaded}, agent.HookMissing, "definition [31m with an id (err_5678 in OpenCode's log)"},
-		{"failed to load, another hopsesh loaded", []pluginInfo{p("hopsesh", "local", "/elsewhere/hopsesh", "active"), unloaded}, agent.HookMissing, "err_5678"},
-		{"someone else's", []pluginInfo{p("hopsesh", "local", "/elsewhere/hopsesh", "active")}, agent.HookMissing, "another plugin"},
-		{"ours among others", []pluginInfo{p("hopsesh", "local", "/elsewhere/hopsesh", "active"), p("hopsesh", "local", dir, "active")}, agent.HookTrusted, ""},
+		{"loaded", []pluginInfo{builtin, p("hopsesh", "local", dir, "active")}, agent.HookTrusted, "", false},
+		{"loaded, folder written another way", []pluginInfo{p("hopsesh", "local", dir+"/", "active")}, agent.HookTrusted, "", false},
+		{"removed or denied", []pluginInfo{builtin}, agent.HookMissing, `"-hopsesh"`, true},
+		{"failed", []pluginInfo{builtin, failed}, agent.HookMissing, "err_1234", false},
+		{"failed to load", []pluginInfo{builtin, unloaded}, agent.HookMissing, "definition [31m with an id (err_5678 in OpenCode's log)", false},
+		{"failed to load, another hopsesh loaded", []pluginInfo{p("hopsesh", "local", "/elsewhere/hopsesh", "active"), unloaded}, agent.HookMissing, "err_5678", false},
+		{"someone else's", []pluginInfo{p("hopsesh", "local", "/elsewhere/hopsesh", "active")}, agent.HookMissing, "another plugin", false},
+		{"ours among others", []pluginInfo{p("hopsesh", "local", "/elsewhere/hopsesh", "active"), p("hopsesh", "local", dir, "active")}, agent.HookTrusted, "", false},
 	} {
 		got := pluginTrust(c.plugins, dir, pa)
-		if got.State != c.state || !strings.Contains(got.Detail, c.detail) || got.State != agent.HookTrusted && got.Fix == "" {
+		if got.State != c.state || !strings.Contains(got.Detail, c.detail) || got.State != agent.HookTrusted && got.Fix == "" || got.Excluded != c.excluded {
 			t.Errorf("%s: %+v", c.name, got)
 		}
 	}
@@ -297,12 +298,22 @@ func TestHookTrust(t *testing.T) {
 	if got := m.HookTrust(ctx, h, in, nil); got.State != agent.HookTrusted || got.Failures != 0 || asked != 2 {
 		t.Fatalf("running (asked %d): %+v", asked, got)
 	}
+	// The last failure an hour ago is reported; one more than a week ago no longer is.
+	recent := time.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
 	if err := fh.ExecSQL(dbPath, "INSERT INTO kv (key, value, time_created, time_updated) VALUES (?, ?, 1, 1)",
-		pluginStorageKey("hopsesh", "failures"), `{"count":3,"at":"2026-11-14T07:00:00.000Z","reason":"hopsesh did not answer within 5000 ms"}`); err != nil {
+		pluginStorageKey("hopsesh", "failures"), `{"count":3,"at":"`+recent+`","reason":"hopsesh did not answer within 5000 ms"}`); err != nil {
 		t.Fatal(err)
 	}
 	if got := m.HookTrust(ctx, h, in, nil); got.State != agent.HookTrusted || got.Failures != 3 || !strings.Contains(got.Detail, "did not answer within 5000 ms") {
 		t.Fatalf("with failures: %+v", got)
+	}
+	old := time.Now().Add(-failureWindow - time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
+	if err := fh.ExecSQL(dbPath, "UPDATE kv SET value = ? WHERE key = ?",
+		`{"count":3,"at":"`+old+`","reason":"hopsesh did not answer within 5000 ms"}`, pluginStorageKey("hopsesh", "failures")); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.HookTrust(ctx, h, in, nil); got.State != agent.HookTrusted || got.Failures != 0 || got.Detail != "" {
+		t.Fatalf("with failures over a week old: %+v", got)
 	}
 	// A list without hopsesh's plugin (OpenCode may not have reloaded its plugins yet) is
 	// asked for again: three times in all.

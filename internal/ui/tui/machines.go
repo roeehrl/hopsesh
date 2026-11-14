@@ -163,7 +163,11 @@ func renderMachines(v machinesView, width int) string {
 		if a.ProfileLabel != "" {
 			where += " · " + a.ProfileLabel
 		}
-		line("hook", a.Hook, dim.Render("  "+where))
+		kind := "hook"
+		if a.Plugin {
+			kind = "plugin"
+		}
+		line(kind, a.Hook, dim.Render("  "+where))
 		line("skill", a.Skill, dim.Render("  "+where))
 	}
 	checked := s.CheckedAt

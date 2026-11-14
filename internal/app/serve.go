@@ -201,9 +201,9 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 			}
 			return t, fmt.Errorf("%s is open on %s in %s; continue it there, or close it first", e.Session.Title, LocalName(), where)
 		}
-		cmd, err := a.Resume(inv, e, agent.ResumeOptions{})
+		cmd, err := a.Resume(inv, e, agent.ResumeOptions{RestartService: req.RestartService})
 		if err != nil {
-			return t, remoteRestart(err)
+			return t, remoteRestart(err, req.Kind)
 		}
 		if err := release(); err != nil {
 			return t, err
@@ -216,9 +216,9 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 		}
 		c, t.Title = cmd, "Sign in · "+mod.Spec().Name
 	case peer.TerminalNew:
-		cmd, err := a.NewSessionCommand(ctx, req.Agent, req.Profile, req.Dir, false)
+		cmd, err := a.NewSessionCommand(ctx, req.Agent, req.Profile, req.Dir, req.RestartService)
 		if err != nil {
-			return t, remoteRestart(err)
+			return t, remoteRestart(err, req.Kind)
 		}
 		c, t.Title, t.Dir = cmd, "New "+mod.Spec().Name+" session", cmd.Dir
 	default:
@@ -242,13 +242,20 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 	return t, nil
 }
 
-// remoteRestart says how to agree to restart the agent's background service (decision
-// D2) when the request came from another machine, which cannot ask yet.
-func remoteRestart(err error) error {
-	if errors.Is(err, agent.ErrRestartsService) {
-		return fmt.Errorf("%w. hopsesh cannot ask about it from another machine: on %s, open the session with hopsesh open --restart-service, or run the agent yourself there", err, LocalName())
+// remoteRestart is a refusal to restart the agent's background service (decision D2) for
+// a request from another machine: coded so hopsesh there asks the person and sends the
+// request again with their yes (TerminalRequest.RestartService). Its Message also says
+// how to agree here, for an older hopsesh there, which cannot ask; its Reason does not.
+func remoteRestart(err error, kind string) error {
+	if !errors.Is(err, agent.ErrRestartsService) {
+		return err
 	}
-	return err
+	how := "open the session with hopsesh open --restart-service"
+	if kind == peer.TerminalNew {
+		how = "start the session there yourself"
+	}
+	return &peer.Error{Code: peer.CodeRestartsService, Reason: err.Error(),
+		Message: fmt.Sprintf("%v. The hopsesh you asked from is too old to ask about it: on %s, %s", err, LocalName(), how)}
 }
 
 // NewSessionCommand starts a new session of an agent in dir, signed in as the account of

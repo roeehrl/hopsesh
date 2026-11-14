@@ -273,6 +273,7 @@ hopsesh terminals run
   --agent string
   --dir string
   --profile string
+  --restart-service
   --resume string
 hopsesh trust
   --yes

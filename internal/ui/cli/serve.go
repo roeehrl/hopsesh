@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -267,12 +269,19 @@ hopsesh terminals attach shows it again. Needs hopsesh set up there (hopsesh hos
 			if s, _ := f.GetString("resume"); s != "" {
 				req.Kind, req.Session = peer.TerminalResume, s
 			}
+			req.RestartService, _ = f.GetBool("restart-service")
 			if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
 				req.Cols, req.Rows = w, h
 			}
-			ctx, cancel := ctxTimeout(2)
-			t, err := r.app.RemoteTerminal(ctx, args[0], req)
-			cancel()
+			open := func(restart bool) (peer.Terminal, error) {
+				req.RestartService = restart
+				ctx, cancel := ctxTimeout(2)
+				defer cancel()
+				return r.app.RemoteTerminal(ctx, args[0], req)
+			}
+			// hopsesh there would restart the agent's background service, which other
+			// windows share (decision D2): it asks first, as hopsesh open does.
+			t, err := r.askingRestart(req.Kind == peer.TerminalNew, req.RestartService, open)
 			if err != nil {
 				return err
 			}
@@ -285,7 +294,32 @@ hopsesh terminals attach shows it again. Needs hopsesh set up there (hopsesh hos
 	f.String("resume", "", "the id of a session on that machine to continue")
 	f.String("dir", "", "the folder there a new session starts in (its home folder by default)")
 	f.String("profile", "", "the account folder's id (the agent's default folder when empty)")
+	f.Bool("restart-service", false, "agree to restart the agent's background service there when no program of its version is there (OpenCode; other windows' turns stop)")
 	return cmd
+}
+
+// askingRestart runs open; when hopsesh there refuses because it would restart the
+// agent's background service, it asks on a terminal and runs it again with the yes, or
+// says how to agree (--restart-service). restart: they agreed already.
+func (r *run) askingRestart(start, restart bool, open func(restart bool) (peer.Terminal, error)) (peer.Terminal, error) {
+	t, err := open(restart)
+	if !errors.Is(err, agent.ErrRestartsService) || restart {
+		return t, err
+	}
+	what := "open the session"
+	if start {
+		what = "start the session"
+	}
+	if !r.interactive() || r.jsonOut {
+		return t, fmt.Errorf("%w\nTo restart it and %s, run again with --restart-service", err, what)
+	}
+	r.printf("%v\n", err)
+	r.printf("Restart it and %s? [y/N] ", what)
+	line, _ := bufio.NewReader(r.in).ReadString('\n')
+	if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+		return t, errors.New("nothing was opened")
+	}
+	return open(true)
 }
 
 // attachHere shows a terminal of hopsesh on machine in this terminal until it ends.

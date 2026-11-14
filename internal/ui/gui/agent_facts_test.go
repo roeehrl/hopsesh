@@ -50,7 +50,7 @@ func TestAgentFactsFromModules(t *testing.T) {
 // into a new folder do not make it keep its sign-in there.
 func TestAgentFactsThirdAgent(t *testing.T) {
 	f := agentFacts(thirdagent.New(), "windows")
-	if f.Short != "Third" || !f.Local || !f.Accounts || f.InheritsSignIn || f.HookReview || f.RemoteControlTyped != "" {
+	if f.Short != "Third" || !f.Local || !f.Accounts || f.InheritsSignIn || f.HookReview || f.RemoteControlTyped != "" || f.Virtual || f.ServiceTurns {
 		t.Fatalf("third %+v", f)
 	}
 	if f.DefaultRoot != "~/.local/share/third" {
@@ -78,14 +78,15 @@ func TestPlanLabel(t *testing.T) {
 }
 
 // OpenCode has account folders now, keeps no sign-in in a new one (each signs in to its
-// providers itself), and resumes under any of them; its desktop app shares the terminal's.
+// providers itself), and resumes under any of them; its desktop app shares the terminal's,
+// and its sessions are in a database, with no file to show.
 func TestAgentFactsOpenCode(t *testing.T) {
 	m, ok := all.Registry().Get("opencode")
 	if !ok {
 		t.Fatal("no OpenCode module")
 	}
 	f := agentFacts(m, "darwin")
-	if !f.Local || !f.Accounts || f.InheritsSignIn || !f.ResumeAcrossAccounts || f.HookReview {
+	if !f.Local || !f.Accounts || f.InheritsSignIn || !f.ResumeAcrossAccounts || f.HookReview || !f.Virtual || !f.ServiceTurns {
 		t.Fatalf("opencode %+v", f)
 	}
 	if f.DefaultRoot != "~/.local/share/opencode" || f.AppName != "OpenCode" {
