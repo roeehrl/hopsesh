@@ -156,6 +156,11 @@ func (s Store) Register(p agent.RuntimeProfile) (agent.RuntimeProfile, error) {
 			if old.ID == p.ID || old.Endpoint == p.Endpoint && old.Agent == p.Agent && old.Root == p.Root {
 				return errors.New("that account root is already registered")
 			}
+			// Two folders added at once may have been given one port (each read the
+			// others before either registered).
+			if p.Port != 0 && old.Endpoint == p.Endpoint && old.Port == p.Port {
+				return fmt.Errorf("the port %d was given to the account folder %s meanwhile; add this one again", p.Port, old.Name)
+			}
 		}
 		*ps = append(*ps, p)
 		return nil

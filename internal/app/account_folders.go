@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/BurntSushi/toml"
@@ -122,21 +123,36 @@ func (a *App) addLocalAccount(ctx context.Context, id agent.ID, name string, tag
 		root = real
 	}
 	p := agent.RuntimeProfile{Machine: m.Name, ID: profiles.ID(), Endpoint: endpoint, Agent: id, Name: name, Tags: tags, Root: root, Managed: true}
+	prepared := false
 	if prep, ok := mod.(agent.AccountPreparer); ok {
 		if err := a.prepareAccount(ctx, m, mod, prep, &p); err != nil {
 			// The folder is hopsesh's, made just now: nothing of the person's is in it.
 			_ = os.RemoveAll(root)
 			return agent.RuntimeProfile{}, fmt.Errorf("setting up the %s folder: %w", mod.Spec().Name, err)
 		}
+		prepared = true
 	}
 	if o.Command {
 		cmd, err := addShellCommand(m.Facts.Home, string(id)+"-"+slug, mod, root)
 		if err != nil {
+			if prepared {
+				// Not registered, so its port would be given again: nobody signed in to it yet.
+				_ = os.RemoveAll(root)
+			}
 			return p, err
 		}
 		p.Command = cmd
 	}
-	return a.accountStore().Register(p)
+	out, err := a.accountStore().Register(p)
+	if err != nil && prepared {
+		// Another folder took its port meanwhile (the store checks again), or it could not
+		// be registered: it goes, as a folder the module could not set up does.
+		if p.Command != "" {
+			removeShellCommand(m.Facts.Home, p.Command)
+		}
+		_ = os.RemoveAll(root)
+	}
+	return out, err
 }
 
 // prepareAccount has the module ready a folder it just made (agent.AccountPreparer), with
@@ -175,13 +191,22 @@ func (a *App) prepareAccount(ctx context.Context, m *host.Machine, mod agent.Mod
 	return nil
 }
 
-// portFree reports whether nothing listens on a port of this machine's loopback.
+// portFree reports whether nothing listens on a port of this machine: nothing answers on
+// its loopback, and the port can be bound there and on every IPv4 address (a test bind
+// alone misses a wildcard listener on macOS and Windows, where it may share the port).
 func portFree(port int) bool {
-	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-	if err != nil {
+	p := strconv.Itoa(port)
+	if c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", p), 300*time.Millisecond); err == nil {
+		_ = c.Close()
 		return false
 	}
-	_ = l.Close()
+	for _, host := range []string{"127.0.0.1", "0.0.0.0"} {
+		l, err := net.Listen("tcp", net.JoinHostPort(host, p))
+		if err != nil {
+			return false
+		}
+		_ = l.Close()
+	}
 	return true
 }
 
