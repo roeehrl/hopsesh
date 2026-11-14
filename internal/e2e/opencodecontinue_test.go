@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -281,7 +282,8 @@ func readLineage(path string) *lineage.Manifest {
 }
 
 // Undo of a continuation into OpenCode deletes the session OpenCode imported, at the
-// stamp the write left it; once it was used, an unforced undo refuses and leaves it.
+// stamp the write left it, and everything hopsesh placed beside it; once it was used, an
+// unforced undo refuses and leaves it.
 func TestUndoContinueIntoOpenCode(t *testing.T) {
 	log, box, here := ocWorld(t)
 	seed(t, box)
@@ -331,6 +333,17 @@ func TestUndoContinueIntoOpenCode(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(hereOC.Root("data"), agent.AnchorRel("opencode", made))); !errors.Is(err, os.ErrNotExist) {
 			t.Fatal("undo left the anchor")
 		}
+		// Nor its lineage, its title, its archive or the transfer file in tmp/.
+		var left []string
+		_ = filepath.WalkDir(filepath.Join(hereOC.Root("data"), "hopsesh"), func(p string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				left = append(left, p)
+			}
+			return nil
+		})
+		if len(left) > 0 {
+			t.Fatalf("undo left %q", left)
+		}
 	}
 	if n := len(calls(t, log, "session delete")); n != 2 {
 		t.Fatalf("%d deletes", n)
@@ -341,7 +354,7 @@ func TestUndoContinueIntoOpenCode(t *testing.T) {
 // session: no second import, the same command, the session journaled at the write's
 // stamp and lineage beside it. Interrupted before the import, the recovery imports it.
 func TestContinueIntoOpenCodeRecovery(t *testing.T) {
-	for _, stage := range []string{"native-written", "before-import"} {
+	for _, stage := range []string{"native-written", "before-import", "unjournaled"} {
 		t.Run(stage, func(t *testing.T) {
 			log, box, here := ocWorld(t)
 			seed(t, box)
@@ -363,12 +376,28 @@ func TestContinueIntoOpenCodeRecovery(t *testing.T) {
 				}
 				return nil
 			}}
-			if stage == "before-import" {
+			if stage != "native-written" {
 				// The program dies at the import: the session is placed, not imported.
 				t.Setenv("FAKE_OPENCODE_FAIL", "session import")
 			}
-			if _, err := move.Apply(ctx, p, in, env); err == nil {
+			failed, err := move.Apply(ctx, p, in, env)
+			if err == nil {
 				t.Fatal("the fault did not interrupt the continuation")
+			}
+			if stage == "unjournaled" {
+				// As if the run had stopped after saving its request and before journaling
+				// the session: the recovery journals it before it imports it.
+				j, err := journal.Load(env.StateDir, failed.Journal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				v := vendorEntries(j)
+				if len(v) != 1 {
+					t.Fatalf("the session in the journal: %+v", v)
+				}
+				if err := j.ForgetSession(v[0].Machine, *v[0].Key, true); err != nil || len(vendorEntries(j)) != 0 {
+					t.Fatalf("forgetting it: %v", err)
+				}
 			}
 			if _, err := os.Stat(filepath.Join(hereOC.Root("data"), agent.AnchorRel("opencode", made))); err != nil {
 				t.Fatalf("the written session is not placed: %v", err)
@@ -386,7 +415,7 @@ func TestContinueIntoOpenCodeRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantImports := 1
-			if stage == "before-import" {
+			if stage != "native-written" {
 				wantImports = 2 // the failed one, and the recovery's
 			}
 			if n := len(calls(t, log, "session import")); n != wantImports || !sessionThere(t, here, made) || !resumesOC(res, made) {
@@ -408,6 +437,96 @@ func TestContinueIntoOpenCodeRecovery(t *testing.T) {
 			}
 			if sessionThere(t, here, made) {
 				t.Fatal("undo left the session")
+			}
+		})
+	}
+}
+
+// The resume command of every arrival in OpenCode is checked on the target: with a service
+// of another version running (D2), a continuation, a second continuation with no new
+// work, and a recovered one each leave the command shown but not runnable; a recovered
+// continuation asked to go on keeps its prompt. The service's version is one no desktop
+// app ships, so no resume program of that version is found (desktopCLIs also looks in
+// /Applications).
+func TestContinueIntoOpenCodeChecksResume(t *testing.T) {
+	refused := func(res *move.Result) bool {
+		return len(res.Run.Argv) == 0 && res.Command != "" && slices.ContainsFunc(res.Warnings, func(w string) bool { return strings.Contains(w, "before you resume it") })
+	}
+	setup := func(t *testing.T) (location, location, agent.Install, move.Input) {
+		_, box, here := ocWorld(t)
+		seed(t, box)
+		hereOC := ocInstall(here)
+		os.MkdirAll(hereOC.Root("data"), 0o700)
+		in := move.Input{Source: move.Side{Machine: box.m, Module: claude.New(), Install: box.in}, Session: list(t, box)[sid],
+			Target: move.Side{Machine: here.m, Module: opencode.New(), Install: hereOC}}
+		return box, here, hereOC, in
+	}
+	ctx := context.Background()
+	t.Run("continue and no work", func(t *testing.T) {
+		box, here, _, in := setup(t)
+		t.Setenv("FAKE_OPENCODE_SERVICE", "running")
+		t.Setenv("FAKE_OPENCODE_SERVICE_VERSION", "2.1.5")
+		p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+		if err != nil || len(p.Blockers) > 0 {
+			t.Fatalf("plan: %v %v", err, p.Blockers)
+		}
+		res, err := move.Apply(ctx, p, in, move.Env{StateDir: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !refused(res) {
+			t.Fatalf("the continuation's resume: %v %q", res.Run.Argv, res.Warnings)
+		}
+		oc := in.Target.Module.(*opencode.Module)
+		s := ocOnly(t, here, oc)
+		lin, _ := lineage.Read(host.LocalFS(), list(t, box)[sid].Path)
+		again := move.Input{Source: in.Source, Session: list(t, box)[sid], Lineage: lin, Target: in.Target,
+			Copies: []move.Copy{{Summary: s, Lineage: readLineage(s.Path)}}}
+		p, err = move.Build(ctx, again, move.Options{TargetDir: here.repo})
+		if err != nil || !p.NoWork {
+			t.Fatalf("again: %v, no work %t", err, p.NoWork)
+		}
+		if res, err = move.Apply(ctx, p, again, move.Env{StateDir: t.TempDir()}); err != nil {
+			t.Fatal(err)
+		}
+		if !refused(res) || len(ocSessions(t, here, oc)) != 1 {
+			t.Fatalf("the resume with no new work: %v %q", res.Run.Argv, res.Warnings)
+		}
+	})
+	for _, tc := range []struct {
+		name    string
+		service bool // a service of another version runs at the recovery
+	}{{"recovery keeps the prompt", false}, {"recovery checks the service", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, here, _, in := setup(t)
+			opt := move.Options{TargetDir: here.repo, OperationID: "continue-oc-resume", Go: true}
+			p, err := move.Build(ctx, in, opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := move.Env{StateDir: t.TempDir(), Failpoint: func(s string) error {
+				if s == "native-written" {
+					return errors.New("simulated process exit")
+				}
+				return nil
+			}}
+			if _, err := move.Apply(ctx, p, in, env); err == nil {
+				t.Fatal("the fault did not interrupt the continuation")
+			}
+			env.Failpoint = nil
+			if tc.service {
+				t.Setenv("FAKE_OPENCODE_SERVICE", "running")
+				t.Setenv("FAKE_OPENCODE_SERVICE_VERSION", "2.1.5")
+			}
+			if p, err = move.Build(ctx, in, opt); err != nil {
+				t.Fatal(err)
+			}
+			res, err := move.Apply(ctx, p, in, env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.service != refused(res) || !tc.service && !slices.Contains(res.Run.Argv, "--prompt") {
+				t.Fatalf("the recovered resume: %v %q", res.Run.Argv, res.Warnings)
 			}
 		})
 	}
@@ -492,8 +611,9 @@ func TestBringCloudWorkIntoOpenCode(t *testing.T) {
 	if err != nil || !p.Fetch.Write || p.Fetch.CanAppend || p.Fetch.Original != nil || len(p.Blockers) > 0 {
 		t.Fatalf("the offer: %+v %v %v", p.Fetch, p.Blockers, err)
 	}
-	if p, _, err = a.Plan(ctx, inv, e, "opencode", move.Options{AppendOriginal: true}); err == nil && len(p.Blockers) == 0 && p.Fetch.Append {
-		t.Fatal("the cloud's work was to be added to an OpenCode session")
+	if p, _, err = a.Plan(ctx, inv, e, "opencode", move.Options{AppendOriginal: true}); err != nil || p.Fetch.Append ||
+		!slices.ContainsFunc(p.Blockers, func(b string) bool { return strings.Contains(b, "OpenCode cannot add to an existing session") }) {
+		t.Fatalf("asking to add the cloud's work to an OpenCode session: %v %v", p, err)
 	}
 	p, _, err = a.Plan(ctx, inv, e, "opencode", move.Options{})
 	if err != nil {
@@ -518,5 +638,10 @@ func TestBringCloudWorkIntoOpenCode(t *testing.T) {
 	}
 	if _, err := a.Undo(ctx, res.Journal, false); err != nil {
 		t.Fatal(err)
+	}
+	inv3 := a.Scan(ctx, app.ScanOptions{})
+	defer inv3.Close()
+	if _, err := inv3.Find(app.ParseRef("opencode/" + sid)); err == nil {
+		t.Fatal("undo left the brought session")
 	}
 }
