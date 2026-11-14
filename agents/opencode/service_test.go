@@ -525,7 +525,7 @@ func TestResumeRestartingTheService(t *testing.T) {
 	key := sessionKey(in, sesFiles)
 	pl := agent.Placement{CWD: "/home/u/git/demo"}
 	_, err := m.ResumeOn(ctx, h, in, key, pl, agent.ResumeOptions{})
-	if !errors.Is(err, agent.ErrRestartsService) || !strings.Contains(err.Error(), "--restart-service") {
+	if !errors.Is(err, agent.ErrRestartsService) || !strings.Contains(err.Error(), "agree to restart it") {
 		t.Fatalf("not asked: %v", err)
 	}
 	c, err := m.ResumeOn(ctx, h, in, key, pl, agent.ResumeOptions{RestartService: true})

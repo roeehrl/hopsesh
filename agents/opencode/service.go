@@ -290,7 +290,7 @@ func (e *restartError) Error() string {
 	}
 	return fmt.Sprintf("OpenCode's background service runs %s, and %s is another version: opening the session with it would restart the service, "+
 		"which the desktop app shares, and stop any turn it is running. Install opencode %s, or quit OpenCode desktop and run `opencode service stop` yourself, then try again; "+
-		"or agree to restart it when hopsesh asks (hopsesh open --restart-service)", e.Service, have, e.Service)
+		"or agree to restart it", e.Service, have, e.Service)
 }
 
 func (e *restartError) Unwrap() error { return agent.ErrRestartsService }
