@@ -1,7 +1,7 @@
 // The Accounts screen: the accounts you use, who each tool is signed in as on every
 // machine (the grid), and the folders tools keep sessions in. A session keeps the account
 // that ran it, and continues as whoever is signed in to the tool and machine it opens in.
-import { api, h, fill, view, state, screen, go, toast, fail, ask, errText, current, navigationID, sys, on, ago, icon, ICONS, dialog, loading, loadError, agentInfo, agentShort, localAgents } from './core.js';
+import { api, h, fill, view, state, screen, go, toast, fail, ask, errText, current, navigationID, sys, on, ago, icon, ICONS, dialog, loading, loadError, agentInfo, agentShort, localAgents, RESTART } from './core.js';
 
 let data = null, busy = false, problem = '';
 const checking = new Set();
@@ -278,7 +278,15 @@ function newSessionDialog(f) {
     h('label', { style: 'display:flex;flex-direction:column;gap:6px;font-size:12.5px' }, 'In folder (empty: the home folder)', dir), error,
     h('div', { class: 'dlg-foot' }, h('button', { class: 'btn', onclick: () => d.close() }, 'Cancel'),
       h('button', { class: 'btn primary', onclick: async () => {
-        try { await api('NewSessionOn', f.local ? '' : f.machine, f.agent, f.default ? '' : f.profile, dir.value.trim().replace(/^~(?=\/|$)/, '')); d.close(); } catch (e) { error.textContent = errText(e); }
+        const args = [f.local ? '' : f.machine, f.agent, f.default ? '' : f.profile, dir.value.trim().replace(/^~(?=\/|$)/, '')];
+        try { await api('NewSessionOn', ...args); d.close(); } catch (e) {
+          const msg = errText(e);
+          if (!msg.startsWith(RESTART)) { error.textContent = msg; return; }
+          // Decision D2: starting it would restart the agent's background service.
+          d.close();
+          if (!await ask({ title: `Restart ${f.agentName}'s background service?`, body: msg.slice(RESTART.length), ok: 'Restart it and start', danger: true })) return;
+          try { await api('AllowNewSessionRestart', args[0], f.agent, args[2]); await api('NewSessionOn', ...args); } catch (e2) { fail(e2); }
+        }
       } }, 'Start')));
   dir.focus();
 }

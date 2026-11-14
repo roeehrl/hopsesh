@@ -368,6 +368,10 @@ export function dialog(...kids) {
 }
 
 // ask is a yes/no question in the small dialog.
+// RESTART starts the backend's refusal of a resume or a new session that would restart
+// the agent's background service (decision D2): the window asks before going on anyway.
+export const RESTART = "restart-service: ";
+
 export function ask({ title, body, ok, danger = false }) {
   return new Promise((resolve) => {
     const d = dialog(

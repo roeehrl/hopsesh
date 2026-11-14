@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -142,5 +145,93 @@ func TestNoticeMainOfAnAccountFolder(t *testing.T) {
 		if got := noticeMain(c.spec, c.scope); got != c.want {
 			t.Errorf("%s: %s, want %s", c.name, got, c.want)
 		}
+	}
+}
+
+// A port is free only when nothing answers on it and it can be bound on the loopback and
+// on every IPv4 address: a wildcard listener holds it too.
+func TestPortFree(t *testing.T) {
+	for _, host := range []string{"127.0.0.1", "0.0.0.0"} {
+		l, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		if portFree(port) {
+			t.Errorf("a port held on %s reads as free", host)
+		}
+		l.Close()
+		// (Windows may keep a port that was connected to a while longer.)
+		if runtime.GOOS != "windows" && !portFree(port) {
+			t.Errorf("a port let go on %s reads as taken", host)
+		}
+	}
+}
+
+// A new OpenCode session runs a program of the running service's version, as a resume
+// does (decision D2): with none here, it is refused until the person agrees, in the
+// default folder and in an added one (asked there with the folder's variables). The
+// version is one no desktop app here bundles.
+func TestNewOpenCodeSessionAsksBeforeRestartingTheService(t *testing.T) {
+	_, log := cloudEnv(t, "opencode")
+	for _, k := range []string{"XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_DB", "FAKE_OPENCODE_FAIL"} {
+		t.Setenv(k, "")
+		os.Unsetenv(k)
+	}
+	if b, err := os.ReadFile("/Applications/OpenCode.app/Contents/Resources/opencode-cli.version"); err == nil && strings.TrimSpace(string(b)) == "2.2.5" {
+		t.Skip("the desktop app here bundles opencode 2.2.5")
+	}
+	t.Setenv("HOPSESH_APP_RUNTIMES", "off")
+	home := os.Getenv("HOME")
+	os.MkdirAll(filepath.Join(home, ".local", "share", "opencode"), 0o700)
+	a := cloudApp(t, all.Registry())
+	ctx := context.Background()
+	p, err := a.AddAccount(ctx, "", "opencode", "Work", nil, AddAccountOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_OPENCODE_SERVICE", "running")
+	t.Setenv("FAKE_OPENCODE_SERVICE_VERSION", "2.2.5")
+	for _, profile := range []string{"", p.ID} {
+		if _, err := a.NewSessionCommand(ctx, "opencode", profile, home, false); !errors.Is(err, agent.ErrRestartsService) {
+			t.Fatalf("folder %q, not asked: %v", profile, err)
+		}
+		c, err := a.NewSessionCommand(ctx, "opencode", profile, home, true)
+		if err != nil || filepath.Base(c.Argv[0]) != "opencode"+exe() || len(c.Argv) != 1 {
+			t.Fatalf("folder %q, agreed: %+v %v", profile, c, err)
+		}
+	}
+	// The services were asked about, never started, stopped or replaced.
+	calls, _ := os.ReadFile(log)
+	if !strings.Contains(string(calls), "service status") {
+		t.Fatalf("no service probe:\n%s", calls)
+	}
+	for _, never := range []string{"started the background service", "stopped the background service", "replaced the background service"} {
+		if strings.Contains(string(calls), never) {
+			t.Errorf("%q:\n%s", never, calls)
+		}
+	}
+	t.Setenv("FAKE_OPENCODE_SERVICE_VERSION", "")
+	if c, err := a.NewSessionCommand(ctx, "opencode", p.ID, home, false); err != nil || len(c.Argv) != 1 {
+		t.Fatalf("same version: %+v %v", c, err)
+	}
+}
+
+func exe() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+// A request from another machine cannot ask to restart the agent's service: the refusal
+// says how to agree on this one. Other errors pass as they are.
+func TestRemoteRestartSaysHowToAgree(t *testing.T) {
+	err := remoteRestart(fmt.Errorf("opening it: %w", agent.ErrRestartsService))
+	if !errors.Is(err, agent.ErrRestartsService) || !strings.Contains(err.Error(), "hopsesh open --restart-service") || !strings.Contains(err.Error(), LocalName()) {
+		t.Fatalf("%v", err)
+	}
+	if other := errors.New("x"); remoteRestart(other) != other {
+		t.Fatal("another error was changed")
 	}
 }

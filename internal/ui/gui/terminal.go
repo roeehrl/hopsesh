@@ -117,8 +117,9 @@ type tab struct {
 	bindingSequence  uint64 // newest committed native read; guarded by Terms.mu
 	checkingControls *terminalBindingControls
 	// external ends the tab and runs its command in the user's terminal app (nil: not
-	// offered); rerun starts the same spec in a new tab.
+	// offered); rerun starts the same spec in a new tab, or respec's when it has one.
 	external func(id string) error
+	respec   func() (pty.Spec, error)
 	// exited is told once that the program ended.
 	exited   func(pty.Info)
 	notified bool // this waiting episode was notified
@@ -138,6 +139,10 @@ type TabSetup struct {
 	// does not offer it); Exited is told once that its program ended.
 	External func(id string) error
 	Exited   func(pty.Info)
+	// Respec makes the program again for "Run again" (nil: the same spec runs again): for
+	// an agent whose command depends on what runs on the machine then (OpenCode's must be
+	// of its running service's version, decision D2). Its error is shown and nothing runs.
+	Respec func() (pty.Spec, error)
 	// Background opens the tab without bringing the window forward: it comes forward when
 	// it waits for the user or fails (a hand-off's step, which may need nobody).
 	Background bool
@@ -583,8 +588,16 @@ func (t *Terminals) rerun(id string, tb *tab) {
 		t.notice(id, "It is running in another tab already.")
 		return
 	}
+	spec := tb.spec
+	if tb.respec != nil {
+		var err error
+		if spec, err = tb.respec(); err != nil {
+			t.notice(id, err.Error())
+			return
+		}
+	}
 	_ = t.mgr.Close(id)
-	if _, err := t.Open(tb.spec, TabSetup{Meta: tb.meta, External: tb.external, Exited: tb.exited}); err != nil {
+	if _, err := t.Open(spec, TabSetup{Meta: tb.meta, External: tb.external, Exited: tb.exited, Respec: tb.respec}); err != nil {
 		t.notice("", err.Error())
 	}
 }
@@ -785,7 +798,7 @@ func (t *Terminals) Open(spec pty.Spec, setup TabSetup) (pty.Info, error) {
 		return pty.Info{}, err
 	}
 	t.mu.Lock()
-	t.tabs[s.ID()] = &tab{meta: setup.Meta, spec: spec, external: setup.External, exited: setup.Exited, background: setup.Background}
+	t.tabs[s.ID()] = &tab{meta: setup.Meta, spec: spec, external: setup.External, exited: setup.Exited, respec: setup.Respec, background: setup.Background}
 	t.mu.Unlock()
 	if _, ok := t.mgr.Get(s.ID()); !ok { // gone already
 		t.mu.Lock()

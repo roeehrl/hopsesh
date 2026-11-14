@@ -187,15 +187,80 @@ func (a *App) ResumeSession(machine, key, where string) (*OpenedDTO, error) {
 	}
 	l := app.Launch{Kind: termapp.KindSession, Run: c, Key: e.Session.Key,
 		Labels: termapp.Labels{Title: titleOf(e.Session), Agent: e.AgentName, Machine: e.Machine}}
-	return a.sessionTab(c, l, TabMeta{Kind: TabSession, Agent: e.AgentName, Machine: machine, Key: key}, titleOf(e.Session))
+	return a.sessionTab(c, l, TabMeta{Kind: TabSession, Agent: e.AgentName, Machine: machine, Key: key}, titleOf(e.Session), a.resumeAgain(e.Agent, machine, key))
+}
+
+// resumeAgain makes a session tab's command again for "Run again" and "Open in my
+// terminal", for an agent whose resume command depends on what runs on the machine then
+// (agent.HostResumer: OpenCode's program must be of its running service's version,
+// decision D2); nil for others, whose tab runs the same command again. The person's yes
+// to restart the service is never reused: such a resume is refused, and the window asks
+// when the session is opened from it again.
+func (a *App) resumeAgain(id agent.ID, machine, key string) func() (agent.Command, error) {
+	a.mu.Lock()
+	var mod agent.Module
+	if a.core != nil {
+		mod, _ = a.core.Module(id)
+	}
+	a.mu.Unlock()
+	if _, ok := mod.(agent.HostResumer); !ok {
+		return nil
+	}
+	return func() (agent.Command, error) {
+		core := a.snapshot()
+		a.mu.Lock()
+		e, err := a.find(machine, key)
+		inv := a.inv
+		a.mu.Unlock()
+		if err != nil {
+			return agent.Command{}, err
+		}
+		c, err := core.Resume(inv, e, agent.ResumeOptions{})
+		return c, againRefused(err, "open the session again from hopsesh's window, which asks")
+	}
+}
+
+// againRefused says how to agree when a tab's command, made again, would restart the
+// agent's background service (decision D2): the terminal window cannot ask.
+func againRefused(err error, how string) error {
+	if errors.Is(err, agent.ErrRestartsService) {
+		return fmt.Errorf("%w. To restart it, %s", err, how)
+	}
+	return err
 }
 
 // sessionTab opens a session's command in a tab; when the terminal cannot start it, the
-// same launch opens in the user's terminal app instead.
-func (a *App) sessionTab(c agent.Command, l app.Launch, meta TabMeta, title string) (*OpenedDTO, error) {
+// same launch opens in the user's terminal app instead. again, when not nil, makes the
+// command again for "Run again" and "Open in my terminal" (resumeAgain).
+func (a *App) sessionTab(c agent.Command, l app.Launch, meta TabMeta, title string, again func() (agent.Command, error)) (*OpenedDTO, error) {
 	if a.Terms != nil {
 		if _, err := a.Terms.sessionTabRoute(meta.Machine, meta.Key); err != nil {
 			return nil, err
+		}
+	}
+	owned := meta
+	specOf := func(c agent.Command) (pty.Spec, error) {
+		c = a.ownedSessionCommand(c, owned)
+		return a.tabSpec(c, tabTitle(title, strings.TrimSuffix(filepath.Base(c.Argv[0]), ".exe")))
+	}
+	var respec func() (pty.Spec, error)
+	external := func(id string) error { return a.moveOut(id, l) }
+	if again != nil {
+		respec = func() (pty.Spec, error) {
+			c, err := again()
+			if err != nil {
+				return pty.Spec{}, err
+			}
+			return specOf(c)
+		}
+		external = func(id string) error {
+			c, err := again()
+			if err != nil {
+				return err
+			}
+			l := l
+			l.Run = c
+			return a.moveOut(id, l)
 		}
 	}
 	c = a.ownedSessionCommand(c, meta)
@@ -226,7 +291,7 @@ func (a *App) sessionTab(c agent.Command, l app.Launch, meta TabMeta, title stri
 			}
 		}
 		a.mu.Unlock()
-		info, err = a.Terms.Open(spec, TabSetup{Meta: meta, External: func(id string) error { return a.moveOut(id, l) }})
+		info, err = a.Terms.Open(spec, TabSetup{Meta: meta, External: external, Respec: respec})
 	}
 	if err != nil {
 		if oerr := a.openLaunch(l); oerr != nil {

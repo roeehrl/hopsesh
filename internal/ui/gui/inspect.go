@@ -477,7 +477,8 @@ func (a *App) ResumeCommand(machine, key string) (string, error) {
 	}
 	c, err := core.Resume(inv, e, agent.ResumeOptions{})
 	if err != nil {
-		return "", err
+		// No command to copy that would restart the agent's service unasked (D2).
+		return "", againRefused(err, "open the session from hopsesh's window, which asks")
 	}
 	return launch.Shell(c, "", launch.DefaultShell()), nil
 }

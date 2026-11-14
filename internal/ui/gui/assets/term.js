@@ -3,7 +3,7 @@
 // you", the entry points' routing (In this window / In my terminal), and the quit
 // confirmation that lists the programs still running.
 import {showWorkspace} from "./terminal-workspace.js";
-import { api, on, h, state, toast, fail, sys, dialog, count, icon, ago, localAgents, words, ask, errText } from "./core.js";
+import { api, on, h, state, toast, fail, sys, dialog, count, icon, ago, localAgents, words, ask, errText, RESTART } from "./core.js";
 
 export const tabs = new Map(); // id → the tab (TermTab)
 const revisions = new Map(); // retain removals so a delayed startup RPC cannot resurrect them
@@ -77,10 +77,6 @@ export function showTerminal(id) {
 function opened(r) {
   if (r?.notice) toast(r.notice);
 }
-
-// RESTART starts the backend's refusal of a resume that would restart the agent's
-// background service (decision D2): the window asks before resuming anyway.
-const RESTART = "restart-service: ";
 
 // resume continues a session: "here", "terminal", or "" (the setting).
 export async function resume(e, w = "") {

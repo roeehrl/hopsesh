@@ -1196,7 +1196,7 @@ func (a *App) OpenResult(where string) (*OpenedDTO, error) {
 	case WhereTerminal:
 		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
 	}
-	return a.sessionTab(res.Run, l, TabMeta{Kind: TabSession, Agent: p.Agent, Machine: app.LocalName(), Key: key}, p.Title)
+	return a.sessionTab(res.Run, l, TabMeta{Kind: TabSession, Agent: p.Agent, Machine: app.LocalName(), Key: key}, p.Title, a.resumeAgain(l.Key.Agent, app.LocalName(), key))
 }
 
 // bringTab runs a bring-back's command (claude --teleport, which saves the copy only once
@@ -1301,17 +1301,50 @@ func askRestart(err error) error {
 	return err
 }
 
+// AllowNewSessionRestart is AllowServiceRestart for a new session of an agent on a
+// machine, in its account folder profile ("" the default folder): the next NewSessionOn
+// for it, within two minutes.
+func (a *App) AllowNewSessionRestart(machine string, id agent.ID, profile string) {
+	if machine == "" {
+		machine = app.LocalName()
+	}
+	a.AllowServiceRestart(machine, newSessionKey(id, profile))
+}
+
+// newSessionKey names a new session of an agent in a folder among the sessions the
+// person agreed to restart the service for (no session key looks like it).
+func newSessionKey(id agent.ID, profile string) string {
+	return "new\x00" + string(id) + "\x00" + profile
+}
+
+// unmarked is err without askRestart's marker, for a place that does not ask.
+func unmarked(err error) error {
+	if err != nil && strings.HasPrefix(err.Error(), restartAsk) {
+		if inner := errors.Unwrap(err); inner != nil {
+			return inner
+		}
+	}
+	return err
+}
+
 // resumeOptions are o with the person's agreement to restart the service, taken (once)
 // when AllowServiceRestart recorded it for this session.
 func (a *App) resumeOptions(machine, key string, o agent.ResumeOptions) agent.ResumeOptions {
+	o.RestartService = a.takeRestart(machine, key)
+	return o
+}
+
+// takeRestart reports, once, whether the person agreed to restart the service for key
+// on machine within restartWindow.
+func (a *App) takeRestart(machine, key string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	k := machine + "\x00" + key
-	if at, ok := a.restartOK[k]; ok {
+	at, ok := a.restartOK[k]
+	if ok {
 		delete(a.restartOK, k)
-		o.RestartService = time.Since(at) < restartWindow
 	}
-	return o
+	return ok && time.Since(at) < restartWindow
 }
 
 // Undo reverses a move or continuation by its journal id; force undoes it even when the
