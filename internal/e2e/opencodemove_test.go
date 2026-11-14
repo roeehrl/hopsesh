@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +67,7 @@ func ocWorld(t *testing.T) (string, location, location) {
 
 func ocInstall(l location) agent.Install {
 	home := l.m.Facts.Home
-	return agent.Install{Agent: "opencode", Version: "2.3.0", MainRoot: "data", Present: true, Roots: map[string]string{
+	return agent.Install{Agent: "opencode", Version: "2.3.0", Binary: l.m.Facts.Binaries["opencode"].Path, MainRoot: "data", Present: true, Roots: map[string]string{
 		"data": filepath.Join(home, ".local", "share", "opencode"), "state": filepath.Join(home, ".local", "state", "opencode"),
 		"config": filepath.Join(home, ".config", "opencode")}}
 }
@@ -197,7 +198,7 @@ func TestOpenCodeMoveAndUndo(t *testing.T) {
 		t.Fatalf("moved: %+v (source %+v)", moved, in.Session)
 	}
 	imports := calls(t, log, "session import")
-	if len(imports) != 2 || !strings.Contains(imports[0], string(ocParent)+".json --directory "+here.repo+" --standalone") || !strings.Contains(imports[1], string(ocChild)+".json") {
+	if len(imports) != 2 || !strings.Contains(imports[0], "/tmp/"+string(ocParent)+"-") || !strings.Contains(imports[0], ".json --directory "+here.repo+" --standalone") || !strings.Contains(imports[1], "/tmp/"+string(ocChild)+"-") {
 		t.Fatalf("imports: %q", imports)
 	}
 	if len(calls(t, log, "session export "+string(ocParent))) == 0 {
@@ -310,15 +311,134 @@ func TestOpenCodeKeepBoth(t *testing.T) {
 	if err != nil || kid == string(ocChild) || !sessionThere(t, here, ocChild) {
 		t.Fatalf("the copy's child: %q %v", kid, err)
 	}
+	// A title recorded later (another rename or copy) does not stop this undo, which takes
+	// out only the copy's own record.
+	titles := filepath.Join(ocInstall(here).Root("data"), "hopsesh", "opencode", "titles.jsonl")
+	later := `{"id":"ses_other","title":"renamed later"}` + "\n"
+	if f, err := os.OpenFile(titles, os.O_APPEND|os.O_WRONLY, 0o600); err != nil {
+		t.Fatal(err)
+	} else {
+		_, _ = f.WriteString(later)
+		f.Close()
+	}
 	j, _ := journal.Load(env.StateDir, res.Journal)
 	if err := j.Undo(ctx, ocReach(m, box, here), false); err != nil {
 		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(titles); string(b) != later {
+		t.Fatalf("titles after undo: %q", b)
 	}
 	if sessionThere(t, here, to) || sessionThere(t, here, agent.SessionID(kid)) || !sessionThere(t, here, ocParent) || !sessionThere(t, here, ocChild) {
 		t.Fatal("undo: the copy kept beside must go, with its child, and the one here stay")
 	}
 	if d := calls(t, log, "session delete"); len(d) != 1 || !strings.Contains(d[0], string(to)) {
 		t.Fatalf("deletes: %q", d)
+	}
+}
+
+// Moved again over an unchanged copy here, the copy is set aside (OpenCode's export of it
+// and its child as a backup, then a stamp-guarded delete) and the newer one imported; undo
+// deletes that and imports the backup again, the child too. The preview says what hopsesh
+// cannot see about OpenCode.
+func TestOpenCodeResyncAndUndo(t *testing.T) {
+	log, box, here := ocWorld(t)
+	seedOpenCode(t, box)
+	m := opencode.New()
+	ctx := context.Background()
+	env := move.Env{StateDir: t.TempDir()}
+	in := ocInput(t, m, box, here)
+	p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if err != nil || len(p.Blockers) > 0 {
+		t.Fatal(err, p.Blockers)
+	}
+	if !slices.ContainsFunc(p.Warnings, func(w string) bool { return strings.Contains(w, "cannot see an OpenCode window") }) ||
+		slices.ContainsFunc(p.Warnings, func(w string) bool { return strings.Contains(w, "not found") }) {
+		t.Fatalf("warnings: %q", p.Warnings)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	first := ocSessions(t, here, m)[ocParent].Size
+	useOpenCode(t, box, ocParent, "More at box.")
+	in = ocInput(t, m, box, here)
+	if p, err = move.Build(ctx, in, move.Options{TargetDir: here.repo}); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Blockers) > 0 || len(p.SetAside) != 1 {
+		t.Fatalf("over the copy here: %v, %d set aside", p.Blockers, len(p.SetAside))
+	}
+	res, err := move.Apply(ctx, p, in, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := ocSessions(t, here, m)[ocParent]; s.Size != first+1 || s.Subagents != 1 {
+		t.Fatalf("replaced: %+v", s)
+	}
+	if d := calls(t, log, "session delete"); len(d) != 1 || !strings.Contains(d[0], string(ocParent)+" --standalone") {
+		t.Fatalf("deletes: %q", d)
+	}
+	j, _ := journal.Load(env.StateDir, res.Journal)
+	var backup string
+	for _, e := range vendorEntries(j) {
+		if !e.Created {
+			backup = e.Backup
+		}
+	}
+	if backup == "" {
+		t.Fatal("no set-aside entry")
+	}
+	if err := j.Undo(ctx, ocReach(m, box, here), false); err != nil {
+		t.Fatal(err)
+	}
+	if s, ok := ocSessions(t, here, m)[ocParent]; !ok || s.Size != first || s.Subagents != 1 || !sessionThere(t, here, ocChild) {
+		t.Fatalf("restored: %v %+v", ok, s)
+	}
+	if !slices.ContainsFunc(calls(t, log, "session import"), func(c string) bool { return strings.Contains(c, backup) }) {
+		t.Fatal("not restored from the backup")
+	}
+	if _, err := os.Stat(backup); !os.IsNotExist(err) {
+		t.Fatal("the backup outlived the session put back")
+	}
+	if _, err := os.Stat(strings.TrimSuffix(backup, ".json") + ".children"); err == nil {
+		if left, _ := os.ReadDir(strings.TrimSuffix(backup, ".json") + ".children"); len(left) > 0 {
+			t.Fatalf("the child's backup outlived the session put back: %v", left)
+		}
+	}
+}
+
+// A copy last written by a newer OpenCode than the one here is refused before the copy
+// here is set aside: the move fails with nothing changed here.
+func TestOpenCodeNewerRefusedFirst(t *testing.T) {
+	log, box, here := ocWorld(t)
+	seedOpenCode(t, box)
+	m := opencode.New()
+	ctx := context.Background()
+	env := move.Env{StateDir: t.TempDir()}
+	in := ocInput(t, m, box, here)
+	p, _ := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+	if _, err := move.Apply(ctx, p, in, env); err != nil {
+		t.Fatal(err)
+	}
+	useOpenCode(t, box, ocParent, "More at box, with a newer OpenCode.")
+	db, _ := fakeopencode.Open(ocDB(box))
+	_, err := db.Exec(`UPDATE session_v2 SET version = '2.9.0' WHERE id = ?`, string(ocParent))
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := ocSessions(t, here, m)[ocParent]
+	in = ocInput(t, m, box, here)
+	if p, err = move.Build(ctx, in, move.Options{TargetDir: here.repo}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := move.Apply(ctx, p, in, env); err == nil || !strings.Contains(err.Error(), "2.9.0") {
+		t.Fatalf("a newer copy: %v", err)
+	}
+	if after, ok := ocSessions(t, here, m)[ocParent]; !ok || after.Size != before.Size {
+		t.Fatalf("the copy here changed: %v %+v", ok, after)
+	}
+	if n := len(calls(t, log, "session delete")) + len(calls(t, log, "session import")); n != 2 {
+		t.Fatalf("commands after the refusal: %q %q", calls(t, log, "session delete"), calls(t, log, "session import"))
 	}
 }
 
