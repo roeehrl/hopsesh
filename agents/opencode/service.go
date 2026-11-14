@@ -271,16 +271,22 @@ func resumeProgram(ctx context.Context, h agent.Host, in agent.Install, svc serv
 	if restart {
 		return binName, nil
 	}
-	return "", &restartError{Service: want, Have: in.Version}
+	re := &restartError{Service: want, Have: in.Version}
+	if in.Profile != nil && !in.Profile.Default {
+		re.Folder = in.Profile.Name
+	}
+	return "", re
 }
 
 // restartError is a resume that would restart OpenCode's background service: no
 // opencode of the service's version is on this machine (decision D2: hopsesh asks
 // instead of restarting it unasked). It is agent.ErrRestartsService, which the user
-// interfaces ask about before resuming with ResumeOptions.RestartService.
+// interfaces ask about before resuming with ResumeOptions.RestartService; each says how
+// to agree, since some (another machine's, a copied command) cannot ask.
 type restartError struct {
 	Service string // the running service's version
 	Have    string // the PATH opencode's
+	Folder  string // an added account folder's name, whose service the desktop app does not use ("" the default folder)
 }
 
 func (e *restartError) Error() string {
@@ -288,9 +294,13 @@ func (e *restartError) Error() string {
 	if e.Have != "" {
 		have += " (" + e.Have + ")"
 	}
+	if e.Folder != "" {
+		return fmt.Sprintf("the background service of OpenCode's %s folder runs %s, and %s is another version: opening the session with it would restart that service "+
+			"and stop any turn it is running for another window. Install opencode %s, or stop that folder's service yourself, then try again", e.Folder, e.Service, have, e.Service)
+	}
 	return fmt.Sprintf("OpenCode's background service runs %s, and %s is another version: opening the session with it would restart the service, "+
-		"which the desktop app shares, and stop any turn it is running. Install opencode %s, or quit OpenCode desktop and run `opencode service stop` yourself, then try again; "+
-		"or agree to restart it", e.Service, have, e.Service)
+		"which the desktop app shares, and stop any turn it is running. Install opencode %s, or quit OpenCode desktop and run `opencode service stop` yourself, then try again",
+		e.Service, have, e.Service)
 }
 
 func (e *restartError) Unwrap() error { return agent.ErrRestartsService }

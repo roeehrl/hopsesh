@@ -46,6 +46,7 @@ var (
 	_ agent.SanitizedProjection  = (*Module)(nil)
 	_ agent.SessionWatchProvider = (*Module)(nil)
 	_ agent.HostResumer          = (*Module)(nil)
+	_ agent.HostStarter          = (*Module)(nil)
 	_ agent.VendorInstaller      = (*Module)(nil)
 	_ agent.SessionStore         = (*Module)(nil)
 	_ agent.DirChanger           = (*Module)(nil)
@@ -295,6 +296,20 @@ func (m *Module) ResumeOn(ctx context.Context, h agent.Host, in agent.Install, k
 		return agent.Command{}, err
 	}
 	return resumeCommand(in, program, key, p, o), nil
+}
+
+// StartProgram is the program a new session runs: as for a resume, one of the running
+// background service's version (the TUI would restart it otherwise, D2), unless the
+// person agreed (restart). The PATH opencode is in.Binary.
+func (m *Module) StartProgram(ctx context.Context, h agent.Host, in agent.Install, restart bool) (string, error) {
+	program, err := resumeProgram(ctx, h, in, probeService(ctx, h), restart)
+	if err != nil {
+		return "", err
+	}
+	if program == binName && in.Binary != "" {
+		program = in.Binary
+	}
+	return program, nil
 }
 
 // SessionWatchPaths are the database Detect chose and its WAL (every change lands there)
