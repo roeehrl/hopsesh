@@ -6,7 +6,7 @@
 // systems. Results go to a grid in the run summary and a log per row.
 //
 //	hsmatrix run -hopsesh bin/hopsesh -there hsremote@127.0.0.1 -alias hsm-box -label linux→linux -out out/
-//	hsmatrix rows [-all]
+//	hsmatrix rows [-all] [-agents claude,codex]
 //	hsmatrix agent seed|find|append|remove|head|base   (the helper; JSON in, JSON out)
 package main
 
@@ -43,7 +43,12 @@ func main() {
 		all := fl.Bool("all", false, "every combination, not pairwise")
 		strength := fl.Int("t", 2, "coverage: 2 = pairs, 3 = triples")
 		seedN := fl.Int64("seed", 1, "pairwise seed")
+		agents := fl.String("agents", os.Getenv("HSMATRIX_AGENTS"), "comma-separated agents whose sessions the rows use (default $HSMATRIX_AGENTS, else claude, codex and opencode)")
 		_ = fl.Parse(os.Args[2:])
+		if err := setAgents(*agents); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 		rows := covering(*strength, *seedN)
 		if *all {
 			rows = every()
@@ -72,7 +77,12 @@ func runMain(args []string) int {
 	seedN := fl.Int64("seed", 1, "pairwise seed")
 	only := fl.String("only", "", "comma-separated row numbers or ops to run")
 	shard := fl.String("shard", "", "k/n: run every n-th row starting at the k-th (1-based), to split a long run across jobs")
+	agents := fl.String("agents", os.Getenv("HSMATRIX_AGENTS"), "comma-separated agents whose sessions the rows use (default $HSMATRIX_AGENTS, else claude, codex and opencode)")
 	_ = fl.Parse(args)
+	if err := setAgents(*agents); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
 	rows := covering(*strength, *seedN)
 	if *all {
 		rows = every()
@@ -136,6 +146,12 @@ func runMain(args []string) int {
 		env[k] = v
 	}
 	testkit.Apply(env)
+	// The matrix runs only the stand-in agents: a real OpenCode first on PATH would run on
+	// this machine's data.
+	if _, err := standIn(); err != nil {
+		fmt.Fprintln(os.Stderr, "hsmatrix:", err)
+		return 2
+	}
 	for _, d := range []string{env["HOPSESH_CONFIG_DIR"], env["CLAUDE_CONFIG_DIR"], filepath.Join(env["CODEX_HOME"], "sessions"), env["HSMATRIX_BASE"]} {
 		_ = os.MkdirAll(d, 0o755)
 	}

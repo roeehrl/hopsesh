@@ -14,6 +14,7 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/core/move"
 	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakeopencode"
 )
 
 // side is one machine of a scenario: here (in-process) or there (the helper over ssh).
@@ -187,7 +188,10 @@ func (r *runner) scenario(row Row) error {
 		return r.cloudHop(row)
 	}
 	s := &sc{row: row, id: newID(), host: r.hosts[row.Naming]}
-	s.marker = fmt.Sprintf("hsm%03dx%s", row.N, s.id[:6])
+	if row.From == "opencode" {
+		s.id = fakeopencode.SessionID(time.Now()) // OpenCode's import takes only its own ids
+	}
+	s.marker = fmt.Sprintf("hsm%03dx%s", row.N, short(s.id)[:6])
 	s.text = contents[row.Content] + " " + s.marker
 	s.title = fmt.Sprintf("matrix row %d", row.N)
 	if row.Op == "push" {
@@ -524,7 +528,12 @@ func (r *runner) skill() error {
 	if _, err := r.hs(true, "skill", "install"); err != nil {
 		return err
 	}
-	for _, p := range []string{filepath.Join(claudeDir(), "skills", "hopsesh", "SKILL.md")} {
+	paths := []string{filepath.Join(claudeDir(), "skills", "hopsesh", "SKILL.md")}
+	if ok, _ := standIn(); ok {
+		// OpenCode reads the copy Codex shares in ~/.agents/skills.
+		paths = append(paths, filepath.Join(homeDir(), ".agents", "skills", "hopsesh", "SKILL.md"))
+	}
+	for _, p := range paths {
 		if _, err := os.Stat(p); err != nil {
 			return fmt.Errorf("the skill is not at %s", p)
 		}

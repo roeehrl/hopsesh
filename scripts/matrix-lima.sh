@@ -5,6 +5,7 @@
 # here; Linux → macOS runs inside the VM. Used by CI on macos-15-intel; needs sudo.
 #
 #   scripts/matrix-lima.sh <macOS bin dir> <Linux bin dir> <out dir>
+#   HSMATRIX_AGENTS=claude,codex limits both runs to those agents' sessions (hsmatrix -agents).
 set -eu
 # shellcheck source=lib/testhost.sh
 . "$(dirname "$0")/lib/testhost.sh"
@@ -19,7 +20,7 @@ UHOME=$(th_home "$U")
 sudo mkdir -p /usr/local/bin
 sudo install -m 0755 "$BIN/hopsesh" /usr/local/bin/hopsesh
 sudo install -m 0755 "$BIN/hsmatrix" /usr/local/bin/hsmatrix
-for a in claude codex; do sudo install -m 0755 "$BIN/fakeagent" "/usr/local/bin/$a"; done
+for a in claude codex opencode; do sudo install -m 0755 "$BIN/fakeagent" "/usr/local/bin/$a"; done
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519
 sudo -u "$U" -H sh -c 'umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys'
@@ -40,6 +41,7 @@ G sudo sh -c '
   install -m 755 /tmp/hsmatrix /usr/local/bin/hsmatrix
   install -m 755 /tmp/fakeagent /usr/local/bin/claude
   install -m 755 /tmp/fakeagent /usr/local/bin/codex
+  install -m 755 /tmp/fakeagent /usr/local/bin/opencode
   install -d -o hsremote -m 700 /home/hsremote/.ssh
   install -o hsremote -m 600 /tmp/mac.pub /home/hsremote/.ssh/authorized_keys
   su hsremote -c "ssh-keygen -q -t ed25519 -N \"\" -f /home/hsremote/.ssh/id_ed25519"'
@@ -58,7 +60,7 @@ echo "== macOS → Linux"
 (cd / && "$BIN/hsmatrix" run -hopsesh "$BIN/hopsesh" -there hsm-lima -alias hsm-lima -label 'macos→linux' -out "$OUT/m2l") || failed=$((failed + 1))
 
 echo "== Linux → macOS"
-G sudo -u hsremote -H sh -c '
+G sudo -u hsremote -H env HSMATRIX_AGENTS="${HSMATRIX_AGENTS:-}" sh -c '
   printf "Host hsm-mac\n  HostName host.lima.internal\n  User hsremote\n" >> ~/.ssh/config
   cd ~ && hsmatrix run -hopsesh /usr/local/bin/hopsesh -there hsremote@host.lima.internal -alias hsm-mac -label "linux→macos" -out /tmp/l2m' || failed=$((failed + 1))
 G sudo chmod -R a+rX /tmp/l2m 2>/dev/null || true

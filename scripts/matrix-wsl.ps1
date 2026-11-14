@@ -4,6 +4,7 @@
 # runs here; Linux → Windows runs inside the guest. Used by CI on windows-2025.
 #
 #   ./scripts/matrix-wsl.ps1 -Bin bin -LinuxBin bin-linux -Out out
+#   $env:HSMATRIX_AGENTS = 'claude,codex' limits both runs to those agents' sessions (hsmatrix -agents).
 param(
   [Parameter(Mandatory)][string]$Bin,
   [Parameter(Mandatory)][string]$LinuxBin,
@@ -47,6 +48,7 @@ install -m 755 '$(WslPath "$LinuxBin\hopsesh")' /usr/local/bin/hopsesh
 install -m 755 '$(WslPath "$LinuxBin\hsmatrix")' /usr/local/bin/hsmatrix
 install -m 755 '$(WslPath "$LinuxBin\fakeagent")' /usr/local/bin/claude
 install -m 755 '$(WslPath "$LinuxBin\fakeagent")' /usr/local/bin/codex
+install -m 755 '$(WslPath "$LinuxBin\fakeagent")' /usr/local/bin/opencode
 install -d -o hsremote -m 700 /home/hsremote/.ssh
 echo '$winPub' > /home/hsremote/.ssh/authorized_keys
 chown hsremote /home/hsremote/.ssh/authorized_keys; chmod 600 /home/hsremote/.ssh/authorized_keys
@@ -84,7 +86,7 @@ $code = InWsl @"
 printf 'Host hsm-win\n  HostName $gw\n  User $env:USERNAME\n' >> ~/.ssh/config
 cd ~
 code=0
-hsmatrix run -hopsesh /usr/local/bin/hopsesh -there '$env:USERNAME@$gw' -alias hsm-win -label 'linux→windows' -out /tmp/l2w || code=`$?
+HSMATRIX_AGENTS='$env:HSMATRIX_AGENTS' hsmatrix run -hopsesh /usr/local/bin/hopsesh -there '$env:USERNAME@$gw' -alias hsm-win -label 'linux→windows' -out /tmp/l2w || code=`$?
 cp -r /tmp/l2w/. '$(WslPath $l2w)/' 2>/dev/null || true
 exit `$code
 "@ 'hsremote'

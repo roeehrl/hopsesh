@@ -22,7 +22,7 @@ $tools = 'C:\hsm-bin'
 New-Item -ItemType Directory -Force -Path $tools | Out-Null
 Copy-Item (Join-Path $Bin 'hopsesh.exe') $tools -Force
 Copy-Item (Join-Path $Bin 'hsmatrix.exe') $tools -Force
-foreach ($a in 'claude', 'codex') { Copy-Item (Join-Path $Bin 'fakeagent.exe') (Join-Path $tools "$a.exe") -Force }
+foreach ($a in 'claude', 'codex', 'opencode') { Copy-Item (Join-Path $Bin 'fakeagent.exe') (Join-Path $tools "$a.exe") -Force }
 $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 if (($machine -split ';') -notcontains $tools) { [Environment]::SetEnvironmentVariable('Path', "$tools;$machine", 'Machine') }
 $env:Path = "$tools;$env:Path"

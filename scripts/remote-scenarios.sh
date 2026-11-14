@@ -44,7 +44,7 @@ th_add_user "$U"
 th_clean_login_env
 UHOME=$(th_home "$U")
 sudo mkdir -p /usr/local/bin
-for a in claude codex; do sudo install -m 0755 "$BIN/fakeagent" "/usr/local/bin/$a"; done
+for a in claude codex opencode; do sudo install -m 0755 "$BIN/fakeagent" "/usr/local/bin/$a"; done
 if command -v hopsesh > /dev/null 2>&1 || [ -e /usr/local/bin/hopsesh ]; then
   echo "hopsesh is installed system-wide; the first scenario needs a machine without it" >&2
   exit 1
