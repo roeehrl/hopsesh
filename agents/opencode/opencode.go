@@ -13,6 +13,7 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -178,11 +179,34 @@ func (m *Module) Bundle(ctx context.Context, h agent.Host, in agent.Install, s a
 	if err != nil {
 		return agent.Bundle{}, err
 	}
-	b := agent.Bundle{Files: []agent.BundleFile{main}}
+	b := agent.Bundle{Files: []agent.BundleFile{main}, Warnings: m.moveWarnings(ctx, h, in, s)}
 	for _, c := range kids {
 		b.Files = append(b.Files, agent.BundleFile{Root: rootData, Rel: childRel(s.Key.Session, c), Role: agent.RoleSide, Rewrite: agent.RewriteJSONL, Virtual: true, Size: estimate(1)})
 	}
 	return b, nil
+}
+
+// claudeAgent is the provider of OpenCode's "Claude Agent" sessions.
+const claudeAgent = "claude-agent"
+
+// moveWarnings are what a move's preview says about an OpenCode session: a window that has
+// it open while it is idle cannot be seen, and a session of the Claude Agent provider
+// stays an OpenCode session.
+func (m *Module) moveWarnings(ctx context.Context, h agent.Host, in agent.Install, s agent.Summary) []string {
+	where := h.Facts().Machine
+	if where == "" {
+		where = "the machine it is on"
+	}
+	out := []string{fmt.Sprintf("hopsesh cannot see an OpenCode window (a terminal or the desktop app) that has this session open while it is idle on %s; close it there, so it does not continue the copy left behind", where)}
+	if r, ok, err := openSQL(ctx, h, in); ok && err == nil {
+		if row, err := r.session(ctx, s.Key.Session); err == nil {
+			var model modelRef
+			if json.Unmarshal(row.Model, &model) == nil && model.ProviderID == claudeAgent {
+				out = append(out, "this session runs on OpenCode's Claude Agent provider: it moves as an OpenCode session (not a Claude Code one), and OpenCode here needs that provider set up to continue it")
+			}
+		}
+	}
+	return out
 }
 
 // placedBundle is a bundle from the files at the session's anchor and its children's

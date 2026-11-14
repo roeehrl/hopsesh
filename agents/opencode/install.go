@@ -115,42 +115,81 @@ func placedFamily(ctx context.Context, h agent.Host, in agent.Install, key agent
 		}
 		kids = append(kids, kid)
 	}
-	return parentsFirst(root, kids), nil
+	return parentsFirst(root, kids)
 }
 
 // parentsFirst orders a family for its import: OpenCode imports a child only once its
 // parent is there. A child whose parent is not in the family hangs from the root.
-func parentsFirst(root *placedSession, kids []*placedSession) []*placedSession {
+func parentsFirst(root *placedSession, kids []*placedSession) ([]*placedSession, error) {
 	sort.Slice(kids, func(i, j int) bool { return kids[i].id < kids[j].id })
 	byID := map[string]bool{root.id: true}
 	for _, k := range kids {
 		byID[k.id] = true
 	}
-	children := map[string][]*placedSession{}
+	ids, parents := []string{root.id}, []string{""}
 	for _, k := range kids {
 		if k.parent == "" || !byID[k.parent] || k.parent == k.id {
 			k.parent = root.id
 			k.info["parentID"], _ = json.Marshal(root.id)
 		}
-		children[k.parent] = append(children[k.parent], k)
+		ids, parents = append(ids, k.id), append(parents, k.parent)
 	}
-	out := []*placedSession{root}
-	seen := map[string]bool{root.id: true}
-	for i := 0; i < len(out); i++ {
-		for _, k := range children[out[i].id] {
-			if !seen[k.id] {
-				seen[k.id] = true
-				out = append(out, k)
+	order, err := familyOrder(ids, parents)
+	if err != nil {
+		return nil, fmt.Errorf("the placed copy of the OpenCode session %s: %w", root.id, err)
+	}
+	all := append([]*placedSession{root}, kids...)
+	out := make([]*placedSession, 0, len(order))
+	for _, i := range order {
+		out = append(out, all[i])
+	}
+	return out, nil
+}
+
+// familyOrder orders a family's members (ids[0] the root, parents[i] the parent of
+// ids[i]) for their import: the root, then each member once its parent is in. One whose
+// parent is not in the family comes after the root. Members that do not hang from the
+// root (their parents make a cycle) are an error: OpenCode would not import them.
+func familyOrder(ids, parents []string) ([]int, error) {
+	in := map[string]bool{}
+	for _, x := range ids {
+		in[x] = true
+	}
+	children := map[string][]int{}
+	for i := 1; i < len(ids); i++ {
+		parent := parents[i]
+		if !in[parent] || parent == ids[i] {
+			parent = ids[0]
+		}
+		children[parent] = append(children[parent], i)
+	}
+	out := []int{0}
+	seen := map[int]bool{0: true}
+	for k := 0; k < len(out); k++ {
+		for _, c := range children[ids[out[k]]] {
+			if !seen[c] {
+				seen[c] = true
+				out = append(out, c)
 			}
 		}
 	}
-	return out
+	if len(out) != len(ids) {
+		var lost []string
+		for i := range ids {
+			if !seen[i] {
+				lost = append(lost, ids[i])
+			}
+		}
+		return nil, fmt.Errorf("the child sessions %s do not hang from %s", strings.Join(lost, ", "), ids[0])
+	}
+	return out, nil
 }
 
 // remapIDs gives a keep-both copy's children and messages new ids, and puts them where
-// OpenCode refers to them by id: the sessions' id and parentID, the messages' id, a
-// summary's kept message (metadata.keepID) and a subagent call's session
-// (state.metadata.sessionID). What the model reads (text, tool input and output) is left
+// OpenCode refers to them by id: the sessions' id and parentID, a pending revert's message
+// (revert.messageID; 2.3.0's import drops it), the messages' id, a summary's kept message
+// (metadata.keepID), a subagent's answer's session (metadata.childID) and a subagent
+// call's session (state.metadata.sessionID). What the model reads (text, tool input and output) is left
 // as it is, so the copy reads as the conversation hopsesh staged; a subagent's answer may
 // still name the original's child. Each new id keeps the old one's time part, so the
 // order stays, and takes the rest from the copy's id, so a second run gives the same ids.
@@ -189,13 +228,17 @@ func remapIDs(fam []*placedSession, from, to string) {
 		}
 		swap(p.info, "id")
 		swap(p.info, "parentID")
+		editObject(p.info, "revert", func(rv map[string]json.RawMessage) bool { return swap(rv, "messageID") })
 		for i, raw := range p.msgs {
 			var msg map[string]json.RawMessage
 			if json.Unmarshal(raw, &msg) != nil {
 				continue
 			}
 			swap(msg, "id")
-			editObject(msg, "metadata", func(md map[string]json.RawMessage) bool { return swap(md, "keepID") })
+			editObject(msg, "metadata", func(md map[string]json.RawMessage) bool {
+				kept := swap(md, "keepID")
+				return swap(md, "childID") || kept
+			})
 			var content []map[string]json.RawMessage
 			if json.Unmarshal(msg["content"], &content) == nil {
 				changed := false
@@ -279,15 +322,25 @@ func (m *Module) AfterInstall(ctx context.Context, h agent.Host, in agent.Instal
 		if s != root {
 			dir = childDir(h, s, root, cwd)
 		}
-		tmp := h.Path().Join(in.Root(rootData), "hopsesh", string(id), "tmp", s.id+".json")
 		write := func() (string, error) {
 			b, err := s.transfer()
 			if err != nil {
 				return "", err
 			}
+			// Named after its content: a recovery writes the same file again, and another
+			// operation's import of the session never rewrites this one's (the journal
+			// would take that for this file being used since).
+			sum := sha256.Sum256(b)
+			tmp := h.Path().Join(in.Root(rootData), "hopsesh", string(id), "tmp", s.id+"-"+hex.EncodeToString(sum[:6])+".json")
 			return tmp, h.FS().WriteFile(tmp, b, 0o600)
 		}
-		if err := m.importSession(ctx, h, in, svc, agent.SessionID(s.id), s.ids(), dir, write); err != nil {
+		err := m.importSession(ctx, h, in, svc, agent.SessionID(s.id), s.ids(), dir, write)
+		if err != nil && s != root && errors.Is(err, agent.ErrDiverged) {
+			// The copy's root may be this run's import: only its own divergence means
+			// this run made nothing (the core then leaves the session to undo alone).
+			err = fmt.Errorf("its child session %s: %v", s.id, err)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -313,19 +366,50 @@ func childDir(h agent.Host, s, root *placedSession, cwd string) string {
 // checkTarget refuses a copy last written by a newer OpenCode than the one that imports it
 // here (the running service, else the program): an older one may not read its messages.
 func (m *Module) checkTarget(ctx context.Context, h agent.Host, in agent.Install, svc service, fam []*placedSession) error {
-	here := in.Version
-	if svc.State == serviceRunning {
-		v, err := serviceVersion(ctx, h, svc)
-		if err != nil {
-			return fmt.Errorf("hopsesh could not tell which version OpenCode's background service runs: %w", err)
-		}
-		here = v
+	here, err := importVersion(ctx, h, in, svc)
+	if err != nil {
+		return err
 	}
 	for _, s := range fam {
-		if here != "" && s.version != "" && agent.VersionLess(here, s.version) {
-			return fmt.Errorf("%w: the session was last written by OpenCode %s, and OpenCode here is %s, which may not read it; update OpenCode here, then try again",
-				agent.ErrUnsupported, s.version, here)
+		if err := readsVersion(here, s.version); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// CheckInstall is checkTarget before anything changes here (agent.InstallChecker), for the
+// version that last wrote the session moved; AfterInstall checks every session it imports.
+func (m *Module) CheckInstall(ctx context.Context, h agent.Host, in agent.Install, version string) error {
+	svc, err := writeService(ctx, h, in)
+	if err != nil {
+		return err
+	}
+	here, err := importVersion(ctx, h, in, svc)
+	if err != nil {
+		return err
+	}
+	return readsVersion(here, version)
+}
+
+// importVersion is the OpenCode that imports here: the running service's, else the
+// program's.
+func importVersion(ctx context.Context, h agent.Host, in agent.Install, svc service) (string, error) {
+	if svc.State != serviceRunning {
+		return in.Version, nil
+	}
+	v, err := serviceVersion(ctx, h, svc)
+	if err != nil {
+		return "", fmt.Errorf("hopsesh could not tell which version OpenCode's background service runs: %w", err)
+	}
+	return v, nil
+}
+
+// readsVersion refuses a session last written by a newer OpenCode than here.
+func readsVersion(here, written string) error {
+	if here != "" && written != "" && agent.VersionLess(here, written) {
+		return fmt.Errorf("%w: the session was last written by OpenCode %s, and OpenCode here is %s, which may not read it; update OpenCode here, then try again",
+			agent.ErrUnsupported, written, here)
 	}
 	return nil
 }

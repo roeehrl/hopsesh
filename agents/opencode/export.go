@@ -166,29 +166,54 @@ func (m *Module) Materialize(ctx context.Context, h agent.Host, in agent.Install
 }
 
 // movable is a session as a move carries it: OpenCode's export, with the OpenCode version
-// that last wrote it from the database; else the database alone, without media.
+// that last wrote it from the database; else (OpenCode's program does not run here, or may
+// not: exportService) the database alone, without media.
 func (m *Module) movable(ctx context.Context, h agent.Host, in agent.Install, sid agent.SessionID) (session, []message, error) {
-	sess, msgs, err := exportSession(ctx, h, probeService(ctx, h), sid)
-	if err == nil {
-		if r, ok, e := openSQL(ctx, h, in); ok && e == nil {
-			if row, e := r.session(ctx, sid); e == nil {
-				sess.Version = row.Version
+	svc, why := exportService(ctx, h, in)
+	if why == nil {
+		sess, msgs, err := exportSession(ctx, h, svc, sid)
+		if err == nil {
+			if r, ok, e := openSQL(ctx, h, in); ok && e == nil {
+				if row, e := r.session(ctx, sid); e == nil {
+					sess.Version = row.Version
+				}
 			}
+			return sess, msgs, nil
 		}
-		return sess, msgs, nil
+		if !notRun(err) {
+			return session{}, nil, err
+		}
+		why = err
 	}
-	if !notRun(err) {
+	sess, msgs, err := m.transcript(ctx, h, in, sid)
+	if err != nil {
 		return session{}, nil, err
 	}
-	if sess, msgs, err = m.transcript(ctx, h, in, sid); err != nil {
+	if err := noMedia(sid, msgs, why); err != nil {
 		return session{}, nil, err
-	}
-	for _, msg := range msgs {
-		if bytes.Contains(msg.Raw, []byte(`"media:`)) {
-			return session{}, nil, fmt.Errorf("%w: the OpenCode session %s holds media that only OpenCode's own export carries, and its program does not run here", agent.ErrUnsupported, sid)
-		}
 	}
 	return sess, msgs, nil
+}
+
+// exportService is the service an export a move or a backup carries runs through, or why
+// OpenCode's program does not export here (then the session is read from the database).
+// With the service stopped, the export runs a private server, which must be an OpenCode
+// that reads every session in the database, as for a change (writeService): an older one
+// could migrate or misread it.
+func exportService(ctx context.Context, h agent.Host, in agent.Install) (service, error) {
+	return writeService(ctx, h, in)
+}
+
+// noMedia refuses a session read from the database that holds media: only OpenCode's own
+// export carries them (the database holds "media:" references, which an import refuses).
+// why is the reason OpenCode's export was not used.
+func noMedia(sid agent.SessionID, msgs []message, why error) error {
+	for _, msg := range msgs {
+		if bytes.Contains(msg.Raw, []byte(`"media:`)) {
+			return fmt.Errorf("%w: the OpenCode session %s holds media that only OpenCode's own export carries, and hopsesh does not export it here (%v)", agent.ErrUnsupported, sid, why)
+		}
+	}
+	return nil
 }
 
 // readFile reads a session's JSON lines from a file only: a copy hopsesh staged or

@@ -17,10 +17,13 @@ import (
 // for that message. A private server (--standalone) ends before it applies the move and
 // leaves the session marked busy, so with the service stopped hopsesh does not ask.
 
-// How long ChangeDir waits for OpenCode to apply a move, and how often it looks.
+// How long ChangeDir waits for OpenCode to apply a move, and how often it looks: in the
+// database, or, where hopsesh cannot read it, through OpenCode's API (a process each time,
+// so less often).
 var (
-	cdWait = 30 * time.Second
-	cdPoll = 100 * time.Millisecond
+	cdWait    = 30 * time.Second
+	cdPoll    = 100 * time.Millisecond
+	cdAPIPoll = time.Second
 )
 
 // errNoService: only OpenCode's running background service applies a folder change.
@@ -55,7 +58,7 @@ func (m *Module) ChangeDir(ctx context.Context, h agent.Host, in agent.Install, 
 		return noServiceCD(p.To)
 	}
 	sid := s.Key.Session
-	before, _, err := m.lastSwitch(ctx, h, in, svc, sid)
+	before, _, viaAPI, err := m.lastSwitch(ctx, h, in, svc, sid)
 	if err != nil {
 		return err
 	}
@@ -70,10 +73,20 @@ func (m *Module) ChangeDir(ctx context.Context, h agent.Host, in agent.Install, 
 	}
 	deadline := time.Now().Add(cdWait)
 	for {
-		mid, dir, err := m.lastSwitch(ctx, h, in, svc, sid)
+		poll := cdPoll
+		if viaAPI {
+			// An API call without --standalone starts the service when it stopped since:
+			// ask first, and stop waiting when it is not running.
+			poll = cdAPIPoll
+			if probeService(ctx, h).State != serviceRunning {
+				return fmt.Errorf("OpenCode took the folder change, but its background service stopped before it made it; it makes it at the session's next step once OpenCode runs again")
+			}
+		}
+		mid, dir, api, err := m.lastSwitch(ctx, h, in, svc, sid)
 		if err != nil {
 			return err
 		}
+		viaAPI = api
 		if mid != before && dir == p.To {
 			return nil
 		}
@@ -83,7 +96,7 @@ func (m *Module) ChangeDir(ctx context.Context, h agent.Host, in agent.Install, 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(cdPoll):
+		case <-time.After(poll):
 		}
 	}
 }
@@ -92,20 +105,20 @@ const lastSwitchQuery = `SELECT m.id, json_extract(m.data, '$.location.directory
 	`WHERE m.session_id = ? AND m.type = 'location-switched' ORDER BY m.seq DESC LIMIT 1`
 
 // lastSwitch is the session's newest location-switched message and the folder it names
-// ("" for none): from the database, else from OpenCode's API.
-func (m *Module) lastSwitch(ctx context.Context, h agent.Host, in agent.Install, svc service, sid agent.SessionID) (string, string, error) {
+// ("" for none): from the database, else from OpenCode's API (viaAPI).
+func (m *Module) lastSwitch(ctx context.Context, h agent.Host, in agent.Install, svc service, sid agent.SessionID) (mid, dir string, viaAPI bool, err error) {
 	if r, ok, err := openSQL(ctx, h, in); ok {
 		if err == nil {
 			var rows agent.Rows
 			if rows, err = r.sq.Query(ctx, r.db, lastSwitchQuery, string(sid)); err == nil {
 				if len(rows.Rows) == 0 {
-					return "", "", nil
+					return "", "", false, nil
 				}
-				return rows.Rows[0].String("id"), nativeDir(h, rows.Rows[0].String("dir")), nil
+				return rows.Rows[0].String("id"), nativeDir(h, rows.Rows[0].String("dir")), false, nil
 			}
 		}
 		if !readUnsupported(err) {
-			return "", "", err
+			return "", "", false, err
 		}
 	}
 	var page struct {
@@ -116,12 +129,12 @@ func (m *Module) lastSwitch(ctx context.Context, h agent.Host, in agent.Install,
 	}
 	q := url.Values{"type": {"location-switched"}, "order": {"desc"}, "limit": {"1"}}
 	if err := apiJSON(ctx, h, svc, "GET", "/api/session/"+string(sid)+"/message?"+q.Encode(), nil, &page); err != nil {
-		return "", "", err
+		return "", "", true, err
 	}
 	if len(page.Data) == 0 {
-		return "", "", nil
+		return "", "", true, nil
 	}
-	return page.Data[0].ID, nativeDir(h, page.Data[0].Location.Directory), nil
+	return page.Data[0].ID, nativeDir(h, page.Data[0].Location.Directory), true, nil
 }
 
 // InSession is OpenCode's own folder change, typed in the session.

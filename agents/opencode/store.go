@@ -21,10 +21,15 @@ import (
 
 // writeService probes OpenCode's background service before a change: with it stopped, the
 // change runs on a private server, whose OpenCode must read every session in the database.
+// When the probe failed, nothing changes (unknownService). Exports a move or a backup
+// carries go through the same check (exportService).
 func writeService(ctx context.Context, h agent.Host, in agent.Install) (service, error) {
 	svc := probeService(ctx, h)
-	if !svc.standalone() {
+	switch svc.State {
+	case serviceRunning:
 		return svc, nil
+	case serviceUnknown:
+		return svc, unknownService(svc)
 	}
 	newest := ""
 	if r, ok, err := openSQL(ctx, h, in); ok {
@@ -47,7 +52,7 @@ func backupDir(h agent.Host, in agent.Install) string {
 // and each child in <id>-<time>.children/<n>-<child>.json, parents first. The stamp is
 // the session's before and after the export, which must agree.
 func (m *Module) Backup(ctx context.Context, h agent.Host, in agent.Install, sid agent.SessionID) (string, agent.SessionStamp, error) {
-	svc := probeService(ctx, h)
+	svc, why := exportService(ctx, h, in)
 	for attempt := 0; ; attempt++ {
 		before, err := m.SessionStamp(ctx, h, in, sid)
 		if err != nil {
@@ -59,7 +64,7 @@ func (m *Module) Backup(ctx context.Context, h agent.Host, in agent.Install, sid
 		}
 		var files [][]byte
 		for _, s := range append([]agent.SessionID{sid}, kids...) {
-			b, err := m.exported(ctx, h, in, svc, s)
+			b, err := m.exported(ctx, h, in, svc, why, s)
 			if err != nil {
 				return "", "", fmt.Errorf("exporting %s: %w", s, err)
 			}
@@ -90,15 +95,21 @@ func (m *Module) Backup(ctx context.Context, h agent.Host, in agent.Install, sid
 }
 
 // exported is a session as OpenCode's import reads it: its export, or, where OpenCode's
-// program does not run, the same made from the database (refused for a session with
-// media, which only the export carries).
-func (m *Module) exported(ctx context.Context, h agent.Host, in agent.Install, svc service, sid agent.SessionID) ([]byte, error) {
-	b, err := exportRaw(ctx, h, svc, sid)
-	if err == nil || !notRun(err) {
-		return b, err
+// program does not run or may not (why, from exportService), the same made from the
+// database (refused for a session with media, which only the export carries).
+func (m *Module) exported(ctx context.Context, h agent.Host, in agent.Install, svc service, why error, sid agent.SessionID) ([]byte, error) {
+	if why == nil {
+		b, err := exportRaw(ctx, h, svc, sid)
+		if err == nil || !notRun(err) {
+			return b, err
+		}
+		why = err
 	}
-	s, msgs, err := m.movable(ctx, h, in, sid)
+	s, msgs, err := m.transcript(ctx, h, in, sid)
 	if err != nil {
+		return nil, err
+	}
+	if err := noMedia(sid, msgs, why); err != nil {
 		return nil, err
 	}
 	t := transfer{Info: infoOf(s), Messages: make([]json.RawMessage, 0, len(msgs))}
@@ -110,10 +121,16 @@ func (m *Module) exported(ctx context.Context, h agent.Host, in agent.Install, s
 }
 
 // Delete deletes the session, and with it its children, through OpenCode, only while its
-// stamp is expect.
+// stamp is expect. The stamp is read last, right before the delete, so that the running
+// service has as little time as it can to add a turn in between (it still can: OpenCode's
+// delete names no state).
 func (m *Module) Delete(ctx context.Context, h agent.Host, in agent.Install, sid agent.SessionID, expect agent.SessionStamp) error {
 	if expect == "" {
 		return fmt.Errorf("%w: hopsesh deletes an OpenCode session only at a state it recorded", agent.ErrDenied)
+	}
+	svc, err := writeService(ctx, h, in)
+	if err != nil {
+		return err
 	}
 	st, err := m.SessionStamp(ctx, h, in, sid)
 	if err != nil {
@@ -121,10 +138,6 @@ func (m *Module) Delete(ctx context.Context, h agent.Host, in agent.Install, sid
 	}
 	if st != expect {
 		return fmt.Errorf("%w: the OpenCode session %s was used since", agent.ErrDiverged, sid)
-	}
-	svc, err := writeService(ctx, h, in)
-	if err != nil {
-		return err
 	}
 	argv := []string{"session", "delete", string(sid)}
 	if svc.standalone() {
@@ -143,9 +156,10 @@ func (m *Module) Delete(ctx context.Context, h agent.Host, in agent.Install, sid
 	return fmt.Errorf("OpenCode did not delete the session %s: %w", sid, commandError("session delete", res))
 }
 
-// Restore imports a Backup again, the session first, each in the folder it was in. A
-// session already there with the backup's messages is left; with others, it is newer
-// work, and ErrDiverged.
+// Restore imports a Backup again, the session first and each child after its parent, each
+// in the folder it was in. A session already there with the backup's messages is left
+// (a restore that stopped halfway is finished); with others, it is newer work, and
+// ErrDiverged.
 func (m *Module) Restore(ctx context.Context, h agent.Host, in agent.Install, sid agent.SessionID, backup string) (agent.SessionStamp, error) {
 	files := []string{backup}
 	dir := strings.TrimSuffix(backup, ".json") + ".children"
@@ -159,12 +173,15 @@ func (m *Module) Restore(ctx context.Context, h agent.Host, in agent.Install, si
 			kids = append(kids, h.Path().Join(dir, e.Name()))
 		}
 	}
-	sort.Strings(kids) // numbered parents first
+	sort.Strings(kids)
 	files = append(files, kids...)
-	svc, err := writeService(ctx, h, in)
-	if err != nil {
-		return "", err
+	type saved struct {
+		file string
+		s    session
+		want []string
 	}
+	all := make([]saved, 0, len(files))
+	ids, parents := make([]string, 0, len(files)), make([]string, 0, len(files))
 	for i, f := range files {
 		b, err := agent.ReadNative(ctx, h.FS(), f)
 		if err != nil {
@@ -181,8 +198,20 @@ func (m *Module) Restore(ctx context.Context, h agent.Host, in agent.Install, si
 		for _, msg := range msgs {
 			want = append(want, msg.ID)
 		}
-		file := f
-		if err := m.importSession(ctx, h, in, svc, agent.SessionID(s.ID), want, nativeDir(h, s.Directory), func() (string, error) { return file, nil }); err != nil {
+		all = append(all, saved{f, s, want})
+		ids, parents = append(ids, s.ID), append(parents, s.ParentID)
+	}
+	order, err := familyOrder(ids, parents)
+	if err != nil {
+		return "", fmt.Errorf("the backup %s: %w", backup, err)
+	}
+	svc, err := writeService(ctx, h, in)
+	if err != nil {
+		return "", err
+	}
+	for _, i := range order {
+		b := all[i]
+		if err := m.importSession(ctx, h, in, svc, agent.SessionID(b.s.ID), b.want, nativeDir(h, b.s.Directory), func() (string, error) { return b.file, nil }); err != nil {
 			return "", err
 		}
 	}

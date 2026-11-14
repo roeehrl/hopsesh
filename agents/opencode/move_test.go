@@ -93,8 +93,8 @@ func TestAfterInstallImportsFamily(t *testing.T) {
 			imports = append(imports, c)
 		}
 	}
-	if len(imports) != 2 || !strings.Contains(imports[0], sesSubagent+".json --directory "+home+"/git/elsewhere --standalone") ||
-		!strings.Contains(imports[1], sesChild+".json --directory "+home+"/git/elsewhere") {
+	if len(imports) != 2 || !strings.Contains(imports[0], "/tmp/"+sesSubagent+"-") || !strings.Contains(imports[0], ".json --directory "+home+"/git/elsewhere --standalone") ||
+		!strings.Contains(imports[1], "/tmp/"+sesChild+"-") || !strings.Contains(imports[1], ".json --directory "+home+"/git/elsewhere") {
 		t.Fatalf("imports: %q", imports)
 	}
 	got := listing(t, m, h, in)[sesSubagent]
@@ -471,5 +471,283 @@ func TestInstallRefusesNewerSession(t *testing.T) {
 	}
 	if countCommands(f, "session import") != 0 {
 		t.Fatal("imported")
+	}
+}
+
+// Kept both, a summary's kept message (metadata.keepID) and a subagent's answer's session
+// (metadata.childID) name the copy's own message and child, not the original's.
+func TestKeepBothRemapsReferences(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	all := listing(t, m, h, in)
+	r, _, _ := openSQL(ctx, h, in)
+	for _, sid := range []agent.SessionID{sesLong, sesSubagent} {
+		s := all[sid]
+		to := m.NewSessionID(in, time.Now())
+		placeCopy(t, fh, m, h, in, s, to)
+		key := agent.SessionKey{Agent: id, Session: to}
+		if err := m.AfterInstall(ctx, h, in, key, agent.Placement{Key: key, SourceID: sid, CWD: home + "/git/demo"}); err != nil {
+			t.Fatal(err)
+		}
+		_, msgs, err := r.transcript(ctx, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mine := map[string]bool{}
+		for _, msg := range msgs {
+			mine[msg.ID] = true
+		}
+		kids, _ := r.descendants(ctx, to)
+		refs := 0
+		for _, msg := range msgs {
+			var v struct {
+				Metadata struct {
+					KeepID  string `json:"keepID"`
+					ChildID string `json:"childID"`
+				} `json:"metadata"`
+			}
+			_ = json.Unmarshal(msg.Raw, &v)
+			if k := v.Metadata.KeepID; k != "" {
+				refs++
+				if !mine[k] {
+					t.Errorf("%s: the copy's summary keeps %s, not one of its messages", sid, k)
+				}
+			}
+			if c := v.Metadata.ChildID; c != "" {
+				refs++
+				if len(kids) != 1 || c != string(kids[0]) {
+					t.Errorf("%s: the copy's subagent answer names %s, its child is %v", sid, c, kids)
+				}
+			}
+		}
+		if refs == 0 {
+			t.Errorf("%s: no reference to check", sid)
+		}
+	}
+	// A pending revert names a message of the copy too.
+	info := map[string]json.RawMessage{"id": json.RawMessage(`"ses_a"`), "revert": json.RawMessage(`{"messageID":"msg_1d6579dae001EtgMTrA47usaHf"}`)}
+	p := &placedSession{id: "ses_a", info: info, msgs: []json.RawMessage{json.RawMessage(`{"id":"msg_1d6579dae001EtgMTrA47usaHf"}`)}}
+	remapIDs([]*placedSession{p}, "ses_a", "ses_b")
+	if !strings.Contains(string(p.info["revert"]), remappedID("msg_1d6579dae001EtgMTrA47usaHf", "ses_b")) {
+		t.Errorf("the revert: %s", p.info["revert"])
+	}
+}
+
+// A child that OpenCode has with other messages fails the install, but not as the copy's
+// own divergence: the root this run imported stays the operation's, for undo.
+func TestChildDivergedKeepsRoot(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	s := listing(t, m, h, in)[sesSubagent]
+	placeCopy(t, fh, m, h, in, s, sesSubagent)
+	// OpenCode keeps a session at the child's id, of its own, with other messages.
+	if err := fh.ExecSQL(dbPath, `UPDATE session_v2 SET parent_id = NULL WHERE id = ?`, sesChild); err != nil {
+		t.Fatal(err)
+	}
+	if err := fh.ExecSQL(dbPath, `INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES
+		('msg_ffffffffffffUsedSinceThere', ?, 'user', 99, 1, 1, '{"time":{"created":1},"text":"more"}')`, sesChild); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := m.SessionStamp(ctx, h, in, sesSubagent)
+	if err := m.Delete(ctx, h, in, sesSubagent, st); err != nil {
+		t.Fatal(err)
+	}
+	err := m.AfterInstall(ctx, h, in, s.Key, agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: home + "/git/demo"})
+	if err == nil || errors.Is(err, agent.ErrDiverged) || !strings.Contains(err.Error(), sesChild) {
+		t.Fatalf("a diverged child: %v", err)
+	}
+	if _, err := m.SessionStamp(ctx, h, in, sesSubagent); err != nil {
+		t.Fatalf("the root: %v", err)
+	}
+}
+
+// A restore that stopped after the session (a child's import failed) is finished by the
+// next one, which imports only what is missing.
+func TestRestoreFinishesHalfDone(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	backup, st, err := m.Backup(ctx, h, in, sesSubagent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Delete(ctx, h, in, sesSubagent, st); err != nil {
+		t.Fatal(err)
+	}
+	f.onCall = func(argv []string) (agent.Result, bool) {
+		fails := len(argv) > 2 && argv[0] == "session" && argv[1] == "import" && strings.Contains(argv[2], ".children")
+		return agent.Result{Code: 1, Stderr: []byte("Error: LocationNotFoundError")}, fails
+	}
+	if _, err := m.Restore(ctx, h, in, sesSubagent, backup); err == nil {
+		t.Fatal("a failed child import restored")
+	}
+	if _, err := m.SessionStamp(ctx, h, in, sesSubagent); err != nil {
+		t.Fatalf("the session: %v", err)
+	}
+	f.onCall = nil
+	if _, err := m.Restore(ctx, h, in, sesSubagent, backup); err != nil {
+		t.Fatal(err)
+	}
+	if n := countCommands(f, "session import "+backup); n != 1 {
+		t.Fatalf("the session was imported %d times", n)
+	}
+	if _, err := m.SessionStamp(ctx, h, in, sesChild); err != nil {
+		t.Fatalf("the child: %v", err)
+	}
+}
+
+// When `service status` fails, nothing changes through OpenCode (a command could start the
+// service, or run a private server beside it), and a move's export reads the database.
+func TestUnknownServiceChangesNothing(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	s := listing(t, m, h, in)[sesFiles]
+	st, _ := m.SessionStamp(ctx, h, in, sesFiles)
+	f.onCall = func(argv []string) (agent.Result, bool) {
+		return agent.Result{Code: 1, Stderr: []byte("Error: timed out")}, argv[0] == "service"
+	}
+	if err := m.Delete(ctx, h, in, sesFiles, st); err == nil || !strings.Contains(err.Error(), "could not tell whether") {
+		t.Fatalf("a delete: %v", err)
+	}
+	if _, err := m.Restore(ctx, h, in, sesFiles, "/nowhere.json"); err == nil {
+		t.Fatal("a restore ran")
+	}
+	if err := m.Rename(ctx, h, in, s, "x"); err == nil {
+		t.Fatal("a rename ran")
+	}
+	b, _ := m.Bundle(ctx, h, in, s)
+	if _, err := m.Materialize(ctx, h, in, s, b.Files[0]); err != nil {
+		t.Fatalf("a move's file: %v", err)
+	}
+	if n := countCommands(f, "session delete") + countCommands(f, "session export") + countCommands(f, "api"); n != 0 {
+		t.Fatalf("commands: %q", f.commands())
+	}
+}
+
+// A move's export runs a private server only when its OpenCode reads every session in the
+// database, as for a change; else the session is read from the database.
+func TestExportNeedsANewEnoughProgram(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	s := listing(t, m, h, in)[sesFiles]
+	if err := fh.ExecSQL(dbPath, `UPDATE session_v2 SET version = '2.9.0' WHERE id = ?`, sesShell); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := m.Bundle(ctx, h, in, s)
+	if _, err := m.Materialize(ctx, h, in, s, b.Files[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := m.Backup(ctx, h, in, sesFiles); err != nil {
+		t.Fatal(err)
+	}
+	if n := countCommands(f, "session export"); n != 0 {
+		t.Fatalf("exported through an older private server: %q", f.commands())
+	}
+}
+
+// The core asks before anything changes whether OpenCode here imports a session last
+// written by a version: the running service's version counts, else the program's.
+func TestCheckInstall(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	if err := m.CheckInstall(ctx, h, in, "2.9.0"); !errors.Is(err, agent.ErrUnsupported) || !strings.Contains(err.Error(), "2.9.0") {
+		t.Fatalf("a newer session: %v", err)
+	}
+	for _, v := range []string{"2.3.0", "2.2.0", ""} {
+		if err := m.CheckInstall(ctx, h, in, v); err != nil {
+			t.Fatalf("%q: %v", v, err)
+		}
+	}
+	f.status, f.version = serviceURL, "2.9.0"
+	if err := m.CheckInstall(ctx, h, in, "2.9.0"); err != nil {
+		t.Fatalf("the service reads it: %v", err)
+	}
+	if countCommands(f, "session import")+countCommands(f, "session delete") != 0 {
+		t.Fatal("the check changed something")
+	}
+}
+
+// A family is imported parents first; a member whose parent is not in it comes after the
+// root, and members that do not hang from the root are refused.
+func TestFamilyOrder(t *testing.T) {
+	order, err := familyOrder([]string{"r", "b", "a", "x"}, []string{"", "a", "r", "gone"})
+	if err != nil || !slices.Equal(order, []int{0, 2, 3, 1}) {
+		t.Fatalf("%v %v", order, err)
+	}
+	if _, err := familyOrder([]string{"r", "a", "b"}, []string{"", "b", "a"}); err == nil || !strings.Contains(err.Error(), "do not hang from") {
+		t.Fatalf("a cycle: %v", err)
+	}
+	root := &placedSession{id: "r", info: map[string]json.RawMessage{}}
+	a := &placedSession{id: "a", parent: "b", info: map[string]json.RawMessage{}}
+	b := &placedSession{id: "b", parent: "a", info: map[string]json.RawMessage{}}
+	if _, err := parentsFirst(root, []*placedSession{a, b}); err == nil {
+		t.Fatal("a placed cycle was imported")
+	}
+}
+
+// A move's preview says a window that has the session open while it is idle cannot be
+// seen, and that a Claude Agent session stays an OpenCode one.
+func TestMoveWarnings(t *testing.T) {
+	fh, _ := newMachine(t, setup{})
+	m, h, in := open(t, fh)
+	s := listing(t, m, h, in)[sesFiles]
+	b, _ := m.Bundle(ctx, h, in, s)
+	if len(b.Warnings) != 1 || !strings.Contains(b.Warnings[0], "cannot see an OpenCode window") {
+		t.Fatalf("%q", b.Warnings)
+	}
+	if err := fh.ExecSQL(dbPath, `UPDATE session_v2 SET model = '{"id":"claude-sonnet","providerID":"claude-agent"}' WHERE id = ?`, sesFiles); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = m.Bundle(ctx, h, in, s)
+	if len(b.Warnings) != 2 || !strings.Contains(b.Warnings[1], "Claude Agent") {
+		t.Fatalf("%q", b.Warnings)
+	}
+}
+
+// Where hopsesh cannot read the database it waits for a folder change through OpenCode's
+// API, asking whether the service still runs before each call (a call without
+// --standalone would start it again) and stopping when it does not.
+func TestChangeDirThroughAPI(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	m, sqlHost, in := open(t, fh)
+	s := listing(t, m, sqlHost, in)[sesFiles]
+	h := agent.Confine(noSQL{fh}, m.Spec(), in)
+	f.status = serviceURL
+	to := home + "/git/elsewhere"
+	p, _ := m.PlanChangeDir(ctx, h, in, s, to)
+	if err := m.ChangeDir(ctx, h, in, s, p); err != nil {
+		t.Fatal(err)
+	}
+	if countCommands(f, "api GET /api/session/"+sesFiles+"/message") == 0 {
+		t.Fatalf("commands: %q", f.commands())
+	}
+	defer func(w time.Duration) { cdAPIPoll = w }(cdAPIPoll)
+	cdAPIPoll = 10 * time.Millisecond
+	posted := false
+	f.onCall = func(argv []string) (agent.Result, bool) {
+		switch {
+		case argv[0] == "api" && argv[1] == "POST":
+			posted = true
+			return agent.Result{}, true // taken, never made
+		case argv[0] == "service" && posted:
+			return agent.Result{Stdout: []byte("stopped\n")}, true
+		}
+		return agent.Result{}, false
+	}
+	got := listing(t, m, sqlHost, in)[sesFiles]
+	back, _ := m.PlanChangeDir(ctx, h, in, got, home+"/git/demo")
+	n := len(f.commands())
+	err := m.ChangeDir(ctx, h, in, got, back)
+	if err == nil || !strings.Contains(err.Error(), "stopped before it made it") {
+		t.Fatalf("the service stopped: %v", err)
+	}
+	after := f.commands()[n:]
+	for i, c := range after {
+		if strings.HasPrefix(c, "api POST") {
+			for _, later := range after[i+1:] {
+				if strings.HasPrefix(later, "api") {
+					t.Fatalf("an API call after the service stopped: %q", after)
+				}
+			}
+		}
 	}
 }

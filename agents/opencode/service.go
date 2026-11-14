@@ -23,8 +23,10 @@ type serviceState string
 const (
 	serviceRunning serviceState = "running"
 	serviceStopped serviceState = "stopped"
-	// serviceUnknown: the probe failed. Commands run their own server, as with the
-	// service stopped; a resume, which could replace a running service, is refused.
+	// serviceUnknown: the probe failed. Reads where SQL is unavailable run their own
+	// server, as with the service stopped; a change (writeService), an export a move
+	// carries and a resume, which could run beside or replace a running service, do not
+	// run.
 	serviceUnknown serviceState = "unknown"
 )
 
@@ -33,6 +35,7 @@ type service struct {
 	State   serviceState
 	URL     string
 	Version string // the running service's version, when asked (serviceVersion)
+	err     error  // why the probe failed (serviceUnknown)
 }
 
 // standalone reports whether commands must run a private server: whenever the service
@@ -104,8 +107,11 @@ func notRun(err error) bool {
 // prints its URL or "stopped" and starts nothing.
 func probeService(ctx context.Context, h agent.Host) service {
 	res, err := run(ctx, h, []string{"service", "status"}, agent.RunOptions{Timeout: 20 * time.Second})
-	if err != nil || res.Code != 0 {
-		return service{State: serviceUnknown}
+	if err != nil {
+		return service{State: serviceUnknown, err: err}
+	}
+	if res.Code != 0 {
+		return service{State: serviceUnknown, err: commandError("service status", res)}
 	}
 	line := strings.TrimSpace(firstLine(res.Stdout))
 	switch {
@@ -114,7 +120,17 @@ func probeService(ctx context.Context, h agent.Host) service {
 	case strings.HasPrefix(line, "http://") || strings.HasPrefix(line, "https://"):
 		return service{State: serviceRunning, URL: line}
 	}
-	return service{State: serviceUnknown}
+	return service{State: serviceUnknown, err: fmt.Errorf("opencode service status printed %q", line)}
+}
+
+// unknownService is why nothing changes through OpenCode when the probe failed: a command
+// without --standalone could start the service, and a private server could run beside
+// it. OpenCode's program not running at all stays that (notRun).
+func unknownService(svc service) error {
+	if notRun(svc.err) {
+		return svc.err
+	}
+	return fmt.Errorf("hopsesh could not tell whether OpenCode's background service is running (%v), so it does not change OpenCode's sessions now; check `opencode service status`, then try again", svc.err)
 }
 
 func firstLine(b []byte) string {
