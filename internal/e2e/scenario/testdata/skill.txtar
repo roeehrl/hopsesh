@@ -1,8 +1,9 @@
-# The skill goes into every agent (Claude Code's folder and the shared ~/.agents for Codex),
-# is reported current, notices an edit and keeps it until --force, adds approval rules on
-# request, and comes out again.
+# The skill goes into every agent (Claude Code's folder and the shared ~/.agents for Codex
+# and OpenCode), is reported current, notices an edit and keeps it until --force, adds
+# approval rules on request (OpenCode's in a file its hopsesh plugin reads), and comes out
+# again.
 exec hopsesh skill install
-stdout 'current .*\.agents.skills.hopsesh \(Codex\)'
+stdout 'current .*\.agents.skills.hopsesh \(Codex, OpenCode\)'
 stdout 'current .*\.claude.skills.hopsesh \(Claude Code\)'
 exists $HOME/.claude/skills/hopsesh/SKILL.md
 exists $HOME/.agents/skills/hopsesh/SKILL.md
@@ -23,12 +24,15 @@ exec hopsesh skill --json
 ! stdout '"state": "modified"'
 ! grep 'my own note' $HOME/.claude/skills/hopsesh/SKILL.md
 stdout '"present": true'
+grep '"bin": "hopsesh"' $HOME/.config/opencode/.hopsesh/rules.json
+grep '"pull"' $HOME/.config/opencode/.hopsesh/rules.json
 
 exec hopsesh skill remove
 exec hopsesh skill --json
 stdout '"state": "absent"'
 ! exists $HOME/.claude/skills/hopsesh/SKILL.md
 ! exists $HOME/.agents/skills/hopsesh/SKILL.md
+! exists $HOME/.config/opencode/.hopsesh/rules.json
 
 -- edited.md --
 ---
