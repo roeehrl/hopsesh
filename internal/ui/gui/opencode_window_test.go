@@ -85,6 +85,7 @@ func TestTabProgramNames(t *testing.T) {
 		"opencode":        "opencode",
 		"/usr/bin/claude": "claude",
 		"/bin/zsh":        "zsh",
+		"claude-work":     "claude-work", // an account folder's command keeps its name
 	} {
 		if got := a.programName(argv0); got != want {
 			t.Errorf("%s: %q, want %q", argv0, got, want)

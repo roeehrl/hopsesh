@@ -100,13 +100,14 @@ func (a *App) terminalEnv(argv0 string) []string {
 }
 
 // programOf is the module whose program argv0 runs, and the program's name as people know
-// it: an agent's own name also for a copy its desktop app ships under another name
-// (OpenCode's opencode-cli). Another program is its file name (module nil).
+// it: an agent's own name also for the copy its desktop app ships as <name>-cli (OpenCode's
+// opencode-cli). Another program is its file name (module nil), an account folder's
+// command (claude-work) included.
 func (a *App) programOf(argv0 string) (agent.Module, string) {
 	base := strings.TrimSuffix(filepath.Base(argv0), ".exe")
 	for _, m := range a.snapshot().Modules() {
 		for _, b := range m.Spec().Binaries {
-			if strings.EqualFold(b.Name, base) || strings.HasPrefix(strings.ToLower(base), strings.ToLower(b.Name)+"-") {
+			if strings.EqualFold(b.Name, base) || strings.EqualFold(b.Name+"-cli", base) {
 				return m, b.Name
 			}
 		}

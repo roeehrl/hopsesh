@@ -1676,8 +1676,8 @@ and `codex`). Done here from the earlier notes:
   - Fixed: the new-session question (PR 7) was answered "no" by its own dialog closing (the
     `close` event of the dialog it replaced resolved it), so agreeing never started anything.
 - **PR 7, copy:** a tab run by the desktop app's `opencode-cli` is titled and listed as
-  `opencode` (`programOf`: a module's program also under `<name>-…`, which also gives such a
-  tab the module's `TerminalEnv`). A Claude Code or Codex session in OpenCode desktop's terminal
+  `opencode` (`programOf`: a module's program also as `<name>-cli`, which also gives such a
+  tab the module's `TerminalEnv`; an account folder's command, `claude-work`, keeps its name). A Claude Code or Codex session in OpenCode desktop's terminal
   panel reads "Working in OpenCode" (`PlaceDTO.In`), with a caption that hopsesh cannot show it
   there, instead of an unknown window. OpenCode's `Desktop.Product` is "OpenCode desktop" (the
   grid read "OpenCode 2.2.7, running OpenCode 2.2.7", the folder "Terminal and OpenCode share one
