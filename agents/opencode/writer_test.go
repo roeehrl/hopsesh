@@ -508,3 +508,25 @@ func TestWriteRoundTrip(t *testing.T) {
 		t.Fatalf("read back:\n%q\nfrom\n%q", b, a)
 	}
 }
+
+// A write is imported by the running service whatever its version (it is never
+// restarted for that), and refused when that service is older than the writer's message
+// types (2.1.0).
+func TestWriteChecksTheImportingService(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	f.status, f.version = serviceURL, "2.0.30"
+	m, h, in := open(t, fh)
+	req := ir.WriteRequest{Mode: ir.WriteNew, SessionID: "ses_e29a00000ffeHandMadeWrite0", Header: ir.Header{CWD: home + "/git/demo", Title: "t"},
+		Items: []ir.Item{{Node: "n1", Role: ir.RoleUser, Text: "hello", Fidelity: "text"}}}
+	if _, err := m.Write(ctx, h, in, req); !errors.Is(err, agent.ErrUnsupported) || !strings.Contains(err.Error(), "background service") {
+		t.Fatalf("a 2.0 service imported: %v", err)
+	}
+	for _, c := range f.commands() {
+		if strings.HasPrefix(c, "session import") {
+			t.Fatalf("ran %s", c)
+		}
+	}
+	if _, ok := fh.Get(anchorOf(fh, in, agent.SessionID(req.SessionID))); ok {
+		t.Error("the transfer was written before the check")
+	}
+}

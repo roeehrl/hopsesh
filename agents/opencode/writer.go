@@ -75,7 +75,7 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 	if sid == "" {
 		sid = m.NewSessionID(in, time.Now())
 	}
-	svc, err := writeService(ctx, h, in)
+	svc, err := writerService(ctx, h, in)
 	if err != nil {
 		return ir.WriteResult{}, err
 	}
@@ -127,11 +127,26 @@ func (m *Module) RecoverWrite(ctx context.Context, h agent.Host, in agent.Instal
 	} else if !bytes.Equal(placed, w.body) {
 		return ir.WriteResult{}, fmt.Errorf("%w: %s is not the session the interrupted write placed", agent.ErrDiverged, anchor)
 	}
-	svc, err := writeService(ctx, h, in)
+	svc, err := writerService(ctx, h, in)
 	if err != nil {
 		return ir.WriteResult{}, err
 	}
 	return m.importWritten(ctx, h, in, svc, req, w)
+}
+
+// writerService is writeService for a write, which a running background service imports
+// whatever its version (it is never restarted for that): the OpenCode that imports must
+// read the message types the writer writes, which every 2.1 and newer has.
+func writerService(ctx context.Context, h agent.Host, in agent.Install) (service, error) {
+	svc, err := writeService(ctx, h, in)
+	if err != nil || svc.State != serviceRunning {
+		return svc, err
+	}
+	v, err := importVersion(ctx, h, in, svc)
+	if err != nil {
+		return svc, err
+	}
+	return svc, supported("OpenCode's background service, which would import the session,", v)
 }
 
 // importWritten has OpenCode import the session placed at its anchor (nothing when it has
