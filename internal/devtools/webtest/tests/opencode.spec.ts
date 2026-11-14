@@ -5,7 +5,8 @@ import { fresh, row, agentRow, action, details, menu } from "./helpers";
 // the demo's three OpenCode sessions: sizes in messages, the preview, continuing into and
 // out of OpenCode, its protection plugin, its account folders, the experimental badge
 // (decision D10), no desktop app to open a session in (D11), and the question before a
-// resume or a new session that would restart OpenCode's background service (D2).
+// resume or a new session that would restart OpenCode's background service (D2), here and
+// on another machine (its hopsesh mocked).
 
 const tabs = async (page: Page) => (await (await page.request.post("/call", { data: { m: "TerminalTabs", args: [] } })).json()).result as any[];
 
@@ -53,12 +54,19 @@ test("no desktop app opens an OpenCode session (D11), and OpenCode is experiment
   await page.keyboard.press("Escape");
   await d.getByRole("button", { name: "More actions" }).click();
   await expect(page.getByRole("menuitem", { name: /OpenCode (app|desktop)/ })).toHaveCount(0);
+  // Its session is in OpenCode's database: no file to show, or reveal.
+  await expect(page.getByRole("menuitem", { name: "Copy session ID" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /^(Reveal in Finder|Show in Explorer|Show in Files)/ })).toHaveCount(0);
   await page.keyboard.press("Escape");
+  await expect(d.locator('dt:text-is("Size")')).toHaveCount(1); // the details are there (folded)
+  await expect(d.locator('dt:text-is("File")')).toHaveCount(0);
 
   // Continuing another agent's session in OpenCode says it is experimental.
   await row(page, "Find the codeword").click();
   await d.getByRole("button", { name: "Move", exact: true }).click();
-  await expect(page.getByRole("menuitem", { name: /^Continue with OpenCode…/ })).toContainText("experimental");
+  const item = page.getByRole("menuitem", { name: /^Continue with OpenCode…/ });
+  await expect(item).toContainText("experimental");
+  await expect(item).toContainText("hopsesh's OpenCode support is new"); // not only a tooltip
   await page.keyboard.press("Escape");
   // So does its card in Settings › Agents.
   await menu(page, "settings");
@@ -66,6 +74,7 @@ test("no desktop app opens an OpenCode session (D11), and OpenCode is experiment
   const card = page.locator(".card").filter({ has: page.locator(".set-row", { hasText: "OpenCode" }) }).first();
   await expect(card.locator(".chip.st-warn")).toHaveText("experimental");
   await expect(card.locator(".chip.st-warn")).toHaveAttribute("title", /OpenCode support is new/);
+  await expect(card).toContainText("Experimental: hopsesh's OpenCode support is new");
 });
 
 test("continue a Claude Code session in OpenCode, an OpenCode session in Claude Code, and undo", async ({ page }) => {
@@ -122,6 +131,8 @@ test("OpenCode's protection is a plugin: set up, its texts, and an outdated copy
   const plugin = page.locator(".set-row").filter({ hasText: "OpenCode plugin" });
   await expect(plugin).toContainText("Installed · not confirmed loaded yet · out of date"); // the service is stopped
   await expect(page.getByText(/In OpenCode it is a plugin, which OpenCode loads by itself: it refuses a blocked session's tool calls/)).toBeVisible();
+  // This machine's storage counts OpenCode's sessions in messages, beside the others' bytes.
+  await expect(page.locator(".storage")).toContainText("OpenCode keeps 3 sessions (16 messages) in its database");
   await plugin.getByRole("button", { name: "Update plugin" }).click();
   await expect(plugin).not.toContainText("out of date", { timeout: 30_000 });
   await expect(plugin.getByRole("button", { name: "Remove plugin" })).toBeVisible();
@@ -147,6 +158,43 @@ test("a plugin OpenCode's own config removes: the card says so, and offers no se
   const plugin = page.locator(".set-row").filter({ hasText: "OpenCode plugin" });
   await expect(plugin).toContainText("Installed · not loaded by OpenCode");
   await expect(plugin).toContainText('out of the "plugins" list in your OpenCode config');
+});
+
+test("a plugin OpenCode failed to load is set up again, from the card and from Settings", async ({ page }) => {
+  await fresh(page, "?opencode=failed");
+  const card = page.getByRole("status", { name: "Movement protection" });
+  await expect(card).toContainText("OpenCode plugin · installed · not loaded by OpenCode", { timeout: 30_000 });
+  await expect(card).toContainText("OpenCode could not load the hopsesh plugin");
+  await expect(card).not.toContainText("hopsesh can't fix this from here");
+  await expect(card.getByRole("button", { name: "Set up protection" })).toBeVisible();
+  await menu(page, "settings");
+  await page.getByRole("tab", { name: "Machines", exact: true }).click();
+  const plugin = page.locator(".set-row").filter({ hasText: "OpenCode plugin" });
+  await expect(plugin).toContainText("Installed · not loaded by OpenCode");
+  await expect(plugin).toContainText("Install hopsesh's hooks again");
+  // Installing again replaces the folder, the file that broke it included.
+  await plugin.getByRole("button", { name: "Install plugin again" }).click();
+  await expect(plugin).toContainText("Installed · loaded by OpenCode", { timeout: 30_000 });
+  await expect(plugin.getByRole("button", { name: "Install plugin again" })).toHaveCount(0);
+});
+
+test("the plugin's failed checks are counted in Settings, with the last one's reason", async ({ page }) => {
+  // A check that failed and let a call through, as hopsesh's plugin counts it.
+  const failing = (x: any) => (x.agent === "opencode" ? { ...x, trust: { state: "trusted", failures: 2, detail: "the plugin let 2 call(s) through because hopsesh did not answer" } } : x);
+  await page.route("**/call", async (route) => {
+    const m = route.request().postDataJSON().m;
+    if (m !== "Settings" && m !== "HookHealth") return route.continue();
+    const body = await (await route.fetch()).json();
+    if (m === "Settings") body.result.noticeHooks = (body.result.noticeHooks || []).map(failing);
+    else if (body.result) body.result.hooks = (body.result.hooks || []).map(failing);
+    await route.fulfill({ json: body });
+  });
+  await fresh(page, "?protection=blocked&opencode=running");
+  await menu(page, "settings");
+  await page.getByRole("tab", { name: "Machines", exact: true }).click();
+  const plugin = page.locator(".set-row").filter({ hasText: "OpenCode plugin" });
+  await expect(plugin).toContainText("Installed · loaded by OpenCode · 2 failed checks", { timeout: 30_000 });
+  await expect(plugin).toContainText("the plugin let 2 call(s) through because hopsesh did not answer");
 });
 
 test("an OpenCode account folder: made with its own service port, in the grid and the folders", async ({ page }) => {
@@ -227,7 +275,7 @@ test("continuing into OpenCode whose service would restart: the done screen asks
   await expect.poll(async () => (await tabs(page)).map((t) => t.command)).toEqual([expect.stringMatching(/^opencode -s ses_/)]);
 });
 
-test("a Claude Code session run in OpenCode desktop's terminal panel reads as running in OpenCode, not in an app hopsesh shows", async ({ page }) => {
+test("a Claude Code session run in OpenCode desktop's terminal panel reads as running in OpenCode desktop, not in an app hopsesh shows", async ({ page }) => {
   await fresh(page);
   const got = await page.evaluate(async () => {
     const core = await import("/core.js" as string), actions = await import("/actions.js" as string);
@@ -237,46 +285,97 @@ test("a Claude Code session run in OpenCode desktop's terminal panel reads as ru
     const m = actions.model(live);
     return { status: actions.statusLine(live)[1], primary: m.primary?.label, caption: m.caption, places: m.places.length };
   });
-  expect(got.status).toBe("Working in OpenCode");
+  expect(got.status).toBe("Working in OpenCode desktop"); // not continued in OpenCode the agent
   expect(got.primary).toMatch(/^Resume in /); // nothing to show it in
-  expect(got.caption).toContain("It runs in a terminal inside OpenCode, which hopsesh can't show");
+  expect(got.caption).toContain("It runs in a terminal inside OpenCode desktop, which hopsesh can't show");
   expect(got.places).toBe(0);
 });
 
-test("another machine's hopsesh would restart OpenCode's service there: the window asks, then asks again with the yes (D2)", async ({ page }) => {
-  await fresh(page);
+// remoteRestart answers method (once, then opens) as hopsesh on atelier would when opening
+// the session there restarts OpenCode's service: the reason alone, as a current hopsesh
+// reads it. calls are the window's calls of method and AllowServiceRestart.
+async function remoteRestart(page: Page, method: string) {
   const calls: any[] = [];
   await page.route("**/call", async (route) => {
     const r = route.request().postDataJSON();
-    if (r.m === "ContinueOnMachine") {
+    if (r.m === method) {
       calls.push(r);
-      if (calls.length === 1) return route.fulfill({ json: { error: "restart-service: OpenCode's background service runs 2.2.5, and the opencode program (2.3.0) is another version: opening the session with it would restart the service. An older hopsesh on the machine you opened it from cannot ask about it: then, on atelier, open the session with hopsesh open --restart-service", result: null } });
+      if (calls.length === 1) return route.fulfill({ json: { error: "restart-service: OpenCode's background service runs 2.2.5, and the opencode program (2.3.0) is another version: opening the session with it would restart the service. Install opencode 2.2.5, then try again", result: null } });
       return route.fulfill({ json: { result: { where: "here", tab: "" } } });
     }
     if (r.m === "AllowServiceRestart") { calls.push(r); return route.fulfill({ json: { result: null } }); }
     return route.continue();
   });
-  const done = page.evaluate(async () => (await import("/core.js" as string)).onMachine({ machine: "atelier", key: "opencode/ses_1", agentName: "OpenCode" }));
+  return calls;
+}
+
+// asked agrees to the restart question, after checking what it says.
+async function asked(page: Page) {
   const ask = page.locator("#dlg");
   await expect(ask.getByRole("heading", { name: "Restart OpenCode's background service?" })).toBeVisible();
   await expect(ask).toContainText("runs 2.2.5");
+  await expect(ask).toContainText("Install opencode 2.2.5, then try again."); // a sentence, with its full stop
+  await expect(ask).toContainText("starts it again with that other version");
+  await expect(ask).not.toContainText(/older hopsesh|too old/);
   await ask.getByRole("button", { name: "Restart it and open" }).click();
-  expect(await done).toEqual({ where: "here", tab: "" });
-  expect(calls.map((c) => c.m)).toEqual(["ContinueOnMachine", "AllowServiceRestart", "ContinueOnMachine"]);
-  expect(calls[1].args).toEqual(["atelier", "opencode/ses_1"]);
+  await expect(ask).toBeHidden();
+}
+
+test("another machine's hopsesh would restart OpenCode's service there: Join it there asks, then asks again with the yes (D2)", async ({ page }) => {
+  await fresh(page);
+  const calls = await remoteRestart(page, "ContinueOnMachine");
+  const key = await page.evaluate(async () => {
+    const core = await import("/core.js" as string), plan = await import("/plan.js" as string);
+    const e = core.state.scan.groups.flatMap((g: any) => g.entries).find((x: any) => x.title === "renamed by api");
+    plan.bringLive({ ...e, machine: "atelier", live: true });
+    return e.key;
+  });
+  await page.locator("#sheet").getByRole("button", { name: /Join it on atelier instead/ }).click();
+  await asked(page);
+  await expect.poll(() => calls.map((c) => c.m)).toEqual(["ContinueOnMachine", "AllowServiceRestart", "ContinueOnMachine"]);
+  expect(calls[1].args).toEqual(["atelier", key]);
+});
+
+test("Continue on another machine, and continuing an old copy there, ask before restarting OpenCode's service (D2)", async ({ page }) => {
+  await fresh(page);
+  // The session panel's own actions for a copy on atelier, where hopsesh runs.
+  const run = (label: string, moved: boolean) => page.evaluate(async ([label, moved]) => {
+    const core = await import("/core.js" as string), actions = await import("/actions.js" as string);
+    if (!core.state.scan.machines.some((m: any) => m.name === "atelier"))
+      core.state.scan.machines.push({ name: "atelier", status: "ok", local: false, os: "darwin", agents: [], agentNames: [], sessions: 1, hopsesh: "0.7.0", presence: "login" });
+    const e = core.state.scan.groups.flatMap((g: any) => g.entries).find((x: any) => x.title === "renamed by api");
+    const away = moved ? { live: true, departure: { operation: "op-1", status: "continued", machine: core.here(), agent: e.agent, agentName: e.agentName, key: e.key, profile: "", checkedAt: new Date().toISOString() },
+      guard: { operation: "op-1", mode: "block", effective: false, state: "unprotected", action: "setup", machine: "atelier", problem: "The plugin isn't set up on atelier." } } : {};
+    const m = actions.model({ ...e, machine: "atelier", live: false, places: [], ...away });
+    const it = [m.primary, ...m.chevron].find((x: any) => x?.label === label);
+    if (!it) throw new Error("no " + label);
+    it.run();
+  }, [label, moved] as const);
+  let calls = await remoteRestart(page, "ContinueOnMachine");
+  await run("Continue on atelier", false);
+  await asked(page);
+  await expect.poll(() => calls.map((c) => c.m)).toEqual(["ContinueOnMachine", "AllowServiceRestart", "ContinueOnMachine"]);
+  await page.unrouteAll({ behavior: "wait" });
+
+  calls = await remoteRestart(page, "ContinueOriginalAnyway");
+  await run("Continue this old copy anyway…", true);
+  await page.locator("#dlg").getByRole("button", { name: "Continue old copy" }).click();
+  await asked(page);
+  await expect.poll(() => calls.map((c) => c.m)).toEqual(["ContinueOriginalAnyway", "AllowServiceRestart", "ContinueOriginalAnyway"]);
 });
 
 test("OpenCode's allow rules work through hopsesh's plugin: without it, Settings says they do nothing yet", async ({ page }) => {
   await page.route("**/call", async (route) => {
     if (route.request().postDataJSON().m !== "Settings") return route.continue();
     const body = await (await route.fetch()).json();
-    body.result.skill = { ...body.result.skill, state: "current", rules: [{ agent: "Codex", path: "/h/.codex/rules/hopsesh.rules", present: true }, { agent: "OpenCode", path: "/h/.config/opencode/.hopsesh/rules.json", present: true }] };
+    body.result.skill = { ...body.result.skill, state: "current", rules: [{ agent: "Codex", agentId: "codex", path: "/h/.codex/rules/hopsesh.rules", present: true }, { agent: "OpenCode", agentId: "opencode", path: "/h/.config/opencode/.hopsesh/rules.json", present: true }, { agent: "OpenCode (Work)", agentId: "opencode", profile: "work", path: "/h/.hopsesh/accounts/opencode/work/config/.hopsesh/rules.json", present: true }] };
     body.result.noticeHooks = (body.result.noticeHooks || []).map((x: any) => (x.agent === "opencode" ? { ...x, installed: false } : x));
     await route.fulfill({ json: body });
   });
   await fresh(page);
   await menu(page, "settings");
   await page.getByRole("tab", { name: "Machines", exact: true }).click();
-  await expect(page.getByText("Read-only hopsesh commands are allowed in Codex and OpenCode; hops ask.")).toBeVisible();
+  await expect(page.getByText("Read-only hopsesh commands are allowed in Codex and OpenCode and OpenCode (Work); hops ask.")).toBeVisible();
+  // Only the folder whose plugin is missing: the Work folder has no plugin row here.
   await expect(page.getByText(/^OpenCode applies these rules through hopsesh's plugin, which isn't installed, so they have no effect there yet\./)).toBeVisible();
 });
