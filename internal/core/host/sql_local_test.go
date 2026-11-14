@@ -26,10 +26,19 @@ INSERT INTO message VALUES ('msg_1', 'ses_a', 1, 'Why does it fail?'), ('msg_2',
 INSERT INTO credential VALUES ('provider', 'sk-never-read');
 `
 
+// oddDir is a folder name with the characters a URI gives a meaning: Windows allows no ?
+// in a file's name, so there it has the others.
+func oddDir() string {
+	if runtime.GOOS == "windows" {
+		return "odd #% dir"
+	}
+	return "odd ?#% dir"
+}
+
 // sqlDB makes a database in a folder whose name has the characters a URI gives a meaning.
 func sqlDB(t *testing.T, wal bool) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "odd ?#% dir")
+	dir := filepath.Join(t.TempDir(), oddDir())
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}

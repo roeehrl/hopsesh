@@ -85,7 +85,7 @@ func (s localSQL) batch(ctx context.Context, db string, stmts []agent.Statement)
 	if err != nil {
 		return nil, sqlError(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // after Commit, ErrTxDone
 	budget := agent.NewSQLBudget()
 	out := make([]agent.Rows, 0, len(stmts))
 	for _, st := range stmts {

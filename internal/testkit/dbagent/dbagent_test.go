@@ -1,6 +1,7 @@
 package dbagent
 
 import (
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -14,12 +15,13 @@ func TestConformance(t *testing.T) {
 	agenttest.Run(t, m, func(t *testing.T) *agenttest.FakeHost {
 		fh := agenttest.NewFakeHost("/home/u")
 		fh.AddBinary("dbagent", "dbagent 1.0.0")
+		// The fake machine's paths are slashed on every OS (on Windows too).
 		data := "/home/u/.local/share/dbagent"
-		fh.LoadSQL(t, DBFile(data))
-		real, _ := fh.SQLFile(DBFile(data))
+		fh.LoadSQL(t, path.Join(data, "db.sqlite"))
+		real, _ := fh.SQLFile(path.Join(data, "db.sqlite"))
 		was := dbPath
 		dbPath = func(d string) string {
-			if filepath.Clean(d) == data {
+			if path.Clean(filepath.ToSlash(d)) == data {
 				return real
 			}
 			t.Fatalf("the program wrote the database of %s", d)
