@@ -21,6 +21,9 @@ export const EVENTS = ["session.created", "session.moved", "session.forked"]
 
 const ANSWER_LIMIT = 64 << 10
 
+// How many sessions the plugin remembers (verdicts, parents, notices); the oldest go first.
+const REMEMBER = 2000
+
 // setup registers the plugin's hooks on ctx, with the config file next to the entry.
 // A missing or broken config registers nothing: the plugin fails open, as every hopsesh
 // hook does.
@@ -66,25 +69,24 @@ export function create(ctx, config, deps = {}) {
   const timeoutMs = positive(config.timeoutMs, 5000)
   const cacheMs = positive(config.cacheMs, 30000)
   const failMs = positive(config.failMs, 10000)
+  const retryMs = positive(config.retryMs, 1000)
   const verdicts = new Map() // root session id → {block, reason, text, at, failed}
-  const pending = new Map() // root session id → the check running for it
+  const pending = new Map() // root session id and event → the check running for them
   const parents = new Map() // session id → its parent's id ("" for a root)
   const noted = new Map() // session id → the notice put on it ("" once cleared)
   let failures = Promise.resolve()
 
   // root is the session a subagent's session belongs to: hopsesh keeps lineage there.
+  // session.get returns the session itself (the Promise API unwraps {data}). A lookup that
+  // fails throws and is not kept, so the next call asks again.
   async function root(id) {
     let at = id
     for (let i = 0; i < 8; i++) {
       let parent = parents.get(at)
       if (parent === undefined) {
-        try {
-          const got = await ctx.session.get({ sessionID: at })
-          parent = typeof got?.data?.parentID === "string" ? got.data.parentID : ""
-        } catch {
-          parent = ""
-        }
-        parents.set(at, parent)
+        const got = await ctx.session.get({ sessionID: at })
+        parent = typeof got?.parentID === "string" ? got.parentID : ""
+        remember(parents, at, parent)
       }
       if (!parent) return at
       at = parent
@@ -117,6 +119,7 @@ export function create(ctx, config, deps = {}) {
         finish({ error: "hopsesh did not answer within " + timeoutMs + " ms" })
       }, timeoutMs)
       child.on("error", (e) => finish({ error: "cannot run hopsesh: " + message(e) }))
+      child.stdout?.setEncoding?.("utf8") // a character split across chunks stays whole
       child.stdout?.on("data", (b) => {
         out += String(b)
         if (out.length > ANSWER_LIMIT) {
@@ -145,35 +148,48 @@ export function create(ctx, config, deps = {}) {
   }
 
   // check asks hopsesh about the session (its root's lineage), keeps the verdict, and puts
-  // the notice on the session. One check runs per root at a time. A failure lets calls
-  // through for a while (failMs) and is counted.
+  // the notice on the root session (and on a subagent's session while blocked). One check
+  // runs per root and event at a time. A failure keeps a fresh block (one failed check
+  // does not lift it); otherwise it lets calls through for a while (failMs). Each failure
+  // is counted.
   async function check(id, event) {
-    const top = await root(id)
-    let running = pending.get(top)
+    let top
+    try {
+      top = await root(id)
+    } catch (e) {
+      count("cannot find the session's root session: " + message(e))
+      return { block: false, reason: "", text: "", at: now(), failed: true }
+    }
+    const key = top + "\n" + event
+    let running = pending.get(key)
     if (!running) {
       running = ask(top, event).then((r) => {
-        pending.delete(top)
+        pending.delete(key)
+        const at = now()
         if (r.error) {
           count(r.error)
-          const v = { block: false, reason: "", text: "", at: now(), failed: true }
-          verdicts.set(top, v)
-          return v
+          const known = verdicts.get(top)
+          if (known?.block && !known.failed && at - known.at < cacheMs) return known
+          return remember(verdicts, top, { block: false, reason: "", text: "", at, failed: true })
         }
-        const v = { block: r.block, reason: r.reason, text: r.text, at: now(), failed: false }
-        verdicts.set(top, v)
-        return v
+        return remember(verdicts, top, { block: r.block, reason: r.reason, text: r.text, at, failed: false })
       })
-      pending.set(top, running)
+      pending.set(key, running)
     }
     const v = await running
-    if (!v.failed) await note(id, v)
+    if (!v.failed) {
+      await note(top, v)
+      // A subagent's session shows the block too, and loses it when the block ends; a
+      // notice that is not a block is the root's (it is shown once).
+      if (id !== top && (v.block || noted.get(id))) await note(id, v.block ? v : { block: false, text: "" })
+    }
     return v
   }
 
   // verdict is the session's kept verdict while fresh, else a new check.
   async function verdict(id, event) {
-    const top = await root(id)
-    const v = verdicts.get(top)
+    const top = await root(id).catch(() => undefined)
+    const v = top === undefined ? undefined : verdicts.get(top)
     if (v && now() - v.at < (v.failed ? failMs : cacheMs)) return v
     return check(id, event)
   }
@@ -191,7 +207,7 @@ export function create(ctx, config, deps = {}) {
       } else {
         await ctx.session.instructions.entry.remove({ sessionID: id, key: NOTICE_KEY })
       }
-      noted.set(id, want)
+      remember(noted, id, want)
     } catch (e) {
       log("cannot " + (want ? "add" : "clear") + " the notice on " + id + ": " + message(e))
     }
@@ -262,35 +278,80 @@ export function create(ctx, config, deps = {}) {
         log("permission check failed: " + message(err))
       }
     },
-    // Events after which a copy may have moved: check the session again.
+    // Events after which a copy may have moved: check the session again. A subagent's new
+    // session only records its parent (its root's verdict covers it, and its start is not
+    // the root's). A subscription that ends is made again, waiting longer each time.
     listen(signal) {
-      ;(async () => {
-        for await (const ev of ctx.event.subscribe({ types: EVENTS, signal })) {
-          const id = ev?.data?.sessionID
-          if (typeof id === "string" && id) {
-            check(id, "SessionStart").catch((err) => log("event check failed: " + message(err)))
-          }
+      const onEvent = (ev) => {
+        const id = ev?.data?.sessionID
+        if (typeof id !== "string" || !id) return
+        if (ev.type === "session.created") {
+          const parent = typeof ev.data.parentID === "string" ? ev.data.parentID : ""
+          remember(parents, id, parent)
+          if (parent) return
         }
-      })().catch((err) => {
-        if (!signal.aborted) log("event subscription ended: " + message(err))
-      })
+        check(id, "SessionStart").catch((err) => log("event check failed: " + message(err)))
+      }
+      ;(async () => {
+        let wait = retryMs
+        while (!signal.aborted) {
+          const since = now()
+          try {
+            for await (const ev of ctx.event.subscribe({ types: EVENTS, signal })) onEvent(ev)
+            if (!signal.aborted) log("event subscription ended; subscribing again")
+          } catch (err) {
+            if (!signal.aborted) log("event subscription ended: " + message(err))
+          }
+          if (now() - since > 60000) wait = retryMs
+          await sleep(wait, signal)
+          wait = Math.min(wait * 2, 60000)
+        }
+      })()
     },
   }
 }
 
+// remember keeps key's value in map, forgetting the oldest entries past REMEMBER.
+function remember(map, key, value) {
+  map.delete(key)
+  map.set(key, value)
+  while (map.size > REMEMBER) map.delete(map.keys().next().value)
+  return value
+}
+
+// sleep waits ms, or until signal aborts, without keeping the process alive.
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener?.("abort", done)
+      resolve()
+    }
+    const timer = setTimeout(done, ms)
+    timer.unref?.()
+    signal?.addEventListener?.("abort", done, { once: true })
+  })
+}
+
 // ruleEffect is what hopsesh's rules say about a permission: "ask" when any command is one
 // that always asks, "allow" when every command is one that runs without asking, else
-// nothing (OpenCode's own rules stand). Only shell commands are hopsesh's.
+// nothing (OpenCode's own rules stand). Only shell commands are hopsesh's. OpenCode splits
+// a shell call into commands at &&, ;, | and $(…), but a redirection stays in its command:
+// a command with a redirection, a substitution or a second line is never allowed.
 export function ruleEffect(rules, action, resources) {
   if (!rules || action !== "shell" || !Array.isArray(resources) || resources.length === 0) return undefined
   let allowed = true
   for (const resource of resources) {
-    const words = String(resource).trim().split(/\s+/)
+    const command = String(resource)
+    const words = command.trim().split(/\s+/)
     if (prefixed(rules.ask, rules.bin, words)) return "ask"
-    if (!prefixed(rules.allow, rules.bin, words)) allowed = false
+    if (SHELL_SYNTAX.test(command) || !prefixed(rules.allow, rules.bin, words)) allowed = false
   }
   return allowed ? "allow" : undefined
 }
+
+// SHELL_SYNTAX is what makes a command more than hopsesh with its arguments.
+const SHELL_SYNTAX = /[<>|&;`\n\r]|\$\(/
 
 function prefixed(prefixes, bin, words) {
   if (!Array.isArray(prefixes) || words[0] !== bin) return false

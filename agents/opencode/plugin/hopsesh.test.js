@@ -3,13 +3,18 @@
 // is installed and skips them otherwise.
 import { describe, expect, test } from "bun:test"
 import { EventEmitter } from "node:events"
+import { StringDecoder } from "node:string_decoder"
 import { create, ruleEffect, setup, EVENTS, NOTICE_KEY } from "./hopsesh.js"
 
-// fakeChild is a notice-hook process that prints answer and exits with code (never, with
-// answer null).
+// fakeChild is a notice-hook process that prints answer (a string, or the Buffers it
+// writes one by one) and exits with code (never, with answer null).
 function fakeChild(answer, code = 0) {
   const child = new EventEmitter()
   child.stdout = new EventEmitter()
+  let decoder
+  child.stdout.setEncoding = (enc) => {
+    decoder = new StringDecoder(enc)
+  }
   child.stdin = { input: "", on() {}, end(s) { child.stdin.input = s } }
   child.killed = false
   child.kill = () => {
@@ -17,7 +22,9 @@ function fakeChild(answer, code = 0) {
   }
   if (answer !== null) {
     setTimeout(() => {
-      if (answer) child.stdout.emit("data", Buffer.from(answer))
+      for (const b of Array.isArray(answer) ? answer : answer ? [Buffer.from(answer)] : []) {
+        child.stdout.emit("data", decoder ? decoder.write(b) : b)
+      }
       child.emit("close", code)
     }, 1)
   }
@@ -26,11 +33,15 @@ function fakeChild(answer, code = 0) {
 
 // world is a fake context: sessions (id → parent id), and what the plugin did.
 function world({ parents = {}, answers = () => '{"block":false}', storage = {}, now } = {}) {
-  const w = { spawned: [], put: [], removed: [], stored: storage, logs: [], hooks: {}, subscribed: null }
+  const w = { spawned: [], put: [], removed: [], stored: storage, logs: [], hooks: {}, subscribed: null, gets: [] }
   w.ctx = {
     location: { directory: "/work/demo" },
     session: {
-      get: async ({ sessionID }) => ({ data: { id: sessionID, ...(parents[sessionID] ? { parentID: parents[sessionID] } : {}) } }),
+      // As OpenCode's Promise API returns it: the session itself, not {data}.
+      get: async ({ sessionID }) => {
+        w.gets.push(sessionID)
+        return { id: sessionID, ...(parents[sessionID] ? { parentID: parents[sessionID] } : {}) }
+      },
       hook: async (name, cb) => {
         w.hooks["session." + name] = cb
       },
@@ -130,6 +141,51 @@ describe("verdicts", () => {
     expect(JSON.parse(w.spawned[0].child.stdin.input).session_id).toBe("ses_root")
   })
 
+  test("a failed parent lookup is not kept: the next call finds the root", async () => {
+    const w = world({ parents: { ses_child: "ses_root" }, answers: () => blocked })
+    const get = w.ctx.session.get
+    let broken = true
+    w.ctx.session.get = async (q) => {
+      if (broken) throw new Error("database is locked")
+      return get(q)
+    }
+    const p = create(w.ctx, config, w.deps)
+    await p.beforeTool({ sessionID: "ses_child" })
+    expect(w.spawned).toHaveLength(0)
+    await tick()
+    expect(w.stored.failures.reason).toContain("database is locked")
+    broken = false
+    await expect(p.beforeTool({ sessionID: "ses_child" })).rejects.toThrow("Blocked by hopsesh")
+    expect(JSON.parse(w.spawned[0].child.stdin.input).session_id).toBe("ses_root")
+  })
+
+  test("one failed check does not lift a fresh block", async () => {
+    let t = 0
+    const answers = [blocked, "", ""]
+    const w = world({ answers: (i) => answers[i], now: () => t })
+    const p = create(w.ctx, { ...config, cacheMs: 30000, failMs: 10000 }, w.deps)
+    await expect(p.beforeTool({ sessionID: "ses_a" })).rejects.toThrow()
+    t = 1000
+    await p.onPrompt({ sessionID: "ses_a" })
+    await expect(p.beforeTool({ sessionID: "ses_a" })).rejects.toThrow("Blocked by hopsesh")
+    t = 31000
+    await p.beforeTool({ sessionID: "ses_a" })
+    expect(w.spawned.length).toBe(3)
+  })
+
+  test("an answer split inside a character is read whole", async () => {
+    const answer = Buffer.from('{"block":true,"reason":"Moved to café."}')
+    const at = answer.indexOf(0xc3) + 1
+    const w = world()
+    w.deps.spawn = () => {
+      const child = fakeChild([answer.subarray(0, at), answer.subarray(at)])
+      w.spawned.push({ child })
+      return child
+    }
+    const p = create(w.ctx, config, w.deps)
+    await expect(p.beforeTool({ sessionID: "ses_a" })).rejects.toThrow("Moved to café.")
+  })
+
   test("concurrent calls share one check", async () => {
     const w = world({ answers: () => blocked })
     const p = create(w.ctx, config, w.deps)
@@ -161,6 +217,18 @@ describe("notices", () => {
     await p.onPrompt({ sessionID: "ses_a" })
     await p.onPrompt({ sessionID: "ses_a" })
     expect(w.put.map((e) => e.value)).toEqual(["Hopsesh status: continued in Codex."])
+  })
+
+  test("a subagent's check puts the notice on its root, and the block on both", async () => {
+    const answers = ['{"block":false,"context":"Hopsesh status: continued in Codex."}', blocked, '{"block":false}']
+    const w = world({ parents: { ses_child: "ses_root" }, answers: (i) => answers[i] })
+    const p = create(w.ctx, config, w.deps)
+    await p.beforeTool({ sessionID: "ses_child" })
+    expect(w.put).toEqual([{ sessionID: "ses_root", key: NOTICE_KEY, value: "Hopsesh status: continued in Codex." }])
+    await p.onPrompt({ sessionID: "ses_child" })
+    expect(w.put.slice(1).map((e) => e.sessionID)).toEqual(["ses_root", "ses_child"])
+    await p.onPrompt({ sessionID: "ses_child" })
+    expect(w.removed.map((e) => e.sessionID)).toEqual(["ses_root", "ses_child"])
   })
 
   test("the key is one OpenCode accepts", () => {
@@ -247,6 +315,10 @@ describe("permissions", () => {
     expect(ruleEffect(rules, "shell", ["hopsesh hosts add x"])).toBeUndefined()
     expect(ruleEffect(rules, "shell", ["/tmp/evil/hopsesh ls"])).toBeUndefined()
     expect(ruleEffect(rules, "shell", ["hopseshls"])).toBeUndefined()
+    for (const shell of ["hopsesh ls > important.go", "hopsesh ls --json >>x", "hopsesh ls < in", "hopsesh ls `rm x`", "hopsesh ls $(rm x)", "hopsesh ls | sh", "hopsesh ls & rm x", "hopsesh ls; rm x", "hopsesh ls\nrm x"]) {
+      expect(ruleEffect(rules, "shell", [shell])).toBeUndefined()
+    }
+    expect(ruleEffect(rules, "shell", ["hopsesh pull x > log"])).toBe("ask")
     expect(ruleEffect(rules, "read", ["hopsesh ls"])).toBeUndefined()
     expect(ruleEffect(rules, "shell", [])).toBeUndefined()
     expect(ruleEffect(null, "shell", ["hopsesh ls"])).toBeUndefined()
@@ -304,12 +376,54 @@ describe("setup", () => {
       (async function* () {
         yield { type: "session.moved", data: { sessionID: "ses_m" } }
       })()
-    const p = create(w.ctx, config, w.deps)
-    p.listen(new AbortController().signal)
+    const p = create(w.ctx, { ...config, retryMs: 60000 }, w.deps)
+    const stop = new AbortController()
+    p.listen(stop.signal)
     await tick()
     await tick()
+    stop.abort()
     expect(JSON.parse(w.spawned[0].child.stdin.input)).toEqual({ session_id: "ses_m", directory: "/work/demo", event: "SessionStart" })
     expect(p.verdicts.get("ses_m").block).toBe(true)
+  })
+
+  test("a subagent's new session records its parent and runs no check", async () => {
+    const w = world({ answers: () => blocked })
+    w.ctx.event.subscribe = () =>
+      (async function* () {
+        yield { type: "session.created", data: { sessionID: "ses_child", parentID: "ses_root" } }
+      })()
+    const p = create(w.ctx, { ...config, retryMs: 60000 }, w.deps)
+    const stop = new AbortController()
+    p.listen(stop.signal)
+    await tick()
+    stop.abort()
+    expect(w.spawned).toHaveLength(0)
+    await expect(p.beforeTool({ sessionID: "ses_child" })).rejects.toThrow("Blocked by hopsesh")
+    expect(w.gets).toEqual(["ses_root"])
+    expect(JSON.parse(w.spawned[0].child.stdin.input).session_id).toBe("ses_root")
+  })
+
+  test("a move event during a prompt's check gets its own check", async () => {
+    const w = world({ answers: () => blocked })
+    const p = create(w.ctx, config, w.deps)
+    await Promise.all([p.check("ses_a", "UserPromptSubmit"), p.check("ses_a", "SessionStart")])
+    expect(w.spawned.map((s) => JSON.parse(s.child.stdin.input).event)).toEqual(["UserPromptSubmit", "SessionStart"])
+  })
+
+  test("a subscription that ends is made again", async () => {
+    const w = world()
+    let n = 0
+    w.ctx.event.subscribe = () => {
+      n++
+      return (async function* () {})()
+    }
+    const p = create(w.ctx, { ...config, retryMs: 2 }, w.deps)
+    const stop = new AbortController()
+    p.listen(stop.signal)
+    await tick()
+    await tick()
+    stop.abort()
+    expect(n >= 2).toBe(true)
   })
 
   test("a missing or broken config registers nothing (fail open)", async () => {
