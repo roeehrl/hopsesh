@@ -615,7 +615,7 @@ func (a *App) MovementNoticeDetailsForPath(ctx context.Context, id agent.ID, pro
 		// An agent that keeps sessions in a database sends no file: its session's anchor,
 		// and the lineage beside it, follow from the id.
 		if mod, ok := a.Module(id); ok && agent.IsVirtual(mod) {
-			path = filepath.Join(scope.Root, filepath.FromSlash(agent.AnchorRel(id, key.Session)))
+			path = filepath.Join(noticeMain(mod.Spec(), scope), filepath.FromSlash(agent.AnchorRel(id, key.Session)))
 		}
 	}
 	if path == "" {
@@ -661,6 +661,17 @@ func (a *App) MovementNoticeDetailsForPath(ctx context.Context, id agent.ID, pro
 	details.Text, details.Operation, details.Status = hookNoticeText(n), n.Operation, n.Status
 	details.Summary = strings.TrimSuffix(strings.TrimPrefix(hookNoticeText(n), "Hopsesh status: "), " Check the destination before continuing; continuing here may create separate work.")
 	return details, nil
+}
+
+// noticeMain is the main root of the account folder scope (noticeScope): the folder
+// itself, or, for a folder added for an agent with several roots, the main root inside
+// it (OpenCode's <folder>/data/opencode).
+func noticeMain(spec agent.Spec, scope agent.RuntimeProfile) string {
+	in := agent.Install{Agent: spec.ID, Accounts: spec.Accounts}
+	if scope.ID != "" {
+		in.Profile = &scope
+	}
+	return spec.PinMain(in, scope.Root).Main()
 }
 
 // The default root may have been registered since hook installation. Resolve its
