@@ -220,7 +220,7 @@ func TestModuleHostSQLIsConfined(t *testing.T) {
 	spec := agent.Spec{ID: "dbagent", Name: "DB Agent", Roots: []agent.Root{{Name: "data", Default: map[string]string{"*": root}}},
 		SQLFiles: []string{"{data}/agent.db"}, SQLTables: []string{"session", "message"}, SQLDenied: []string{"credential"}}
 	in := agent.Install{Agent: "dbagent", Roots: map[string]string{"data": root}, MainRoot: "data"}
-	m := &Machine{Name: "here", Local: true, Facts: Facts{OS: "darwin", Home: t.TempDir()}}
+	m := &Machine{Name: "here", Local: true, Facts: Facts{OS: runtime.GOOS, Home: t.TempDir()}}
 	h, err := m.For(ctx, spec, in, nil)
 	if err != nil {
 		t.Fatal(err)
