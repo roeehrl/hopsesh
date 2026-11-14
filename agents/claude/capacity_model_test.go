@@ -25,3 +25,16 @@ func TestNewSessionCapacityInfersAccountModel(t *testing.T) {
 		t.Fatalf("newest session's model not used: %+v %v", c, err)
 	}
 }
+
+// Fable 5.2 and the Mythos 5.x models have a 1M window by default, like Fable 5.1.
+func TestNewSessionCapacityFable52(t *testing.T) {
+	for _, model := range []string{"claude-fable-5-2", "claude-mythos-5-1", "claude-mythos-5-2"} {
+		fh := agenttest.NewFakeHost("/home/alice")
+		in := agent.Install{Agent: id, Version: "2.1.321", Roots: map[string]string{"home": "/home/alice/.claude"}}
+		h := agent.Confine(fh, New().Spec(), in)
+		fh.Put(in.Root(home)+"/projects/-a/new.jsonl", []byte(`{"type":"assistant","message":{"model":"`+model+`"}}`+"\n"), time.Now())
+		if c, err := New().ContextCapacity(context.Background(), h, in, nil); err != nil || c.Model != model || c.Window != 1_000_000 {
+			t.Fatalf("%s: %+v %v", model, c, err)
+		}
+	}
+}

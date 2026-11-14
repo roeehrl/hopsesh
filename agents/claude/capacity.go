@@ -125,7 +125,7 @@ func (m *Module) ContextCapacity(ctx context.Context, h agent.Host, in agent.Ins
 	// Only exact model IDs with a documented default 1M window qualify. An alias,
 	// old opt-in [1m] variant, or custom gateway never grants a larger cap.
 	switch c.Model {
-	case "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5", "claude-fable-5-1":
+	case "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5", "claude-fable-5-1", "claude-fable-5-2", "claude-mythos-5-1", "claude-mythos-5-2":
 		c.Window = 1_000_000
 		c.Source += "; documented default 1M model window"
 	}
