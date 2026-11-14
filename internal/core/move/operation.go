@@ -128,8 +128,14 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 		return nil, err
 	}
 	if p.ResumeHere {
-		// Nothing moves: the session continues where it is.
-		return &Result{Command: launch.Shell(p.Resume, "", launch.DefaultShell()), Run: p.Resume}, nil
+		// Nothing moves: the session continues where it is, with a command checked there.
+		res := &Result{Command: launch.Shell(p.Resume, "", launch.DefaultShell()), Run: p.Resume}
+		if in.Target.Machine != nil && in.Target.Module != nil {
+			if h, err := in.Target.Machine.For(ctx, in.Target.Module.Spec(), in.Target.Install, nil); err == nil {
+				finishResume(ctx, p, in.Target, h, res)
+			}
+		}
+		return res, nil
 	}
 	if p.OperationID == "" {
 		return applyPlan(ctx, p, in, env)
@@ -213,6 +219,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 		original.sourceReplica = r.SourceReplica
 		original.sourceState = r.SourceState
 		original.native, original.nativeIn = p.native, p.nativeIn
+		original.resumeOpts = p.resumeOpts
 		*p = *original
 		res := r.Result
 		if res == nil {
@@ -229,6 +236,11 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 			}
 			h, e := in.Target.Machine.For(ctx, in.Target.Module.Spec(), in.Target.Install, j)
 			if e != nil {
+				return res, e
+			}
+			// The session is journaled before the write is finished, as Apply does: the
+			// interrupted run may have saved the request and stopped before journaling it.
+			if e = recordVendorWrite(j, in.Target.Module, in.Target.Machine.Name, p.Placement.Key, *r.Request); e != nil {
 				return res, e
 			}
 			w, e := recoverer.RecoverWrite(ctx, h, in.Target.Install, *r.Request)
@@ -263,6 +275,9 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 			return res, e
 		}
 		res.Command, res.Run = launch.Shell(p.Resume, "", launch.DefaultShell()), p.Resume
+		if h, e := in.Target.Machine.For(ctx, in.Target.Module.Spec(), in.Target.Install, nil); e == nil {
+			finishResume(ctx, p, in.Target, h, res) // the command checked there, where it can be
+		}
 		if e = j.SealWith(ctx, sessions); errors.Is(e, journal.ErrUnstamped) {
 			res.Warnings = append(res.Warnings, "could not record what this changed, for a safe undo: "+e.Error())
 		} else if e != nil {

@@ -418,17 +418,26 @@ channel's `opencode-<channel>.db`) and its `-wal`, and `{data}/hopsesh/opencode/
 ### Writer (IR → OpenCode), `writer.go`
 - **Profile:** `{Window: ContextCapacity, NativeReplay: true (shell only), PortableAppend: false}`;
   true only with PR 11 (D4).
-- **`Write(New)`:**
-  1. Session id from the core's `SessionIDMinter`; `msg_` ids ascending; times start at "now − n ms".
-  2. Info: `{id, title, agent:"build", projectID:"global" (recomputed), location:{directory:cwd}, time…}`;
-     `model` omitted unless the target config model is known (never `{}`).
-  3. Messages: user items → `user {text, files:[], agents:[], time}`; agent text → `assistant {agent,
-     content:[{type:"text",text}], finish:"stop", cost:0, tokens:0…, time}`; NativeReplay shell items →
-     assistant `{type:"tool", id:call_…, name:"shell", executed:true, state:{status:"completed",
-     input:{command}, content:[{type:"text",text:output}], metadata:{exit}}}` (content non-empty);
-     an `idle {outcome:"succeeded"}` after each assistant turn (necessity UNVERIFIED); the briefing and
-     the `[hopsesh] Import ready` item as the last assistant text.
-  4. Write JSONL to the anchor, convert, import (success = `Imported session: <id>` on stdout).
+- **`Write(New)`** (as built in PR 5; the PR 5 note below has the reasons):
+  1. Session id: `WriteRequest.SessionID` (the core minted it with the `SessionIDMinter`); without
+     one in OpenCode's form, one made from the operation id. `msg_` ids ascending (time part from the
+     message's time, tail hashed from the session id, operation and position); message times are the
+     items' own, kept increasing, items without one after them; the session's creation time is the
+     write's.
+  2. Info: `{id, title, projectID:"global" (recomputed), location:{directory:cwd}, cost, tokens, time}`;
+     no `model` and no `agent` (OpenCode picks its default for the next turn; never `{}`).
+  3. Messages: user items → `user {text, files:[], time}`; agent text → `assistant {agent:"build",
+     model:{id:<source model or "unknown">, providerID:"hopsesh"}, content:[{type:"text",text}],
+     finish:"stop", cost:0, tokens:0…, time:{created, completed}}`; NativeReplay shell items →
+     assistant `{type:"tool", id:call_…, name:"shell", executed:false, state:{status:"completed",
+     input:{command}, content:[{type:"text",text:output}], metadata:{status, truncated, exit}},
+     time:{created, ran, completed}}` with `finish:"tool-calls"` (a failed call without an exit status
+     is `state:{status:"error", error:{type:"tool.execution", message}}`); an `idle {outcome:"succeeded"}`
+     after each turn of replies, as OpenCode's own turns end; the briefing (a user message) and the
+     `[hopsesh] Import ready` item (the last reply) as the converter renders them.
+  4. Write JSON lines to the anchor, then the transfer to `{data}/hopsesh/opencode/tmp/`, import
+     (success = `Imported session: <id>` on stdout; a session already there with these messages is
+     done, with others `ErrDiverged`). Verified with a real 2.3.0 `--standalone` import (PR 5).
 - **Result:** `WriteResult{SessionID, Path: anchor, From:0, To: settled count, Cursor}`. The projection
   maps each `ir.Item` to its `msg_` id via `ir.ProjectionFor`.
 - **Lost into OpenCode:** non-shell tool calls (flattened, as for Claude and Codex), reasoning, Claude
@@ -436,9 +445,8 @@ channel's `opencode-<channel>.db`) and its `-wal`, and `{data}/hopsesh/opencode/
   per-message model identity.
 - **Lost out of OpenCode:** `native` replay, snapshots and revert, instruction state, child detail
   (summarised), media blobs (names only).
-- **Fetch and adopt append** are gated on `Profile.PortableAppend` (today `fetch.go:495` sets
-  `CanAppend` for any Reader+Writer; `write.go:213` and `adopt.go:439` then append). Fixed in PR 5 with
-  a test.
+- **Fetch and adopt append** are gated on `Profile.PortableAppend` (`relateFetch` offers the original
+  only to such a writer; `appendOriginal` refuses otherwise). Done in PR 5, with tests.
 
 ---
 
@@ -1099,6 +1107,149 @@ Decisions and what is left:
   the folder back restored the session with its child and removed both files; a restore after
   the root alone had been imported (its stamp now another: 2.3.0's import sets
   `time_updated`) imported only the child.
+
+**Left by PR 5 for later PRs.** Sessions now continue between Claude Code or Codex and OpenCode.
+`writer.go` writes OpenCode's own transfer (§4) at the session's anchor and has OpenCode's program
+import it under `WriteRequest.SessionID` (the core runs no AfterInstall after a write);
+`RecoverWrite` finds the session by the same id (or the one made from `OperationID` when the
+request had none in OpenCode's form), checks the placed file is the one the request makes (the
+same bytes: ids, times and the session's creation time, read back from the file, are made from
+the request), writes it when the write stopped before it, and imports it when OpenCode does not
+have it; a session there with other messages is `ErrDiverged`. Done here from the earlier notes:
+the projection (each written node's item, a shell call's call and result), fetch/adopt append
+gating (`PortableAppend`), the remaining resume call sites (a continuation, a no-work sync,
+recovery and a resume where the session already is now go through `finishResume`, so
+OpenCode's `ResumeOn` checks the session and picks the program; a recovery keeps the fresh
+plan's resume options), and a subagent's answer folded into its call's result. The id minting
+on the capacity-rollover and fetch paths was already in the core (PR 1b); PR 5 tests both with
+OpenCode. Decisions and what is left:
+- **Return into an OpenCode copy (D4).** A writer without `PortableAppend` gets no append from the
+  core: where the copy here is behind the source (an append for Claude or Codex), the plan rolls
+  over to a new session that continues it, as for a full destination (lineage `Rollover`; the
+  copy stays as it is; the plan warns "OpenCode cannot add to an existing session…"). PR 11
+  replaces this with delete + re-import.
+- **Replies need a model.** OpenCode's schema requires `model` on every assistant message; hopsesh
+  names `{id: <the source's model, or "unknown">, providerID: "hopsesh"}`. OpenCode replays a
+  reply's provider state only to the model that made it, and no provider is called `hopsesh`, so
+  nothing is replayed (hopsesh writes none). The session names no model or agent: OpenCode
+  continues it with the model and agent it would pick for a new session. A bounded continuation
+  of an OpenCode session could name the source's model (same machine and profile); it does not
+  yet. How the TUI and desktop app show such a reply's model was not looked at.
+- **Shape corrections to the plan.** Shell calls are `executed:false` (true means a tool the
+  provider ran itself; OpenCode would then not send the result as a tool message), a tool item
+  needs `time` (`created`, `ran`, `completed`), and the session has no `agent` (the captured
+  sessions have none). The idle messages are kept (OpenCode's own turns end with one); whether
+  an import without them works was not tried. A call that exited non-zero gets a second text
+  item, `Exit code: N`, as OpenCode's own shell tool gives its model (the exit status in
+  `metadata.exit` is not shown to it); an output read from OpenCode that ends with that line is
+  not given it twice. The folder a call ran in (`ir.Shell.Dir`, which Codex records) is written
+  as the shell input's `workdir`, its paths mapped by the converter like the command's. Every
+  message time is before the write's own (room left for the messages after it), so a source
+  clock ahead of this one never gives a written message an id after the ones OpenCode makes for
+  the next turn.
+- **Listing.** A session's first and last prompts leave out hopsesh's notes (`[hopsesh] …`, the
+  briefing a continuation writes as a user message), so a written session lists the person's
+  last prompt. Capacity leaves out hopsesh's replies (no tokens, no model): a written session's
+  usage is its bytes, and a new session's model is never `hopsesh/…`.
+- **Subagent answers** (PR 2's note): a synthetic message from a subagent's session (metadata
+  `source:"subagent"`, `childID`) is read as a second result of the call that started that
+  child (what the call returned, then the answer), where the answer came, so the nodes before it
+  do not change when it arrives; the converter uses a call's last result. Node ids are chained,
+  so every node after an answer has a new id once, at this upgrade, against what the PR 2–4
+  reader gave: a cursor or lineage head taken past an answer before it reads as diverged (only
+  development data; OpenCode is not released). A consumer that pairs a call with its first
+  result only would miss the answer. An answer whose child no call names is still left out. An
+  answer that arrives after its call was carried (a parent continued while a background
+  subagent still ran, continued again once it answered) is lost on the incremental return: the
+  call is covered, so only the answer node is rendered, and the converter renders results only
+  through their call (`convert.history` has no case for a lone result). Not reproduced; a fix
+  renders such a result as text (PR 9, with the two-agent loops).
+- **Fork on resume (D5)** is not done: it needs a fork through `api POST …/fork` at the moment a
+  resume is launched (journaled, from a UI action), not a plan-time command; CapFork stays off.
+  PR 7/8, with the D2 confirmation, which also needs a `ResumeOptions` field.
+- **Writer and versions.** The writer uses message types every 2.1+ OpenCode has, and checks no
+  target version; only 2.3.0 was run. A move still checks versions (`CheckInstall`). A write
+  through a running service of another version is not checked either: `session import` then
+  runs in that service, whose import schema may differ from the program's (a D2-like risk for
+  writes, not for resumes). PR 7/8 decides with the D2 confirmation whether a write asks too.
+- **Hand-offs.** An OpenCode session handed off to a cloud and brought back into OpenCode comes as
+  a new OpenCode session (tested with Codex cloud); asking to add the cloud's work to the
+  original (`--append`) is refused at planning ("OpenCode cannot add to an existing session…").
+  Cloud briefings now say "an OpenCode session".
+- **`--target-session` naming an OpenCode copy** rolls over to a new session that continues the
+  named copy, with the same warning, as a full destination does; it is not refused, because a
+  plan with several OpenCode copies asks which one to continue, and that choice still matters
+  for the lineage.
+- **Recovery.** A recovered continuation journals the session it is to make before
+  `RecoverWrite` (the interrupted run may have saved its request and stopped before journaling
+  it), and a target it cannot reach for the resume check keeps the planned command, as a
+  no-work sync does.
+- **Stamp at the write, not fixed.** The stamp of a written session is read in a query after the
+  import (`stampMade`; in a recovery after `RecoverWrite`'s message check). A turn the person
+  added to the new session in between would be recorded as the operation's, so an unforced
+  undo would delete it. The window is one query; closing it needs the writer to give the stamp
+  it left (with its settled count checked against the messages it wrote) and Seal not to stamp
+  a session the write found used (an SDK change: a stamp on `ir.WriteResult`). PR 9 or later.
+- **A written session can start with a reply.** A history that begins with an agent item (a
+  compaction summary, which the converter renders as agent text, or a fitted history cut
+  before its first prompt) is written with an assistant message first. Whether OpenCode 2.3.0
+  sends such a history to providers that refuse one (Gemini, older Anthropic models) as it is
+  was not checked; this is the converter's for every writer, not OpenCode's alone. To check
+  with PR 9's sandbox runs (a compacted Claude Code session continued into OpenCode); a fix
+  writes an OpenCode `compaction` message or a prompt first.
+- **Attribution and fidelity, minor.** Every written reply names `Header.Model`, the source's last
+  model, also in a session that switched models. Attachment placeholders ("[an attachment …
+  was here]") are user messages, so they can be a written session's listed first or last
+  prompt (`ownPromptSQL` leaves out only `[hopsesh] `). A person's own shell command from an
+  OpenCode `shell` message is replayed into another agent as the assistant's tool call (the
+  converter's, from before). A failed call with no output and no exit status reads back as
+  "The command failed.".
+- **Tests carried to PR 9.** PR 3's note item "the stand-in is not in `fakecloud.Programs`" is
+  still open (the cloud test links the test binary as `opencode` instead); PR 9 joins it there
+  or drops the item. §7's OpenCode legs in `context_capacity_test.go`, `lineage_routes_test.go`,
+  `peer_test.go` and a remote continue into OpenCode are not here (PR 5's are in
+  `opencodecontinue_test.go`); PR 9, with the two-agent loops. A resume where the session
+  already is (`ResumeHere`) goes through `finishResume` but no test reaches it with OpenCode
+  (it needs an account boundary OpenCode does not have). The D2 tests use a service version
+  no desktop app ships, since `desktopCLIs` also reads `/Applications`; the e2e world is not
+  hermetic there (PR 9: let tests set the desktop app folders).
+- **Leftovers on disk.** The written anchor is journaled; undo removes it, the transfer file in
+  `tmp/`, the title line in `titles.jsonl` and the lineage beside the anchor. After a kept
+  operation the transfer file in `tmp/` stays, as for moves (PR 4).
+- **Stand-in.** `$FAKE_OPENCODE_FAIL` ("session import") makes a command fail as a program that
+  died would; the recovery tests use it. The test bundle's `export/written-by-hopsesh.json` is
+  real 2.3.0's export of a session hopsesh wrote (shell calls, a failed call without an exit
+  status, notices), scrubbed.
+- **Real-binary check** (opencode 2.3.0, a fresh copy of the sandbox, a guard program that refused
+  any command without `--standalone` and answered `service status` itself; Claude Code and Codex
+  data in the scratch folders): a written transfer with every item kind imported, and OpenCode's
+  export of it equalled the written messages; a Claude Code session and a Codex thread continued
+  into OpenCode through hopsesh (the Codex one interrupted after the write and recovered: one
+  import), OpenCode's exports equalled the placed messages (no `model` on the session, the title
+  kept), hopsesh listed them with the person's last prompt and read them back; undo of the Codex
+  one deleted it through OpenCode. Then one `opencode run -s <id> --standalone` prompt against
+  omlx (D9; data, state and cache in the copy, the config dir the user's, unchanged): OpenCode
+  continued the written session and answered from its history ("PLUM-7"). Continued back, the
+  reply was added to the original Claude Code session (its old lines byte for byte) and written
+  as a new Codex thread, without the earlier legs' notices. Through the guard, 7 commands
+  reached the real binary (imports, exports, a delete), every one `--standalone`; the prompt was
+  the only other run. Run twice on fresh copies with the same results; in one run the local
+  model's reasoning called a hopsesh notice in the history "a prompt injection attempt" (and
+  still answered from the history), which is about the notices' wording, not OpenCode. The
+  harness was not committed (PR 9). Re-run after the review fixes (a fresh copy, the same
+  guard): the transfer `writeRequest` makes (`writer_test.go`, now with the `Exit code: 2` line
+  and a `workdir`) imported, and real 2.3.0 exported exactly its messages (that export, the
+  folder scrubbed, is the bundle's `written-by-hopsesh.json`, which `TestWrittenAsExported`
+  compares with the writer); the Claude Code and Codex legs, the recovery (one import) and the
+  undo as before; one `opencode run -s <id> --standalone` prompt answered "PLUM-7" from the
+  history (config dir listing unchanged); back into Claude Code (an addition, its old lines byte
+  for byte) and into Codex (a new thread). 8 commands reached the real binary through the guard
+  (3 imports, 3 exports, a delete, `--version`), every change `--standalone`.
+- **PR 6:** a session continued into OpenCode keeps its lineage at `agent.AnchorRel`, so the
+  notice-hook lookup by session id finds it; until the plugin exists, the OpenCode copy a
+  continuation leaves behind is unprotected and the result says so ("not protected").
+  Continuations print OpenCode's resume command from `ResumeOn`; a D2 refusal leaves it shown,
+  not runnable, as for moves.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.

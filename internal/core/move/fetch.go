@@ -471,8 +471,12 @@ func relateFetch(ctx context.Context, in FetchInput, p *Plan, opt Options, check
 		return
 	}
 	reader, okR := holder.(agent.Reader)
-	_, okW := holder.(agent.Writer)
-	if !okR || !okW {
+	writer, okW := holder.(agent.Writer)
+	if !okR || !okW || !writer.Profile(hin).PortableAppend {
+		// The work comes as a new session: this agent cannot add to the original.
+		if opt.AppendOriginal {
+			check("err", holder.Spec().Name+" cannot add to an existing session; the cloud's work comes as a new session")
+		}
 		return
 	}
 	h, err := in.Machine.For(ctx, holder.Spec(), hin, nil)

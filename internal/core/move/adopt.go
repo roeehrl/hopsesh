@@ -400,7 +400,7 @@ func recordFetchLineage(ctx context.Context, f *Fetch, side Side, j *journal.Jou
 func appendOriginal(ctx context.Context, f *Fetch, side Side, j *journal.Journal, a agent.Adoption, ad *Adopted) error {
 	reader, okR := side.Module.(agent.Reader)
 	writer, okW := side.Module.(agent.Writer)
-	if !okR || !okW {
+	if !okR || !okW || !writer.Profile(side.Install).PortableAppend {
 		return fmt.Errorf("%w: %s cannot add to its sessions", agent.ErrUnsupported, side.Module.Spec().Name)
 	}
 	h, err := side.Machine.For(ctx, side.Module.Spec(), side.Install, j)

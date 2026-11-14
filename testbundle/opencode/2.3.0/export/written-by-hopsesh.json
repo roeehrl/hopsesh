@@ -1,0 +1,357 @@
+{
+  "info": {
+    "id": "ses_0123456789abHopseshWrite01",
+    "projectID": "5e3680eb782bff46b1f8242a8af1c415e527eced",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1793491200000,
+      "updated": 1794631106587
+    },
+    "title": "Find the codeword",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_0fc7c4e00001WW3czEmOZZrk6d",
+      "time": {
+        "created": 1790942400000
+      },
+      "text": "What is the codeword in notes.txt?",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_0fc7c51e8001FUqMQUZvdBVYOL",
+      "time": {
+        "created": 1790942401000,
+        "completed": 1790942401000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "claude-opus-4-5",
+        "providerID": "hopsesh"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "Let me look."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_0fc7c55d0001dnLdqOStdqr9oU",
+      "time": {
+        "created": 1790942402000,
+        "completed": 1790942402000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "claude-opus-4-5",
+        "providerID": "hopsesh"
+      },
+      "content": [
+        {
+          "type": "tool",
+          "id": "call_a648372c",
+          "name": "shell",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "cat notes.txt"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "PLUM-7\n"
+              }
+            ],
+            "metadata": {
+              "exit": 0,
+              "status": "completed",
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1790942402000,
+            "ran": 1790942402000,
+            "completed": 1790942402000
+          }
+        }
+      ],
+      "finish": "tool-calls",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_0fc7c59b8001uA4FZ0jaw7i4HD",
+      "time": {
+        "created": 1790942403000,
+        "completed": 1790942403000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "claude-opus-4-5",
+        "providerID": "hopsesh"
+      },
+      "content": [
+        {
+          "type": "tool",
+          "id": "call_5665bf3a",
+          "name": "shell",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "ls missing",
+              "workdir": "/home/u/git/demo/sub"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "ls: missing: No such file"
+              },
+              {
+                "type": "text",
+                "text": "Exit code: 2"
+              }
+            ],
+            "metadata": {
+              "exit": 2,
+              "status": "completed",
+              "truncated": false
+            }
+          },
+          "time": {
+            "created": 1790942403000,
+            "ran": 1790942403000,
+            "completed": 1790942403000
+          }
+        }
+      ],
+      "finish": "tool-calls",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_0fc7c59b9001M8b3wZuDm1THJK",
+      "time": {
+        "created": 1790942403001,
+        "completed": 1790942403001
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "claude-opus-4-5",
+        "providerID": "hopsesh"
+      },
+      "content": [
+        {
+          "type": "tool",
+          "id": "call_3e84ed81",
+          "name": "shell",
+          "executed": false,
+          "state": {
+            "status": "error",
+            "input": {
+              "command": "false"
+            },
+            "error": {
+              "type": "tool.execution",
+              "message": "The command failed."
+            }
+          },
+          "time": {
+            "created": 1790942403001,
+            "ran": 1790942403001,
+            "completed": 1790942403001
+          }
+        }
+      ],
+      "finish": "tool-calls",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_0fc7c5da0001QgE4T3jU5hjIrQ",
+      "time": {
+        "created": 1790942404000,
+        "completed": 1790942404000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "claude-opus-4-5",
+        "providerID": "hopsesh"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "The codeword is PLUM-7."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_0fc7c5da1001J7KYiMwCRQtRbo",
+      "time": {
+        "created": 1790942404001
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_0fc7d3860001zh1IHA0j6bbx1X",
+      "time": {
+        "created": 1790942460000
+      },
+      "text": "Thanks. And the second file?",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_0fc7d3c480016A9BA1h5EY90iV",
+      "time": {
+        "created": 1790942461000,
+        "completed": 1790942461000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "claude-opus-4-5",
+        "providerID": "hopsesh"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "FIG-3."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_0fc7d3c49001RqSC5xdzRs4LKJ",
+      "time": {
+        "created": 1790942461001
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_0fc7d3c4a001f91Z4W4Qaw1DJ7",
+      "time": {
+        "created": 1790942461002
+      },
+      "text": "[hopsesh] This conversation was moved from Claude Code.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_0fc7d3c4b001TdhO0mrvkprQ5q",
+      "time": {
+        "created": 1790942461003,
+        "completed": 1790942461003
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "claude-opus-4-5",
+        "providerID": "hopsesh"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "[hopsesh] Import ready."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_0fc7d3c4c001iMU5prOQ2P82b3",
+      "time": {
+        "created": 1790942461004
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}
