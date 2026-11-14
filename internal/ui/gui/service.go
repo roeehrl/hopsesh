@@ -58,8 +58,9 @@ type App struct {
 	core             *app.App // its Cfg is the saved configuration; calls work on snapshots
 	cfgErr           error    // the configuration file could not be used (see StartFresh)
 	inv              *app.Inventory
-	historyStale     map[string]bool // entries requiring a fresh read after History settings change; guarded by mu
-	reviewGeneration uint64          // pending reviews are invalidated independently of borrowed active actions
+	historyStale     map[string]bool      // entries requiring a fresh read after History settings change; guarded by mu
+	restartOK        map[string]time.Time // sessions the person agreed to restart the agent's service for (AllowServiceRestart); guarded by mu
+	reviewGeneration uint64               // pending reviews are invalidated independently of borrowed active actions
 	planGeneration   uint64
 	pushGeneration   uint64
 	actionRunning    bool      // an apply owns the published plan/connection until its deferred release

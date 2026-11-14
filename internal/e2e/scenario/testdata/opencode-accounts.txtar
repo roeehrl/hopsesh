@@ -1,0 +1,345 @@
+# OpenCode account folders (profiles). Each keeps its own data, state and config folders,
+# so its own database and sign-ins. OpenCode's background service listens on one port, so
+# hopsesh gives each folder it makes its own (decision D8), set through OpenCode's program
+# with the folder's variables: the default folder's service, running here, is never
+# stopped, started or moved. As for Claude Code and Codex, a session taken into another
+# folder of this machine continues there as a new session (its portable conversation;
+# the original stays), and a Claude Code session continues into one: both through
+# OpenCode's own import, with the folder's variables, on a private server (the folder's
+# own service is not running).
+git-repo repo https://github.com/example/demo.git
+claude-session 22222222-2222-4333-8444-555555555555 repo 'Account work' 'portable message in'
+mkdir $HOME/.local/share/opencode
+mkdir $HOME/.local/state/opencode
+cp fake-service $HOME/.local/state/opencode/fake-service
+exec opencode session import parent.json --directory $WORK/repo
+stdout '^Imported session: ses_e29a40000ffeHandMadeImport$'
+exec opencode session import child.json --directory $WORK/repo
+stdout '^Imported session: ses_e29a3ffffffeHandMadeChild0$'
+
+# A new folder for OpenCode: its own port, set in its own config folder.
+exec hopsesh accounts add opencode 'Work' --json
+stdout '"agent": "opencode"'
+stdout '"port": [0-9]+'
+! stdout '"port": 49374'
+cp stdout work.json
+account-id work.json
+grep '^opencode service set port [0-9]+$' $WORK/agents.log
+grep '^opencode service get port$' $WORK/agents.log
+exists $HOME/.hopsesh/accounts/opencode/work/config/service.json
+! grep 'stopped the background service' $WORK/agents.log
+
+# A scan finds both folders (the default one registered as it is found); the new one
+# has no session yet.
+exec hopsesh ls --host local --agent opencode --json
+stdout 'ses_e29a40000ffeHandMadeImport'
+exec hopsesh accounts list --json
+stdout '"name": "OpenCode default"'
+stdout '"name": "Work"'
+exec hopsesh accounts list
+stdout 'its service on port [0-9]+'
+
+# The session goes into the Work folder.
+exec hopsesh pull opencode/ses_e29a40000ffeHandMadeImport --target-profile $ACCOUNT_ID --yes --json
+stdout '"kind": "continue"'
+stdout '"otherAccount": true'
+cp stdout move.json
+grep '^opencode session import .*accounts.opencode.work.data.opencode.hopsesh.opencode.tmp.* --standalone$' $WORK/agents.log
+env XDG_DATA_HOME=$HOME/.hopsesh/accounts/opencode/work/data XDG_STATE_HOME=$HOME/.hopsesh/accounts/opencode/work/state OPENCODE_CONFIG_DIR=$HOME/.hopsesh/accounts/opencode/work/config
+cd repo
+exec opencode session list --format json --standalone
+stdout 'imported by hand'
+cd $WORK
+env XDG_DATA_HOME= XDG_STATE_HOME= OPENCODE_CONFIG_DIR=
+exec hopsesh ls --host local --agent opencode --json
+stdout '"profile": "'$ACCOUNT_ID'"'
+
+# A Claude Code session continues into the Work folder too.
+exec hopsesh pull 22222222-2222-4333-8444-555555555555 --in opencode --target-profile $ACCOUNT_ID --yes --json
+stdout '"kind": "continue"'
+cp stdout cont.json
+result-session cont.json
+exec hopsesh ls --host local --agent opencode --json
+stdout 'Account work'
+
+# Undo deletes it through OpenCode, in the Work folder.
+exec hopsesh undo --yes
+grep -count=1 '^opencode session delete '$RETURN_ID' --standalone$' $WORK/agents.log
+exec hopsesh ls --host local --agent opencode --json
+! stdout 'Account work'
+stdout 'imported by hand'
+
+# Protection in a folder: notices install puts the plugin in each folder's own config,
+# its argv naming the folder. The default folder's original, continued into Work, is
+# blocked; the Work copy runs. Continued in Claude Code in turn, the Work copy is the
+# stale one: the notice hook finds its lineage in Work's data folder.
+exec hopsesh notices install --agent opencode
+exists $HOME/.config/opencode/plugins/hopsesh/config.json
+exists $HOME/.hopsesh/accounts/opencode/work/config/plugins/hopsesh/index.js
+grep '"--profile",\s*"'$ACCOUNT_ID'"' $HOME/.hopsesh/accounts/opencode/work/config/plugins/hopsesh/config.json
+result-session move.json
+env FAKE_OPENCODE_TOOL='git commit -am wip'
+cd repo
+exec opencode run -s ses_e29a40000ffeHandMadeImport --standalone 'commit it'
+stderr 'Error: Blocked by hopsesh'
+env XDG_DATA_HOME=$HOME/.hopsesh/accounts/opencode/work/data XDG_STATE_HOME=$HOME/.hopsesh/accounts/opencode/work/state OPENCODE_CONFIG_DIR=$HOME/.hopsesh/accounts/opencode/work/config
+exec opencode run -s $RETURN_ID --standalone 'commit it'
+stderr '^\$ git commit -am wip$'
+! stderr 'Blocked'
+cd $WORK
+env XDG_DATA_HOME= XDG_STATE_HOME= OPENCODE_CONFIG_DIR= FAKE_OPENCODE_TOOL=
+exec hopsesh pull opencode/$RETURN_ID --in claude --yes --json
+stdout '"kind": "continue"'
+# (Without the scan's notes, so the hook finds the lineage from the session id alone.)
+rm $HOME/hopsesh-state/movement
+env FAKE_OPENCODE_TOOL='git commit -am wip'
+env XDG_DATA_HOME=$HOME/.hopsesh/accounts/opencode/work/data XDG_STATE_HOME=$HOME/.hopsesh/accounts/opencode/work/state OPENCODE_CONFIG_DIR=$HOME/.hopsesh/accounts/opencode/work/config
+cd repo
+exec opencode run -s $RETURN_ID --standalone 'commit it'
+stderr 'Error: Blocked by hopsesh\. .*Claude Code'
+cd $WORK
+env XDG_DATA_HOME= XDG_STATE_HOME= OPENCODE_CONFIG_DIR= FAKE_OPENCODE_TOOL=
+
+# Nothing started, stopped or moved the default folder's service, which ran all along.
+exists $HOME/.local/state/opencode/fake-service
+! grep 'started the background service' $WORK/agents.log
+! grep 'stopped the background service' $WORK/agents.log
+
+-- fake-service --
+http://127.0.0.1:49374
+-- parent.json --
+{
+  "info": {
+    "id": "ses_e29a40000ffeHandMadeImport",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1794598000000,
+      "updated": 1794597704901
+    },
+    "title": "imported by hand",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65b0000001HandMadeMsg001",
+      "time": {
+        "created": 1794598001000
+      },
+      "text": "Check the repo and read main.go.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65b0000002HandMadeMsg002",
+      "time": {
+        "created": 1794598002000,
+        "completed": 1794598003000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "I will look at the repo first.",
+          "time": {
+            "created": 1794598002001,
+            "completed": 1794598002002
+          }
+        },
+        {
+          "type": "text",
+          "text": "Looking at the repo."
+        },
+        {
+          "type": "tool",
+          "id": "call_hand0001",
+          "name": "shell",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "git status --short"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": " M main.go\n"
+              }
+            ],
+            "metadata": {
+              "status": "completed",
+              "truncated": false,
+              "exit": 0
+            }
+          },
+          "time": {
+            "created": 1794598002100,
+            "ran": 1794598002101,
+            "completed": 1794598002200
+          }
+        },
+        {
+          "type": "tool",
+          "id": "call_hand0002",
+          "name": "read",
+          "executed": false,
+          "state": {
+            "status": "error",
+            "input": {
+              "path": "missing.go"
+            },
+            "error": {
+              "type": "unknown",
+              "message": "File not found: missing.go"
+            }
+          },
+          "time": {
+            "created": 1794598002300,
+            "ran": 1794598002301,
+            "completed": 1794598002400
+          }
+        }
+      ],
+      "finish": "tool-calls",
+      "cost": 0,
+      "tokens": {
+        "input": 10,
+        "output": 5,
+        "reasoning": 2,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65b0000003HandMadeMsg003",
+      "time": {
+        "created": 1794598004000,
+        "completed": 1794598005000
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "main.go is modified and missing.go does not exist."
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 12,
+        "output": 9,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65b0000004HandMadeMsg004",
+      "time": {
+        "created": 1794598005001
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}
+-- child.json --
+{
+  "info": {
+    "id": "ses_e29a3ffffffeHandMadeChild0",
+    "parentID": "ses_e29a40000ffeHandMadeImport",
+    "projectID": "e1eece87d8935f099635f505ed301e85a3e1ae27",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1794598006000,
+      "updated": 1794597705166
+    },
+    "title": "imported child",
+    "location": {
+      "directory": "/home/u/git/demo"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_1d65b0000005HandMadeMsg005",
+      "time": {
+        "created": 1794598006100
+      },
+      "text": "Reply pong.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_1d65b0000006HandMadeMsg006",
+      "time": {
+        "created": 1794598006200,
+        "completed": 1794598006300
+      },
+      "type": "assistant",
+      "agent": "general",
+      "model": {
+        "id": "Qwen3.8-Flash-Next-oQ4e-mtp",
+        "providerID": "omlx"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "pong"
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 3,
+        "output": 1,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_1d65b0000007HandMadeMsg007",
+      "time": {
+        "created": 1794598006301
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

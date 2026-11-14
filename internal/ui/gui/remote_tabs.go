@@ -111,13 +111,26 @@ func (a *App) NewSessionOn(machine string, id agent.ID, profile, dir string) (*O
 		core := a.snapshot()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		c, err := core.NewSessionCommand(ctx, id, profile, dir)
+		c, err := core.NewSessionCommand(ctx, id, profile, dir, a.takeRestart(app.LocalName(), newSessionKey(id, profile)))
 		if err != nil {
-			return nil, err
+			return nil, askRestart(err)
 		}
-		// The tab binds to the session the agent starts, as any session tab here does.
+		// The tab binds to the session the agent starts, as any session tab here does. An
+		// agent whose program depends on what runs here (agent.HostStarter) makes it again
+		// for "Run again" and "Open in my terminal", without the person's earlier yes.
+		var again func() (agent.Command, error)
+		if m, ok := core.Module(id); ok {
+			if _, ok := m.(agent.HostStarter); ok {
+				again = func() (agent.Command, error) {
+					ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+					defer cancel()
+					c, err := a.snapshot().NewSessionCommand(ctx, id, profile, dir, false)
+					return c, againRefused(err, "start it again from the Accounts screen, which asks")
+				}
+			}
+		}
 		return a.sessionTab(c, app.Launch{Kind: termapp.KindSession, Run: c, Labels: termapp.Labels{Title: "New " + name + " session", Agent: name, Machine: app.LocalName()}},
-			TabMeta{Kind: TabSession, Agent: name, Machine: app.LocalName()}, "New "+name+" session")
+			TabMeta{Kind: TabSession, Agent: name, Machine: app.LocalName()}, "New "+name+" session", again)
 	}
 	req := peer.TerminalRequest{Kind: peer.TerminalNew, Agent: id, Profile: profile, Dir: dir}
 	return a.remoteTab(machine, req, TabMeta{Kind: TabRemote, Agent: name, Machine: machine}, "New "+name+" session · "+machine)
@@ -179,5 +192,5 @@ func (a *App) attachTab(machine string, t peer.Terminal, meta TabMeta, title str
 	meta.Remote = t.ID
 	meta.Command = fmt.Sprintf("%s on %s", t.Title, machine)
 	meta.External, meta.Rerun = true, true
-	return a.sessionTab(c, app.Launch{Kind: termapp.KindSession, Run: c, Labels: termapp.Labels{Title: title, Agent: meta.Agent, Machine: machine}}, meta, title)
+	return a.sessionTab(c, app.Launch{Kind: termapp.KindSession, Run: c, Labels: termapp.Labels{Title: title, Agent: meta.Agent, Machine: machine}}, meta, title, nil)
 }

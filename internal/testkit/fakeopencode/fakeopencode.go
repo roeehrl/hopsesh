@@ -1,7 +1,8 @@
 // Package fakeopencode is the stand-in OpenCode 2.3.0 the tests (and the test bundle) run
 // in place of the real one. It keeps sessions in a SQLite database with OpenCode's own
 // schema, where OpenCode keeps it, and answers what hopsesh asks OpenCode: --version,
-// debug paths, service status, session list|export|import|delete, auth list and the HTTP
+// debug paths, service status, service get|set|unset port, session
+// list|export|import|delete, auth list and the HTTP
 // API calls hopsesh makes through `opencode api`, the way OpenCode 2.3.0 does
 // (agents/opencode/testdata/2.3.0 holds what the real one printed).
 //
@@ -10,7 +11,10 @@
 // OpenCode does for any command but `run`, `service`, `debug paths` and --version when no
 // --standalone is given; the stand-in then records the start in its state folder and in
 // $FAKE_AGENT_LOG ("opencode: started the background service"), so a test can check that
-// hopsesh never starts it.
+// hopsesh never starts it. A port `service set port` set (in {config}/service.json, as
+// OpenCode keeps it) is the started service's; setting or unsetting it stops the service
+// registered in the state folder, which the stand-in logs ("opencode: stopped the
+// background service").
 //
 // An import decodes the transfer with OpenCode's schemas (decode.go): a wrong shape is a
 // Bad Request, and members the schemas do not declare are dropped.
@@ -27,12 +31,14 @@
 package fakeopencode
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -130,6 +136,9 @@ func Main(p Proc) int {
 		if len(args) == 2 && args[1] == "status" {
 			fmt.Fprintln(p.Stdout, r.serviceStatus())
 			return 0
+		}
+		if len(args) >= 3 && slices.Contains([]string{"set", "unset", "get"}, args[1]) && args[2] == "port" {
+			return r.servicePortCmd(args[1], args[3:])
 		}
 		if len(args) >= 2 && slices.Contains([]string{"start", "stop", "restart", "set", "unset", "get"}, args[1]) {
 			return r.fail("the OpenCode stand-in does not play `opencode service %s`", args[1])
@@ -317,6 +326,76 @@ func (r *run) debugPaths(args []string) int {
 // serviceFile is where the stand-in keeps its make-believe service's address.
 func (r *run) serviceFile() string { return filepath.Join(r.paths().state, "fake-service") }
 
+// serviceConfig is the service's settings file, {config}/service.json, which `service set`
+// writes (OpenCode's service-config.ts): the stand-in plays its port only.
+func (r *run) serviceConfig() string { return filepath.Join(r.paths().config, "service.json") }
+
+// configuredPort is the port `service set port` set (0: OpenCode's default).
+func (r *run) configuredPort() int {
+	b, err := os.ReadFile(r.serviceConfig())
+	if err != nil {
+		return 0
+	}
+	var c struct {
+		Port int `json:"port"`
+	}
+	_ = json.Unmarshal(b, &c)
+	return c.Port
+}
+
+// servicePortCmd plays `service get|set|unset port`: get prints the port set, or an empty
+// line; set and unset stop the service registered in this state folder first (OpenCode
+// does, so the next start takes the new port), which the stand-in logs, then write the
+// settings file. None of them starts the service.
+func (r *run) servicePortCmd(verb string, rest []string) int {
+	if r.getenv("FAKE_OPENCODE_FAIL") == "service "+verb {
+		return r.fail("Error: the stand-in was told to fail `opencode service %s`", verb)
+	}
+	if verb == "get" {
+		if p := r.configuredPort(); p != 0 {
+			fmt.Fprintln(r.Stdout, p)
+		} else {
+			fmt.Fprintln(r.Stdout)
+		}
+		return 0
+	}
+	settings := map[string]any{}
+	if b, err := os.ReadFile(r.serviceConfig()); err == nil {
+		_ = json.Unmarshal(b, &settings)
+	}
+	switch verb {
+	case "set":
+		if len(rest) != 1 {
+			return r.fail("Usage: opencode service set port <value>")
+		}
+		port, err := strconv.Atoi(rest[0])
+		if err != nil || port < 1 || port > 65535 {
+			return r.fail("Error: Port must be between 1 and 65535")
+		}
+		settings["port"] = port
+	case "unset":
+		delete(settings, "port")
+	}
+	if r.serviceURL() != "" {
+		_ = os.Remove(r.serviceFile())
+		r.log("opencode: stopped the background service")
+	}
+	b, _ := json.MarshalIndent(settings, "", "  ")
+	_ = os.MkdirAll(filepath.Dir(r.serviceConfig()), 0o700)
+	if err := os.WriteFile(r.serviceConfig(), append(b, '\n'), 0o600); err != nil {
+		return r.fail("Error: %v", err)
+	}
+	return 0
+}
+
+// port is the port the background service listens on: the one set, else the default.
+func (r *run) port() int {
+	if p := r.configuredPort(); p != 0 {
+		return p
+	}
+	return servicePort
+}
+
 // serviceURL is the running service's address ("" when it is stopped).
 func (r *run) serviceURL() string {
 	switch v := r.getenv("FAKE_OPENCODE_SERVICE"); {
@@ -346,7 +425,7 @@ func (r *run) server() {
 	}
 	f := r.serviceFile()
 	_ = os.MkdirAll(filepath.Dir(f), 0o700)
-	_ = os.WriteFile(f, []byte(fmt.Sprintf("http://127.0.0.1:%d\n", servicePort)), 0o600)
+	_ = os.WriteFile(f, []byte(fmt.Sprintf("http://127.0.0.1:%d\n", r.port())), 0o600)
 	r.log("opencode: started the background service")
 }
 

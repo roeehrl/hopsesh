@@ -350,3 +350,30 @@ func TestPluginJS(t *testing.T) {
 	}
 	t.Logf("%s", out)
 }
+
+// A plugin installed before hopsesh registered the default folder names no profile; once
+// it is registered, that plugin is still the default folder's (its notice hook finds the
+// default folder by its root), and never an added folder's.
+func TestPluginOfTheDefaultFolderBeforeItWasRegistered(t *testing.T) {
+	h, in, _ := pluginInstall(t, "2.3.0")
+	pa := h.Path()
+	m := New()
+	d := m.MovementHooks(h, in, "/bin/hopsesh").Dir
+	if _, err := agent.InstallHookDir(osDirFS{}, pa, d); err != nil {
+		t.Fatal(err)
+	}
+	have, err := agent.ReadHookDir(osDirFS{}, pa, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := in
+	def.Profile = &agent.RuntimeProfile{ID: "registered", Default: true}
+	if !m.MovementHooks(h, def, "/bin/hopsesh").Dir.Has(have) {
+		t.Error("the default folder's plugin reads as missing once the folder is registered")
+	}
+	added := in
+	added.Profile = &agent.RuntimeProfile{ID: "work"}
+	if m.MovementHooks(h, added, "/bin/hopsesh").Dir.Has(have) {
+		t.Error("an added folder takes the default folder's plugin as its own")
+	}
+}

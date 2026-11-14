@@ -13,10 +13,13 @@ import (
 	"github.com/roeehrl/hopsesh/internal/ui/cli"
 )
 
-// The test binary is the stand-in claude when it runs under that name.
+// The test binary is the stand-in claude, or opencode, when it runs under that name.
 func TestMain(m *testing.M) {
-	if strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") == "claude" {
+	switch strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe") {
+	case "claude":
 		os.Exit(fakeagent.Claude())
+	case "opencode":
+		os.Exit(fakeagent.OpenCode())
 	}
 	if len(os.Args) > 1 && os.Args[1] == "terminal-step" {
 		// The line the window opens in a terminal for a hand-off's step.

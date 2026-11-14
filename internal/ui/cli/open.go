@@ -39,7 +39,12 @@ hopsesh cannot show is reported, and nothing is opened.
 
 On macOS, the first time hopsesh opens or shows a tab in iTerm2 or Terminal, macOS asks
 whether hopsesh may control that app. If you say no, hopsesh opens Terminal instead, or
-prints the command to copy.`,
+prints the command to copy.
+
+OpenCode's background service is shared by every OpenCode window and its desktop app.
+When it runs another version than every opencode program here, opening a session would
+restart it and stop any turn it is running: hopsesh asks first, and --restart-service
+agrees without asking.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error { return openSession(cmd, args[0]) },
 	}
@@ -47,6 +52,7 @@ prints the command to copy.`,
 	f.String("terminal", "", "the terminal app to open it in (see hopsesh terminals)")
 	f.Bool("app", false, "open this exact conversation in its installed desktop app")
 	f.Bool("here", false, "run it in this terminal instead")
+	f.Bool("restart-service", false, "agree to restart the agent's background service when no program of its version is here (OpenCode; other windows' turns stop)")
 	f.Bool("json", false, "output JSON")
 	return cmd
 }
@@ -100,7 +106,10 @@ func openSession(cmd *cobra.Command, refArg string) error {
 		}
 		return errors.New(msg)
 	}
-	c, err := r.app.Resume(inv, e, agent.ResumeOptions{App: inApp})
+	restart, _ := cmd.Flags().GetBool("restart-service")
+	c, err := r.resumeAsking(e.Session.Title, restart, func(restart bool) (agent.Command, error) {
+		return r.app.Resume(inv, e, agent.ResumeOptions{App: inApp, RestartService: restart})
+	})
 	if err != nil {
 		return err
 	}
@@ -249,4 +258,25 @@ Python API, install its Claude Code integration, or write profiles.`,
 	f.Bool("json", false, "output JSON")
 	cmd.AddCommand(terminalAttachCmd(), terminalRunCmd())
 	return cmd
+}
+
+// resumeAsking resumes (resume) a session titled title; when that would restart the
+// agent's background service, which other windows share (decision D2), it asks first on
+// a terminal and resumes again once the person agrees. restart: they agreed already
+// (--restart-service). --yes does not answer this one; elsewhere it says how to agree.
+func (r *run) resumeAsking(title string, restart bool, resume func(restart bool) (agent.Command, error)) (agent.Command, error) {
+	c, err := resume(restart)
+	if !errors.Is(err, agent.ErrRestartsService) || restart {
+		return c, err
+	}
+	if !r.interactive() || r.jsonOut {
+		return c, fmt.Errorf("%w\nTo restart it and open the session, run again with --restart-service", err)
+	}
+	r.printf("%v\n", err)
+	r.printf("Restart it and open %q? [y/N] ", title)
+	line, _ := bufio.NewReader(r.in).ReadString('\n')
+	if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+		return c, errors.New("nothing was opened")
+	}
+	return resume(true)
 }

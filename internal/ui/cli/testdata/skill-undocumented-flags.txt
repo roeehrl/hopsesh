@@ -42,6 +42,7 @@ hopsesh notices status --profile  # hook plumbing
 hopsesh notices status --state-dir  # hook plumbing
 hopsesh open --app  # agents never open sessions (rule 3)
 hopsesh open --here  # agents never open sessions (rule 3)
+hopsesh open --restart-service  # agents never open sessions (rule 3), and only the person agrees to restart a shared service
 hopsesh open --terminal  # agents never open sessions (rule 3)
 hopsesh plan --app  # opening is the user's (rule 3)
 hopsesh plan --append  # cloud return into an earlier copy; offered by the plan's own blockers

@@ -46,6 +46,7 @@ var (
 	_ agent.SanitizedProjection  = (*Module)(nil)
 	_ agent.SessionWatchProvider = (*Module)(nil)
 	_ agent.HostResumer          = (*Module)(nil)
+	_ agent.HostStarter          = (*Module)(nil)
 	_ agent.VendorInstaller      = (*Module)(nil)
 	_ agent.SessionStore         = (*Module)(nil)
 	_ agent.DirChanger           = (*Module)(nil)
@@ -284,7 +285,8 @@ func resumeCommand(in agent.Install, program string, key agent.SessionKey, p age
 
 // ResumeOn is Resume after checking the machine: the session must be there (OpenCode's
 // -s makes an empty session for an id it does not have), and the program must be of the
-// running background service's version, or the TUI would restart the service (D2).
+// running background service's version, or the TUI would restart the service (D2):
+// that is agent.ErrRestartsService, unless the person agreed (o.RestartService).
 func (m *Module) ResumeOn(ctx context.Context, h agent.Host, in agent.Install, key agent.SessionKey, p agent.Placement, o agent.ResumeOptions) (agent.Command, error) {
 	if _, err := m.SessionStamp(ctx, h, in, key.Session); err != nil {
 		if errors.Is(err, agent.ErrNotFound) {
@@ -292,11 +294,25 @@ func (m *Module) ResumeOn(ctx context.Context, h agent.Host, in agent.Install, k
 		}
 		return agent.Command{}, err
 	}
-	program, err := resumeProgram(ctx, h, in, probeService(ctx, h))
+	program, err := resumeProgram(ctx, h, in, probeService(ctx, h), o.RestartService)
 	if err != nil {
 		return agent.Command{}, err
 	}
 	return resumeCommand(in, program, key, p, o), nil
+}
+
+// StartProgram is the program a new session runs: as for a resume, one of the running
+// background service's version (the TUI would restart it otherwise, D2), unless the
+// person agreed (restart). The PATH opencode is in.Binary.
+func (m *Module) StartProgram(ctx context.Context, h agent.Host, in agent.Install, restart bool) (string, error) {
+	program, err := resumeProgram(ctx, h, in, probeService(ctx, h), restart)
+	if err != nil {
+		return "", err
+	}
+	if program == binName && in.Binary != "" {
+		program = in.Binary
+	}
+	return program, nil
 }
 
 // SessionWatchPaths are the database Detect chose and its WAL (every change lands there)

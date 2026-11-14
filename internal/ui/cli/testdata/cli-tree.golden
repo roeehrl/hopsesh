@@ -138,6 +138,7 @@ hopsesh open
   --app
   --here
   --json
+  --restart-service
   --terminal string
 hopsesh plan
   --app

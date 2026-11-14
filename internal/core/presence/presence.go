@@ -71,7 +71,7 @@ const maxDepth = 64
 
 // Classify walks up from pid's parent to the first ancestor it knows: hopsesh itself
 // (self, or any process named like hopsesh's app), iTerm2, Terminal, tmux, an ssh login,
-// an editor, Windows Terminal, the Claude app or the Codex app. The nearest one wins (a
+// an editor, Windows Terminal, or an agent's desktop app (Claude, Codex, OpenCode). The nearest one wins (a
 // session in tmux inside iTerm2 is tmux's). The walk is bounded and safe against cycles
 // (Windows keeps a parent's pid after the parent exits, and it can be reused). Nothing
 // known gives KindUnknown.
@@ -167,6 +167,11 @@ var unixNames = []rule{
 	{name: "Codex Helper", prefix: true, kind: KindApp("codex"), app: "Codex"},
 	{name: "Codex (", prefix: true, kind: KindApp("codex"), app: "Codex"}, // Codex (Service), Codex (Renderer)
 	{name: "ChatGPT", kind: KindApp("codex"), app: "ChatGPT"},             // the ChatGPT app runs Codex
+	// OpenCode desktop (Electron). Its command-line tools are "opencode" and the
+	// "opencode-cli" it stages, whose `serve --service` is the background service every
+	// window shares: a server, never where a session is shown, so not a host.
+	{name: "OpenCode", kind: KindApp("opencode"), app: "OpenCode"},
+	{name: "OpenCode Helper", prefix: true, kind: KindApp("opencode"), app: "OpenCode"},
 	// Editors: the macOS app and its helpers, then the Linux program.
 	{name: "Code", kind: KindIDE, app: "VS Code"},
 	{name: "Code Helper", prefix: true, kind: KindIDE, app: "VS Code"},
@@ -196,8 +201,9 @@ var unixNames = []rule{
 }
 
 // windowsNames are Windows program names without ".exe", lower case (Windows names match
-// case-insensitively). The Claude and Codex apps are left out: their programs are named
-// like the command-line tools (claude.exe, codex.exe), so a name cannot tell them apart;
+// case-insensitively). The Claude, Codex and OpenCode apps are left out: their programs are
+// named like the command-line tools (claude.exe, codex.exe, opencode.exe), so a name
+// cannot tell them apart;
 // LiveInfo.App says when the Claude app runs a session. The ChatGPT app, which runs Codex,
 // is known.
 var windowsNames = []rule{

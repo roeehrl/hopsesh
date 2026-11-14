@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -385,5 +386,43 @@ func TestPlacedFilesOnly(t *testing.T) {
 	pb, err := m.Bundle(ctx, ph, in, s)
 	if err != nil || len(pb.Files) != 2 || pb.Files[0].Virtual || pb.Files[1].Rel != b.Files[1].Rel {
 		t.Fatalf("placed bundle %+v %v", pb, err)
+	}
+}
+
+// A plan's capacity holds at its apply when nothing that sets the window changed: an
+// OpenCode server refreshing the catalog (a private one runs for the account check in
+// between) keeps it, and a folder whose database appears in between (a new account
+// folder's, made by that check) gives the same fallback as no database.
+func TestCapacityStableAcrossCatalogRefresh(t *testing.T) {
+	fh, _ := newMachine(t, setup{synthetic: true})
+	m, h, in := open(t, fh)
+	s := &agent.Summary{Key: sessionKey(in, sesMixed)}
+	before, err := m.ContextCapacity(ctx, h, in, s)
+	if err != nil || before.ConfigHash == "" {
+		t.Fatalf("%+v %v", before, err)
+	}
+	if err := fh.ExecSQL(dbPath, `UPDATE kv SET value = json_set(value, '$.digest', 'refreshed') WHERE key = 'models-dev:v2:catalog'`); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := m.ContextCapacity(ctx, h, in, s); err != nil || after != before {
+		t.Errorf("a refreshed catalog changed the capacity: %+v, then %+v (%v)", before, after, err)
+	}
+	// Another window for the model is another capacity.
+	if err := fh.ExecSQL(dbPath, fmt.Sprintf(`UPDATE kv SET value = replace(value, ':%d', ':%d') WHERE key = 'models-dev:v2:catalog'`, before.Window, before.Window+1)); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := m.ContextCapacity(ctx, h, in, s); err != nil || after.Window != before.Window+1 || after.ConfigHash == before.ConfigHash {
+		t.Errorf("a new window kept the hash: %+v, then %+v (%v)", before, after, err)
+	}
+
+	empty, _ := newMachine(t, setup{noDB: true})
+	m, h, in = open(t, empty)
+	none, err := m.ContextCapacity(ctx, h, in, nil)
+	if err != nil || none.ConfigHash != "" {
+		t.Fatalf("the fallback window: %+v %v", none, err)
+	}
+	empty.LoadSQL(t, dbPath, filepath.Join(fixture, "schema.sql"))
+	if made, err := m.ContextCapacity(ctx, h, in, nil); err != nil || made != none {
+		t.Errorf("a new database changed a new session's capacity: %+v, then %+v (%v)", none, made, err)
 	}
 }

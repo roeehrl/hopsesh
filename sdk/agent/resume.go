@@ -11,3 +11,12 @@ import "context"
 type HostResumer interface {
 	ResumeOn(ctx context.Context, h Host, in Install, key SessionKey, p Placement, o ResumeOptions) (Command, error)
 }
+
+// HostStarter picks the program a new session runs, for an agent whose program depends
+// on the machine as it is now (OpenCode's TUI restarts its running background service
+// when it is of another version). Without restart (the person agreed) a start that would
+// restart the service is ErrRestartsService. The core uses it, when a module has it, for
+// a new session on this machine; otherwise the program Detect found runs.
+type HostStarter interface {
+	StartProgram(ctx context.Context, h Host, in Install, restart bool) (string, error)
+}

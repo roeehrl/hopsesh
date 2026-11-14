@@ -199,3 +199,24 @@ func TestFolderName(t *testing.T) {
 		t.Errorf("a folder named after its agent: %q", got)
 	}
 }
+
+// Two folders added at once may be given one service port: the second to register is
+// refused. A port is the machine's: another machine's folder may have it.
+func TestRegisterRefusesAPortGivenMeanwhile(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.Register(agent.RuntimeProfile{Endpoint: "e", Agent: "opencode", Name: "Work", Root: "/h/work", Port: 49375}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Register(agent.RuntimeProfile{Endpoint: "e", Agent: "opencode", Name: "Home", Root: "/h/home", Port: 49375}); err == nil {
+		t.Fatal("one port given twice")
+	}
+	for _, p := range []agent.RuntimeProfile{
+		{Endpoint: "other", Agent: "opencode", Name: "Home", Root: "/h/home", Port: 49375},
+		{Endpoint: "e", Agent: "opencode", Name: "Home", Root: "/h/home", Port: 49376},
+		{Endpoint: "e", Agent: "claude", Name: "Claude", Root: "/h/claude"},
+	} {
+		if _, err := s.Register(p); err != nil {
+			t.Errorf("%s on %s: %v", p.Name, p.Endpoint, err)
+		}
+	}
+}

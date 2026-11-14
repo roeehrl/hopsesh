@@ -203,7 +203,7 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 		}
 		cmd, err := a.Resume(inv, e, agent.ResumeOptions{})
 		if err != nil {
-			return t, err
+			return t, remoteRestart(err)
 		}
 		if err := release(); err != nil {
 			return t, err
@@ -216,9 +216,9 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 		}
 		c, t.Title = cmd, "Sign in · "+mod.Spec().Name
 	case peer.TerminalNew:
-		cmd, err := a.NewSessionCommand(ctx, req.Agent, req.Profile, req.Dir)
+		cmd, err := a.NewSessionCommand(ctx, req.Agent, req.Profile, req.Dir, false)
 		if err != nil {
-			return t, err
+			return t, remoteRestart(err)
 		}
 		c, t.Title, t.Dir = cmd, "New "+mod.Spec().Name+" session", cmd.Dir
 	default:
@@ -242,9 +242,20 @@ func (a *App) OpenTerminal(ctx context.Context, req peer.TerminalRequest) (peer.
 	return t, nil
 }
 
+// remoteRestart says how to agree to restart the agent's background service (decision
+// D2) when the request came from another machine, which cannot ask yet.
+func remoteRestart(err error) error {
+	if errors.Is(err, agent.ErrRestartsService) {
+		return fmt.Errorf("%w. hopsesh cannot ask about it from another machine: on %s, open the session with hopsesh open --restart-service, or run the agent yourself there", err, LocalName())
+	}
+	return err
+}
+
 // NewSessionCommand starts a new session of an agent in dir, signed in as the account of
-// the folder profile ("" its default folder).
-func (a *App) NewSessionCommand(ctx context.Context, id agent.ID, profile, dir string) (agent.Command, error) {
+// the folder profile ("" its default folder). restart: the person agreed to restart the
+// agent's background service when no program of its version is here (decision D2);
+// without it such a start is agent.ErrRestartsService.
+func (a *App) NewSessionCommand(ctx context.Context, id agent.ID, profile, dir string, restart bool) (agent.Command, error) {
 	mod, ok := a.Module(id)
 	if !ok {
 		return agent.Command{}, fmt.Errorf("%s is not enabled", id)
@@ -268,21 +279,42 @@ func (a *App) NewSessionCommand(ctx context.Context, id agent.ID, profile, dir s
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return agent.Command{}, fmt.Errorf("no folder %s on %s", dir, LocalName())
 	}
+	target := in
+	if profile != "" {
+		installs, err := a.profileInstalls(ctx, m, mod, in, false, true)
+		if err != nil {
+			return agent.Command{}, err
+		}
+		found := false
+		for _, p := range installs {
+			if p.ProfileID() == profile {
+				p.Accounts = mod.Spec().Accounts
+				target, found = p, true
+				break
+			}
+		}
+		if !found {
+			return agent.Command{}, fmt.Errorf("no account folder %s on %s", profile, LocalName())
+		}
+	}
 	c := agent.Command{Argv: []string{in.Binary}, Dir: dir}
+	if st, ok := mod.(agent.HostStarter); ok {
+		// The program depends on what runs here now (OpenCode's must be of its running
+		// service's version), asked with the folder's variables.
+		th, err := m.For(ctx, mod.Spec(), target, nil)
+		if err != nil {
+			return agent.Command{}, err
+		}
+		program, err := st.StartProgram(ctx, th, target, restart)
+		if err != nil {
+			return agent.Command{}, err
+		}
+		c.Argv = []string{program}
+	}
 	if profile == "" {
 		return c, nil
 	}
-	installs, err := a.profileInstalls(ctx, m, mod, in, false, true)
-	if err != nil {
-		return agent.Command{}, err
-	}
-	for _, p := range installs {
-		if p.ProfileID() == profile {
-			p.Accounts = mod.Spec().Accounts
-			return p.ScopeCommand(c), nil
-		}
-	}
-	return agent.Command{}, fmt.Errorf("no account folder %s on %s", profile, LocalName())
+	return target.ScopeCommand(c), nil
 }
 
 // CloseTerminal ends one of hopsesh serve's terminals.

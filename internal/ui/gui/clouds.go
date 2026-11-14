@@ -438,7 +438,7 @@ func (a *App) OpenBrought(journal, where string) (*OpenedDTO, error) {
 	case WhereTerminal:
 		return &OpenedDTO{Where: WhereTerminal}, a.openLaunch(l)
 	}
-	return a.sessionTab(b.Run, l, TabMeta{Kind: TabSession, Agent: b.Agent, Machine: app.LocalName(), Key: key}, b.Title)
+	return a.sessionTab(b.Run, l, TabMeta{Kind: TabSession, Agent: b.Agent, Machine: app.LocalName(), Key: key}, b.Title, a.resumeAgain(l.Key.Agent, app.LocalName(), key))
 }
 
 // cloudPage reports whether url is a page hopsesh may open for a cloud: a session's page
