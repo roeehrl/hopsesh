@@ -33,12 +33,15 @@ func (*Module) Spec() agent.Spec {
 		Binaries:  []agent.Binary{{Name: "third", VersionArgs: []string{"--version"}}},
 		Roots: []agent.Root{
 			{Name: "data", Env: []string{"THIRD_DATA_DIR"}, Default: map[string]string{"*": "~/.local/share/third"}},
-			{Name: "config", Env: []string{"THIRD_CONFIG_DIR"}, Default: map[string]string{"*": "~/.config/third", "windows": "~/AppData/Roaming/third"}},
+			// Set as is by THIRD_CONFIG_DIR, else inside XDG_CONFIG_HOME.
+			{Name: "config", Env: []string{"THIRD_CONFIG_DIR"}, EnvSub: []agent.EnvSub{{Env: "XDG_CONFIG_HOME", Sub: "third"}},
+				Default: map[string]string{"*": "~/.config/third", "windows": "~/AppData/Roaming/third"}},
 			{Name: "state", Default: map[string]string{"*": "{data}/state"}},
 		},
-		// Inherit carries a setting that is not the sign-in, so InheritsSignIn stays off.
-		Accounts: &agent.ProfileSpec{RootEnv: []string{"THIRD_DATA_DIR"}, Login: []string{"login"},
-			Inherit: map[string][]string{"config.toml": {"theme"}}},
+		// An account folder holds the data root and, inside it, the config root. Inherit
+		// carries settings that are not the sign-in, so InheritsSignIn stays off.
+		Accounts: &agent.ProfileSpec{RootEnv: []string{"THIRD_DATA_DIR"}, RootVars: []agent.ProfileVar{{Env: "THIRD_CONFIG_DIR", Sub: "config"}},
+			Login: []string{"login"}, Inherit: map[string][]string{"config.toml": {"theme"}, "{config}/settings.json": {"theme", "tui.scroll"}}},
 		Desktop: &agent.Desktop{Tool: "Third desktop", Product: "Third"},
 		Plans:   "Third",
 	}

@@ -12,6 +12,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -123,6 +124,18 @@ type Spec struct {
 	// terminal tabs, on top of the user's: settings that suit that terminal
 	// (CLAUDE_CODE_FORCE_SYNC_OUTPUT=1). Never a credential; not used in other terminals.
 	TerminalEnv []string
+	// SQLTables are the database tables the module may read through the Host's SQL
+	// (SQLHost), for an agent that keeps sessions in SQLite. Every other table is refused.
+	SQLTables []string
+	// SQLFiles are the database files SQL may open: paths or patterns (* ? [) with {root}
+	// and ~ as Secrets have ("{data}/opencode*.db", "{db}" for an Install root that a
+	// variable sets). A pattern whose root the install lacks matches nothing. Each file,
+	// with its -wal, -shm and -journal companions, is a Secret too: no file read, copy or
+	// package reaches it.
+	SQLFiles []string
+	// SQLDenied are tables that are never read, even through a view, and whose name
+	// refuses any query that mentions it (credentials, accounts).
+	SQLDenied []string
 }
 
 // Desktop is an agent's desktop app as the user interfaces show it.
@@ -182,14 +195,32 @@ type Binary struct {
 type Root struct {
 	Name string   // "home"
 	Env  []string // overriding variables, first set wins: ["CLAUDE_CONFIG_DIR"]
+	// EnvSub are variables that set the root as a folder inside their value, tried after
+	// Env, first set wins: {XDG_DATA_HOME, "opencode"} is $XDG_DATA_HOME/opencode.
+	EnvSub []EnvSub
 	// Default is the folder when no variable is set, by GOOS ("*" for all); "~" is the home
 	// folder, "{name}" another root.
 	Default map[string]string
 }
 
-// Vars are the environment variables that can set the root. Code that keys on or
-// resolves a root's environment goes through Vars and Locate, never Env itself.
-func (r Root) Vars() []string { return r.Env }
+// EnvSub is a variable that names a folder the root is inside (XDG base directories).
+type EnvSub struct {
+	Env string `json:"env"` // "XDG_DATA_HOME"
+	Sub string `json:"sub"` // "opencode", slash-separated
+}
+
+// Vars are the environment variables that can set the root, in the order Locate tries
+// them. Code that keys on or resolves a root's environment goes through Vars and Locate,
+// never Env or EnvSub themselves.
+func (r Root) Vars() []string {
+	out := append([]string(nil), r.Env...)
+	for _, e := range r.EnvSub {
+		if !slices.Contains(out, e.Env) {
+			out = append(out, e.Env)
+		}
+	}
+	return out
+}
 
 // DefaultFor is the root's folder on goos when no variable sets it ("~/.claude").
 func (r Root) DefaultFor(goos string) string {
@@ -199,12 +230,18 @@ func (r Root) DefaultFor(goos string) string {
 	return r.Default["*"]
 }
 
-// Locate is the root's folder on a machine, before Expand: its first set variable, else
-// its default for goos. getenv reads that machine's environment.
+// Locate is the root's folder on a machine, before Expand: its first set Env variable,
+// else the first set EnvSub variable with its subfolder, else its default for goos.
+// getenv reads that machine's environment.
 func (r Root) Locate(goos string, getenv func(string) string) string {
 	for _, e := range r.Env {
 		if v := getenv(e); v != "" {
 			return v
+		}
+	}
+	for _, e := range r.EnvSub {
+		if v := getenv(e.Env); v != "" {
+			return PathFor(goos).Join(v, e.Sub)
 		}
 	}
 	return r.DefaultFor(goos)
@@ -218,10 +255,23 @@ func (s Spec) MainRoot() Root {
 	return s.Roots[0]
 }
 
-// PinMain returns in with its main root at path and no other root: an account folder,
-// before Detect resolves the other roots against the pinned environment.
+// PinMain returns in with its main root set from the account folder path and no other
+// root, before Detect resolves the other roots against the pinned environment. For an
+// added account (in.Profile set, not the default) of an agent whose account folders hold
+// its roots (ProfileSpec.RootVars), the main root is inside path (ProfileLocate); else it
+// is path itself. Set in.Profile first.
 func (s Spec) PinMain(in Install, path string) Install {
 	in.MainRoot = s.MainRoot().Name
+	if in.Profile != nil && !in.Profile.Default && s.Accounts != nil && len(s.Accounts.RootVars) > 0 {
+		goos := in.OS
+		if goos == "" && (WindowsPath{}).IsAbs(path) {
+			goos = "windows"
+		}
+		// Only the account folder's own variables: a root they do not set is not in it.
+		if main := s.ProfileLocate(in.MainRoot, path, goos, func(string) string { return "" }); PathFor(goos).IsAbs(main) {
+			path = main
+		}
+	}
 	in.Roots = map[string]string{in.MainRoot: path}
 	return in
 }

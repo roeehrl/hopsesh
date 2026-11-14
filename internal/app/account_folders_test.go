@@ -10,6 +10,8 @@ import (
 
 	"github.com/roeehrl/hopsesh/internal/agents/all"
 	"github.com/roeehrl/hopsesh/internal/config"
+	"github.com/roeehrl/hopsesh/internal/testkit/thirdagent"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 func accountsApp(t *testing.T) (*App, string) {
@@ -125,5 +127,53 @@ func TestOldAccountFoldersMoveOutOfTheStateFolder(t *testing.T) {
 	}
 	if left, _ := a.FoldersToMove(); len(left) != 0 {
 		t.Fatalf("left: %+v", left)
+	}
+}
+
+// An agent with several roots gets each pinned in its account command, and a new folder
+// copies only the listed settings, never a credential.
+func TestAccountFolderOfMultiRootAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no account commands on Windows")
+	}
+	home := t.TempDir()
+	root := filepath.Join(home, "accounts", "third", "work")
+	if _, err := addShellCommand(home, "third-work", thirdagent.New(), root); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(filepath.Join(home, ".local", "bin", "third-work"))
+	for _, want := range []string{"export THIRD_DATA_DIR='" + root + "'", "export THIRD_CONFIG_DIR='" + filepath.Join(root, "config") + "'"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("the command lacks %s:\n%s", want, b)
+		}
+	}
+	// The default folders: the data root, and the config root elsewhere. A JSONC
+	// settings file in the config root lands in the new folder's config root.
+	from, fromConfig := filepath.Join(home, "default"), filepath.Join(home, ".config", "third")
+	os.MkdirAll(from, 0o700)
+	os.MkdirAll(fromConfig, 0o700)
+	os.WriteFile(filepath.Join(fromConfig, "settings.json"), []byte(`{
+  // the user's theme
+  "theme": "dark", /* kept */
+  "tui": {"scroll": 3, "token": "x", "server": "https://u:p@h"},
+  "apiKey": "sk-x",
+}`), 0o600)
+	os.WriteFile(filepath.Join(from, "config.toml"), []byte("theme = \"light\"\nkey = \"x\"\n"), 0o600)
+	os.MkdirAll(root, 0o700)
+	spec := thirdagent.New().Spec()
+	base := agent.Install{Agent: spec.ID, MainRoot: "data", Roots: map[string]string{"data": from, "config": fromConfig}}
+	if err := inherit(base, spec, root); err != nil {
+		t.Fatal(err)
+	}
+	js, _ := os.ReadFile(filepath.Join(root, "config", "settings.json"))
+	if !strings.Contains(string(js), `"theme": "dark"`) || !strings.Contains(string(js), `"scroll": 3`) || strings.Contains(string(js), "sk-x") || strings.Contains(string(js), "token") || strings.Contains(string(js), "u:p") {
+		t.Fatalf("settings.json: %s", js)
+	}
+	if _, err := os.Stat(filepath.Join(root, "settings.json")); err == nil {
+		t.Fatal("a config-root file landed in the data root")
+	}
+	toml, _ := os.ReadFile(filepath.Join(root, "config.toml"))
+	if !strings.Contains(string(toml), "light") || strings.Contains(string(toml), "key") {
+		t.Fatalf("config.toml: %s", toml)
 	}
 }

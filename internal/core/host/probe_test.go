@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,5 +80,18 @@ func TestUnsetting(t *testing.T) {
 	out := string(r.Stdout)
 	if strings.Contains(out, "set") && !strings.Contains(out, "unset") || runtime.GOOS != "windows" && !strings.Contains(out, "marker=unset") {
 		t.Fatalf("the variable reached the program: %q", out)
+	}
+}
+
+// A root set inside an XDG folder is read from that variable too, after its own.
+func TestSpecEnvIncludesEnvSub(t *testing.T) {
+	s := agent.Spec{Roots: []agent.Root{
+		{Name: "data", EnvSub: []agent.EnvSub{{Env: "XDG_DATA_HOME", Sub: "x"}}},
+		{Name: "config", Env: []string{"X_CONFIG"}, EnvSub: []agent.EnvSub{{Env: "XDG_CONFIG_HOME", Sub: "x"}}},
+	}, LoginEnv: []string{"XDG_DATA_HOME", "X_DB"}}
+	got := SpecEnv(s)
+	want := []string{"XDG_DATA_HOME", "X_CONFIG", "XDG_CONFIG_HOME", "X_DB"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("SpecEnv = %v, want %v", got, want)
 	}
 }

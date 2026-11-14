@@ -1,0 +1,23 @@
+# Queries CheckSQLQuery passes for the tables session_v2, session_message, session_part,
+# project and kv (credential, account and control_account denied), one per line. The
+# agenttest FakeHost runs each one too, so the text check and the authorizer agree.
+SELECT id, title FROM session_v2 WHERE parent_id IS NULL ORDER BY time_updated DESC
+select s.id, m.data from SESSION_V2 s join session_message m on m.session_id = s.id where s.id = ?
+SELECT s.id, (SELECT count(*) FROM session_message m WHERE m.session_id = s.id) FROM session_v2 AS s
+SELECT session_v2.id, project.id AS project FROM session_v2, project WHERE session_v2.project_id = project.id
+SELECT * FROM main.session_v2 LEFT OUTER JOIN project p USING (id)
+WITH recent(id) AS (SELECT id FROM session_v2 LIMIT 5) SELECT recent.id, session_part.id AS part FROM recent JOIN session_part ON session_part.session_id = recent.id
+WITH a AS (SELECT id FROM b), b AS (SELECT id FROM session_v2) SELECT * FROM a
+WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM n WHERE x < 3) SELECT x FROM n
+SELECT value FROM kv WHERE key LIKE 'models-dev:%' -- the catalog
+SELECT j.value FROM session_message, json_each(session_message.data) AS j
+SELECT t.key FROM session_message m, json_tree(m.data) t WHERE t.type = 'text'
+SELECT replace(title, 'a', 'b') FROM session_v2;
+SELECT * FROM (SELECT id FROM session_v2) x
+SELECT session_v2.id FROM (session_v2 JOIN project ON 1)
+SELECT a IS NOT DISTINCT FROM b FROM session_v2
+SELECT 'credential is a word in a string' FROM session_v2
+SELECT id FROM session_v2 WHERE title IN ('(', ')', 'job') AND id NOT IN (SELECT session_id FROM session_part)
+SELECT id FROM session_v2 WHERE id IN project
+VALUES (1), (2)
+SELECT "title" FROM "session_v2" /* quoted */

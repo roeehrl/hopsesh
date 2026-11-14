@@ -2,6 +2,7 @@ package agent
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -105,5 +106,147 @@ func TestWindowsNativeDefaultDropsCaseAliasedOverrides(t *testing.T) {
 	in.Profile.Root = `c:\Users\alice\.claude`
 	if len(in.ProfileEnv()) != 1 {
 		t.Fatal("case-aliased root bypassed exact metadata match")
+	}
+}
+
+// An agent with several roots pins each to a folder inside the account folder, and a
+// command for it cannot reach another folder through any of them.
+func TestMultiVariableProfile(t *testing.T) {
+	spec := &ProfileSpec{RootVars: []ProfileVar{{Env: "XDG_DATA_HOME", Sub: "data"}, {Env: "XDG_STATE_HOME", Sub: "state"}, {Env: "OPENCODE_CONFIG_DIR", Sub: "config"}},
+		Unset: []string{"OPENCODE_PASSWORD"}}
+	if got := spec.Vars(); !slices.Equal(got, []string{"XDG_DATA_HOME", "XDG_STATE_HOME", "OPENCODE_CONFIG_DIR"}) {
+		t.Fatalf("Vars = %v", got)
+	}
+	in := Install{Agent: "opencode", Binary: "/bin/opencode", Accounts: spec, Profile: &RuntimeProfile{ID: "work", Root: "/home/u/accounts/opencode/work"}}
+	want := []string{"XDG_DATA_HOME=/home/u/accounts/opencode/work/data", "XDG_STATE_HOME=/home/u/accounts/opencode/work/state", "OPENCODE_CONFIG_DIR=/home/u/accounts/opencode/work/config"}
+	if got := in.ProfileEnv(); !slices.Equal(got, want) {
+		t.Fatalf("ProfileEnv = %v", got)
+	}
+	c := in.ScopeCommand(Command{Argv: []string{"opencode", "-s", "ses_1"}, Env: []string{"XDG_DATA_HOME=/elsewhere", "OPENCODE_CONFIG_DIR=/elsewhere", "OPENCODE_PASSWORD=x", "TERM=xterm"}})
+	if !slices.Equal(c.Env, append([]string{"TERM=xterm"}, want...)) || c.Argv[0] != "/bin/opencode" {
+		t.Fatalf("command %+v", c)
+	}
+	for _, v := range []string{"XDG_DATA_HOME", "XDG_STATE_HOME", "OPENCODE_CONFIG_DIR", "OPENCODE_PASSWORD"} {
+		if !slices.Contains(c.Unset, v) {
+			t.Errorf("%s is not unset first", v)
+		}
+	}
+	// A Windows account folder joins with its own separators, even before Detect sets OS.
+	win := Install{Accounts: spec, Profile: &RuntimeProfile{Root: `C:\Users\u\accounts\work`}}
+	if got := win.ProfileEnv()[0]; got != `XDG_DATA_HOME=C:\Users\u\accounts\work\data` {
+		t.Fatalf("Windows ProfileEnv = %q", got)
+	}
+	// RootEnv and RootVars together: the folder itself and folders inside it.
+	both := &ProfileSpec{RootEnv: []string{"X_HOME"}, RootVars: []ProfileVar{{Env: "X_HOME"}, {Env: "X_CACHE", Sub: "cache"}}}
+	if got := both.Vars(); !slices.Equal(got, []string{"X_HOME", "X_CACHE"}) {
+		t.Fatalf("Vars = %v", got)
+	}
+	if got := both.EnvFor("/p", PosixPath{}); !slices.Equal(got, []string{"X_HOME=/p", "X_HOME=/p", "X_CACHE=/p/cache"}) {
+		t.Fatalf("EnvFor = %v", got)
+	}
+	var none *ProfileSpec
+	if none.Vars() != nil || none.EnvFor("/p", PosixPath{}) != nil {
+		t.Fatal("no accounts, no variables")
+	}
+}
+
+// The default account of an agent with several roots is its own folders: its Root is the
+// main root, so the variables that would point inside an account folder are not set, and
+// the machine's own ones stay. RootEnv, naming the main root itself, is still pinned.
+func TestDefaultProfileOfSeveralRoots(t *testing.T) {
+	spec := &ProfileSpec{RootVars: []ProfileVar{{Env: "XDG_DATA_HOME", Sub: "data"}, {Env: "OPENCODE_CONFIG_DIR", Sub: "config"}}, Unset: []string{"OPENCODE_PASSWORD"}}
+	in := Install{Agent: "opencode", Accounts: spec, Profile: &RuntimeProfile{ID: "default", Default: true, Root: "/home/u/.local/share/opencode"}}
+	if got := in.ProfileEnv(); len(got) != 0 {
+		t.Fatalf("the default account pins %v", got)
+	}
+	c := in.ScopeCommand(Command{Argv: []string{"opencode"}, Env: []string{"XDG_DATA_HOME=/elsewhere", "OPENCODE_PASSWORD=x", "TERM=xterm"}})
+	if !slices.Equal(c.Env, []string{"TERM=xterm"}) {
+		t.Fatalf("a caller's variables reached the default account: %v", c.Env)
+	}
+	if slices.Contains(c.Unset, "XDG_DATA_HOME") || !slices.Contains(c.Unset, "OPENCODE_PASSWORD") {
+		t.Fatalf("unset %v: the machine's XDG_DATA_HOME found the default folders and stays", c.Unset)
+	}
+	// An added account is pinned as before.
+	work := Install{Agent: "opencode", Accounts: spec, Profile: &RuntimeProfile{ID: "work", Root: "/home/u/accounts/opencode/work"}}
+	if got := work.ProfileEnv(); len(got) != 2 || got[0] != "XDG_DATA_HOME=/home/u/accounts/opencode/work/data" {
+		t.Fatalf("an added account: %v", got)
+	}
+	// The stand-in third agent: RootEnv names the main root, RootVars a folder inside an
+	// account folder. Its default account keeps the first and not the second.
+	third := &ProfileSpec{RootEnv: []string{"THIRD_DATA_DIR"}, RootVars: []ProfileVar{{Env: "THIRD_CONFIG_DIR", Sub: "config"}}}
+	def := Install{Agent: "third", Accounts: third, Profile: &RuntimeProfile{Default: true, Root: "/home/u/.local/share/third"}}
+	if got := def.ProfileEnv(); !slices.Equal(got, []string{"THIRD_DATA_DIR=/home/u/.local/share/third"}) {
+		t.Fatalf("third default: %v", got)
+	}
+	if c := def.ScopeCommand(Command{Argv: []string{"third"}}); !slices.Contains(c.Unset, "THIRD_DATA_DIR") || slices.Contains(c.Unset, "THIRD_CONFIG_DIR") {
+		t.Fatalf("third default unset %v", c.Unset)
+	}
+}
+
+// Where a root of an account folder is, through the same resolver as the default folder.
+func TestProfileLocate(t *testing.T) {
+	s := Spec{Roots: []Root{
+		{Name: "data", EnvSub: []EnvSub{{Env: "XDG_DATA_HOME", Sub: "opencode"}}, Default: map[string]string{"*": "~/.local/share/opencode"}},
+		{Name: "config", Env: []string{"OPENCODE_CONFIG_DIR"}, EnvSub: []EnvSub{{Env: "XDG_CONFIG_HOME", Sub: "opencode"}}, Default: map[string]string{"*": "~/.config/opencode"}},
+		{Name: "cache", EnvSub: []EnvSub{{Env: "XDG_CACHE_HOME", Sub: "opencode"}}, Default: map[string]string{"*": "~/.cache/opencode"}},
+	}, Accounts: &ProfileSpec{RootVars: []ProfileVar{{Env: "XDG_DATA_HOME", Sub: "data"}, {Env: "OPENCODE_CONFIG_DIR", Sub: "config"}}}}
+	env := map[string]string{"XDG_CACHE_HOME": "/xdg/cache", "OPENCODE_CONFIG_DIR": "/user/config"}
+	getenv := func(k string) string { return env[k] }
+	for name, want := range map[string]string{"data": "/p/data/opencode", "config": "/p/config", "cache": "/xdg/cache/opencode", "nope": ""} {
+		if got := s.ProfileLocate(name, "/p", "linux", getenv); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestInheritJSON(t *testing.T) {
+	src := []byte(`{
+  // OpenCode writes JSONC: comments and trailing commas.
+  "model": "omlx/qwen", /* the LAN model */
+  "theme": "dark",
+  "keybinds": {"leader": "ctrl+x", "url": "https://example.com/a//b"},
+  "provider": {"omlx": {"name": "LAN", "options": {"baseURL": "http://10.0.0.2:8080", "apiKey": "sk-secret", "headers": {"Authorization": "Bearer x"}}, "models": {"qwen": {"limit": {"context": 32768}}}}},
+  "mcp": {"tool": {"command": ["x", "--api-key", "sk-live-abc"], "environment": {"GH": "ghp_secret"}, "url": "https://u:p@h", "remote": "https://h/mcp?key=sk-q", "enabled": true}},
+  "share": "https://user@h",
+  "plain": "http://h:8080/path",
+  "big": 12345678901234567890,
+}`)
+	b, err := InheritJSON(src, []string{"model", "keybinds.leader", "keybinds.url", "provider.omlx.options.baseURL", "provider.omlx.models.qwen.limit.context",
+		"mcp.tool.enabled", "mcp.tool.url", "mcp.tool.remote", "mcp.tool.command", "provider", "keybinds", "share", "plain", "big", "absent.field"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, keep := range []string{`"model": "omlx/qwen"`, `"leader": "ctrl+x"`, `"url": "https://example.com/a//b"`, `"baseURL": "http://10.0.0.2:8080"`,
+		`"context": 32768`, `"enabled": true`, `"plain": "http://h:8080/path"`, `12345678901234567890`} {
+		if !strings.Contains(got, keep) {
+			t.Errorf("lost %s: %s", keep, got)
+		}
+	}
+	// Objects and arrays are not copied whole, nor values that carry credentials.
+	for _, drop := range []string{"sk-", "ghp_", "Bearer", "apiKey", "headers", "u:p", "user@", `"command"`, `"name"`, "theme", "absent"} {
+		if strings.Contains(got, drop) {
+			t.Errorf("copied %s: %s", drop, got)
+		}
+	}
+	for _, field := range []string{"provider.omlx.options.apiKey", "auth", "mcp.tool.env", "mcp.tool.environment", "mcp.tool.environment.GH", "provider..x", "OPENAI_API_KEY"} {
+		if _, err := InheritJSON(src, []string{field}); err == nil {
+			t.Errorf("%s is a credential and must be refused", field)
+		}
+	}
+	if b, err := InheritJSON(src, []string{"absent", "provider"}); b != nil || err != nil {
+		t.Fatalf("nothing to copy: %s, %v", b, err)
+	}
+	if _, err := InheritJSON([]byte(`[1]`), []string{"model"}); err == nil {
+		t.Fatal("not an object")
+	}
+	// Comment marks inside strings are text.
+	if b, _ := InheritJSON([]byte(`{"a": "x // y /* z */", "b": "q\\", "c": 1,}`), []string{"a", "b"}); !strings.Contains(string(b), `"x // y /* z */"`) || !strings.Contains(string(b), `"q\\"`) {
+		t.Fatalf("strings changed: %s", b)
+	}
+	for name, want := range map[string]bool{"apiKey": true, "APIKey": true, "api_key": true, "accessToken": true, "Authorization": true, "keybinds": false, "author": false, "environment": true, "model": false, "openAIKey": true, "githubToken": true, "hotkey": true} {
+		if credentialKey(name) != want {
+			t.Errorf("credentialKey(%q) = %v", name, !want)
+		}
 	}
 }

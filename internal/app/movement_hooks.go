@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -190,10 +191,10 @@ func (a *App) movementNoticeHooks(ctx context.Context, m *host.Machine, action s
 				continue
 			}
 			st.Path = hi.File.Path
-			// A module may only choose a file directly under this known local root.
+			// A module may only choose a file directly in the root it names.
 			var old []byte
 			err = errors.New("hook settings path is outside the selected root")
-			if filepath.Dir(st.Path) == filepath.Clean(in.Main()) {
+			if hi.File.In(in, agent.PathFor(runtime.GOOS)) {
 				old, err = readMovementHookFile(st.Path)
 			}
 			if err == nil {
@@ -326,9 +327,9 @@ func (a *App) movementHookProfile(ctx context.Context, m *host.Machine, mod agen
 	if !st.IsDir() {
 		return base, errors.New("agent root is not a directory")
 	}
-	base = mod.Spec().PinMain(base, root)
 	base.Profile = selected
 	base.Accounts = mod.Spec().Accounts
+	base = mod.Spec().PinMain(base, root)
 	h, err := m.For(ctx, mod.Spec(), base, nil)
 	if err != nil {
 		return base, err

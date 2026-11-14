@@ -35,6 +35,11 @@ type SpecData struct {
 	Desktop *DesktopData `json:"desktop,omitempty"`
 	// Plans names what a bare account plan belongs to ("Claude").
 	Plans string `json:"plans,omitempty"`
+	// SQLFiles, SQLTables and SQLDenied are the databases the module reads, and the tables
+	// it reads and never reads.
+	SQLFiles  []string `json:"sqlFiles"`
+	SQLTables []string `json:"sqlTables"`
+	SQLDenied []string `json:"sqlDenied"`
 }
 
 // DesktopData is agent.Desktop.
@@ -56,6 +61,7 @@ type BinaryData struct {
 type RootData struct {
 	Name    string            `json:"name"`
 	Env     []string          `json:"env"`
+	EnvSub  []agent.EnvSub    `json:"envSub"`
 	Default map[string]string `json:"default"`
 }
 
@@ -127,6 +133,7 @@ func Data(s agent.Spec) SpecData {
 		Instructions: list(s.Instructions), GlobalInstructions: list(s.GlobalInstructions), Tools: s.Tools,
 		Features: list(s.Features), Experimental: list(s.Experimental), DesktopApps: lists(s.Icon.Apps),
 		Binaries: []BinaryData{}, Roots: []RootData{}, Clouds: []CloudData{}, TerminalEnv: list(s.TerminalEnv), Kinds: []KindData{},
+		SQLFiles: list(s.SQLFiles), SQLTables: list(s.SQLTables), SQLDenied: list(s.SQLDenied),
 	}
 	for _, k := range s.Kinds {
 		d.Kinds = append(d.Kinds, KindData{ID: k.ID, Name: k.Name, Note: k.Note})
@@ -143,7 +150,7 @@ func Data(s agent.Spec) SpecData {
 		for k, v := range r.Default {
 			def[k] = v
 		}
-		d.Roots = append(d.Roots, RootData{Name: r.Name, Env: list(r.Env), Default: def})
+		d.Roots = append(d.Roots, RootData{Name: r.Name, Env: list(r.Env), EnvSub: list(r.EnvSub), Default: def})
 	}
 	for _, c := range s.Clouds {
 		problems := map[string]string{}

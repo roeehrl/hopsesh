@@ -110,7 +110,7 @@ func (a *App) addLocalAccount(ctx context.Context, id agent.ID, name string, tag
 	}
 	if h, err := m.For(ctx, mod.Spec(), agent.Install{}, nil); err == nil {
 		if base, err := mod.Detect(ctx, h); err == nil {
-			if err := inherit(base.Main(), root, spec.Inherit); err != nil {
+			if err := inherit(base, mod.Spec(), root); err != nil {
 				return agent.RuntimeProfile{}, err
 			}
 		}
@@ -129,11 +129,52 @@ func (a *App) addLocalAccount(ctx context.Context, id agent.ID, name string, tag
 	return a.accountStore().Register(p)
 }
 
-// inherit copies top-level TOML settings (by file) from the default folder to a new one.
-func inherit(from, to string, keys map[string][]string) error {
-	for file, names := range keys {
+// inherit copies settings (by file) from the default folders (base) to the new account
+// folder root: top-level keys of a TOML file, or dot paths into a JSON or JSONC file
+// (never a credential, agent.InheritJSON). A file named "{root}/rel" is in that root;
+// others are in the main root. Each lands in the same root of the new folder, which must
+// be inside it.
+func inherit(base agent.Install, spec agent.Spec, root string) error {
+	if spec.Accounts == nil {
+		return nil
+	}
+	for file, names := range spec.Accounts.Inherit {
+		name, rel := spec.MainRoot().Name, file
+		if strings.HasPrefix(file, "{") {
+			n, r, ok := strings.Cut(strings.TrimPrefix(file, "{"), "}/")
+			if !ok || n == "" || r == "" {
+				continue
+			}
+			name, rel = n, r
+		}
+		from, to := base.Root(name), spec.ProfileLocate(name, root, runtime.GOOS, func(string) string { return "" })
+		if name == spec.MainRoot().Name && from == "" {
+			from = base.Main()
+		}
+		if inside, err := filepath.Rel(root, to); from == "" || !filepath.IsAbs(to) || err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+			continue // the new folder does not hold that root
+		}
+		src, dst := filepath.Join(from, filepath.FromSlash(rel)), filepath.Join(to, filepath.FromSlash(rel))
+		if ext := strings.ToLower(filepath.Ext(rel)); ext == ".json" || ext == ".jsonc" {
+			b, err := os.ReadFile(src)
+			if err != nil {
+				continue // no such file there: the agent's own default
+			}
+			out, err := agent.InheritJSON(b, names)
+			clear(b)
+			if err != nil || out == nil {
+				continue // not one hopsesh reads, or nothing to copy
+			}
+			if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+				return err
+			}
+			if err := os.WriteFile(dst, out, 0o600); err != nil {
+				return err
+			}
+			continue
+		}
 		var have map[string]any
-		if _, err := toml.DecodeFile(filepath.Join(from, file), &have); err != nil {
+		if _, err := toml.DecodeFile(src, &have); err != nil {
 			continue // no such file there, or not one hopsesh reads: the agent's own default
 		}
 		pick := map[string]any{}
@@ -149,7 +190,10 @@ func inherit(from, to string, keys map[string][]string) error {
 		if err := toml.NewEncoder(&b).Encode(pick); err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(to, file), b.Bytes(), 0o600); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, b.Bytes(), 0o600); err != nil {
 			return err
 		}
 	}
@@ -164,7 +208,7 @@ const commandMark = "# Added by hopsesh for an account folder"
 // unless a command of that name hopsesh did not add is there.
 func addShellCommand(home, name string, mod agent.Module, root string) (string, error) {
 	if runtime.GOOS == "windows" {
-		return "", errors.New("hopsesh adds account commands on macOS and Linux; on Windows set " + strings.Join(mod.Spec().Accounts.RootEnv, " and ") + " yourself")
+		return "", errors.New("hopsesh adds account commands on macOS and Linux; on Windows set " + strings.Join(mod.Spec().Accounts.Vars(), " and ") + " yourself")
 	}
 	path := filepath.Join(home, ".local", "bin", name)
 	if b, err := os.ReadFile(path); err == nil && !bytes.Contains(b, []byte(commandMark)) {
@@ -178,8 +222,9 @@ func addShellCommand(home, name string, mod agent.Module, root string) (string, 
 	for _, v := range spec.Accounts.Unset {
 		fmt.Fprintf(&b, "unset %s\n", v)
 	}
-	for _, v := range spec.Accounts.RootEnv {
-		fmt.Fprintf(&b, "export %s=%s\n", v, shQuote(root))
+	for _, e := range spec.Accounts.EnvFor(root, agent.PathFor(runtime.GOOS)) {
+		k, v, _ := strings.Cut(e, "=")
+		fmt.Fprintf(&b, "export %s=%s\n", k, shQuote(v))
 	}
 	fmt.Fprintf(&b, "exec %s \"$@\"\n", spec.Binaries[0].Name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
