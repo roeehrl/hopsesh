@@ -216,7 +216,9 @@ func noteSubagents(msg message, calls map[string]*ir.ToolResult) {
 // subagentAnswer is a subagent's answer (a synthetic message from the subagent's session,
 // which OpenCode gives the model after the call returned) as the call's result: what the
 // call returned so far and the answer. It is a node of its own where the answer came, so
-// the nodes before it stay as they were read; a converter takes a call's last result.
+// the nodes before it stay as they were read (those after it are chained to it: against a
+// reader that left answers out, their ids changed once); a converter takes a call's last
+// result.
 // Other synthetic messages are left out, as lift leaves them.
 func subagentAnswer(msg message, calls map[string]*ir.ToolResult) (ir.Node, bool) {
 	if msg.Type != "synthetic" || strings.TrimSpace(msg.Text) == "" {
