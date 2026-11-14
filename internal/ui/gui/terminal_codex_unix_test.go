@@ -110,7 +110,7 @@ func TestCodexOwnedPTYBindsFromRealLocksAndRejectsSharedDaemon(t *testing.T) {
 	key := agent.SessionKey{Agent: "codex", Profile: in.ProfileID(), Session: agent.SessionID(ids[0])}
 	c := codex.New().Resume(in, key, agent.Placement{CWD: repo}, agent.ResumeOptions{})
 	original := append([]string{}, c.Argv...)
-	opened, err := a.sessionTab(c, app.Launch{Run: c, Key: key}, TabMeta{Kind: TabSession, Machine: app.LocalName(), Key: key.String()}, "fixture")
+	opened, err := a.sessionTab(c, app.Launch{Run: c, Key: key}, TabMeta{Kind: TabSession, Machine: app.LocalName(), Key: key.String()}, "fixture", nil)
 	if err != nil || opened.Where != WhereHere {
 		t.Fatalf("owned open: %+v %v", opened, err)
 	}

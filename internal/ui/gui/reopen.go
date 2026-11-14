@@ -11,6 +11,7 @@ import (
 	"github.com/roeehrl/hopsesh/internal/app"
 	"github.com/roeehrl/hopsesh/internal/config"
 	"github.com/roeehrl/hopsesh/internal/core/pty"
+	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
 // Reopening: quitting ends the programs in the terminal's tabs (the app owns them), and
@@ -146,6 +147,10 @@ func (a *App) reopenTab(t ReopenTab) error {
 			return errors.New("it ran on " + t.Machine + ", not here")
 		}
 		_, err := a.ResumeSession(t.Machine, t.Key, WhereHere)
+		if errors.Is(err, agent.ErrRestartsService) {
+			// Not asked at start: the list says why, without the window's marker.
+			return againRefused(unmarked(err), "open the session from hopsesh's window, which asks")
+		}
 		return err
 	case TabRemote:
 		if t.Remote != "" {

@@ -122,6 +122,7 @@ type FolderDTO struct {
 	Default    bool       `json:"default"`
 	Tools      string     `json:"tools"`
 	Command    string     `json:"command,omitempty"`
+	Port       int        `json:"port,omitempty"` // its agent's background service's own port (OpenCode); 0 none
 	Counts     []CountDTO `json:"counts"`
 	Unrecorded int        `json:"unrecorded"`
 	Error      string     `json:"error,omitempty"`
@@ -402,7 +403,7 @@ func (a *App) AccountsView() (*AccountsViewDTO, error) {
 				}
 				p := current(in.Profile)
 				f := FolderDTO{Machine: m.Name, Local: m.Local, Profile: p.ID, Generation: p.Generation, Agent: in.Agent, AgentName: spec.Name,
-					Name: "default", Path: short(m, p.Root), Default: p.Default, Command: p.Command, Counts: []CountDTO{}, Error: p.Error, CanRun: canRun && in.Present, Tags: p.Tags,
+					Name: "default", Path: short(m, p.Root), Default: p.Default, Command: p.Command, Port: p.Port, Counts: []CountDTO{}, Error: p.Error, CanRun: canRun && in.Present, Tags: p.Tags,
 					SignedIn: p.Account != nil && p.Account.LoggedIn}
 				if f.Tags == nil {
 					f.Tags = []string{}

@@ -197,6 +197,9 @@ type ResumeOptions struct {
 	App           bool   // open in the agent's desktop app instead of the terminal
 	Name          string // a name for Remote Control / the session list
 	Prompt        string // a first message, "" for none
+	// RestartService: the person agreed to restart the agent's background service to
+	// resume (ErrRestartsService); never set without asking.
+	RestartService bool
 }
 
 // Command is a program to run, never a shell string; the core quotes it for the user's

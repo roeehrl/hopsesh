@@ -31,6 +31,8 @@ func TestMain(m *testing.M) {
 		os.Exit(fakeagent.Codex())
 	case "claude":
 		os.Exit(fakeagent.Claude())
+	case "opencode":
+		os.Exit(fakeagent.OpenCode())
 	}
 	os.Exit(m.Run())
 }

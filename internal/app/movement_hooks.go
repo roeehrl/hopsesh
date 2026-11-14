@@ -499,8 +499,12 @@ func (a *App) movementHookProfile(ctx context.Context, m *host.Machine, mod agen
 	if err != nil {
 		return base, err
 	}
-	// Pin canonical root even when the unregistered default was a symlink.
-	in.Roots[mod.Spec().MainRoot().Name] = root
+	// Pin canonical root even when the unregistered default was a symlink. An added
+	// folder of an agent with several roots holds its main root inside (PinMain), which
+	// Detect resolved.
+	if base.Main() == root {
+		in.Roots[mod.Spec().MainRoot().Name] = root
+	}
 	in.Profile = selected
 	return in, nil
 }

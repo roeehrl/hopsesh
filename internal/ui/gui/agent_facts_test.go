@@ -76,3 +76,25 @@ func TestPlanLabel(t *testing.T) {
 		}
 	}
 }
+
+// OpenCode has account folders now, keeps no sign-in in a new one (each signs in to its
+// providers itself), and resumes under any of them; its desktop app shares the terminal's.
+func TestAgentFactsOpenCode(t *testing.T) {
+	m, ok := all.Registry().Get("opencode")
+	if !ok {
+		t.Fatal("no OpenCode module")
+	}
+	f := agentFacts(m, "darwin")
+	if !f.Local || !f.Accounts || f.InheritsSignIn || !f.ResumeAcrossAccounts || f.HookReview {
+		t.Fatalf("opencode %+v", f)
+	}
+	if f.DefaultRoot != "~/.local/share/opencode" || f.AppName != "OpenCode" {
+		t.Fatalf("folder %q app %q", f.DefaultRoot, f.AppName)
+	}
+	if got := []ToolDTO{{"opencode-terminal", "OpenCode · terminal"}, {"opencode-desktop", "OpenCode desktop"}}; !reflect.DeepEqual(f.Tools, got) {
+		t.Fatalf("opencode tools %+v", f.Tools)
+	}
+	if f.Desktop == nil || !f.Desktop.Shared || f.Desktop.OwnSignIn {
+		t.Fatalf("opencode desktop %+v", f.Desktop)
+	}
+}

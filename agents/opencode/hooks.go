@@ -102,6 +102,14 @@ func (m *Module) MovementHooks(h agent.Host, in agent.Install, bin string, args 
 		out.Reason = err.Error()
 		return out
 	}
+	// The default folder's plugin may have been installed before hopsesh registered the
+	// folder (its first scan does): its notice hook then names no profile, which finds
+	// the default folder all the same.
+	var unnamed map[string][]byte
+	if in.Profile != nil && in.Profile.Default {
+		argv := append([]string{bin, "notice-hook", "--agent", string(id), "--profile", ""}, args...)
+		unnamed, _ = renderPlugin(argv, rulesFile(h, in))
+	}
 	out.Dir = &agent.HookDir{Root: rootConfig, Path: dir, Staging: staging,
 		// hopsesh owns its plugin folder whole: an install replaces it (files added to it
 		// go too), and a removal takes it out. A folder of that name that is not hopsesh's
@@ -118,7 +126,9 @@ func (m *Module) MovementHooks(h agent.Host, in agent.Install, bin string, args 
 			}
 			return nil, nil
 		},
-		Has:  func(have map[string][]byte) bool { return hasPlugin(have, files) },
+		Has: func(have map[string][]byte) bool {
+			return hasPlugin(have, files) || unnamed != nil && hasPlugin(have, unnamed)
+		},
 		Runs: pluginRuns,
 	}
 	if !agent.HookVersionAtLeast(in.Version, hookFloor) {

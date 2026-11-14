@@ -82,3 +82,50 @@ func TestAccountsViewJoinsSignInsAcrossToolsAndMachines(t *testing.T) {
 		t.Fatalf("folder: %+v", folder)
 	}
 }
+
+// OpenCode's folders are on the Accounts screen like Claude Code's and Codex's: its
+// terminal lists every folder's providers, its desktop app shares the default folder's,
+// and an added folder runs in the terminal only.
+func TestAccountsViewOpenCodeFolders(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOPSESH_STATE_DIR", t.TempDir())
+	t.Setenv("HOPSESH_CONFIG_DIR", t.TempDir())
+	providers := &agent.Account{LoggedIn: true, Label: "Anthropic, OpenAI", Confidence: "limited", Observation: "anthropic,openai"}
+	none := &agent.Account{LoggedIn: false, Label: "no provider signed in", Confidence: "limited"}
+	def := agent.Install{Agent: "opencode", Binary: "/x/opencode", Version: "2.3.0", Present: true, Desktop: "/Applications/OpenCode.app", DesktopVersion: "2.2.7", DesktopEngine: "2.2.7",
+		Roots: map[string]string{"data": "/h/.local/share/opencode"}, Profile: &agent.RuntimeProfile{ID: "oc-default", Agent: "opencode", Default: true, Root: "/h/.local/share/opencode", Account: providers}}
+	work := def
+	work.Desktop = ""
+	work.Roots = map[string]string{"data": "/h/.hopsesh/accounts/opencode/work/data/opencode"}
+	work.Profile = &agent.RuntimeProfile{ID: "oc-work", Agent: "opencode", Name: "Work", Root: "/h/.hopsesh/accounts/opencode/work", Port: 49375, Account: none}
+	here := &app.Machine{Name: app.LocalName(), Local: true, Status: app.StatusOK, Agents: []app.AgentState{{Agent: "opencode", Install: def}, {Agent: "opencode", Install: work}}}
+	a := &App{core: app.New(config.Defaults(), all.Registry(), t.TempDir(), nil), inv: &app.Inventory{Machines: []*app.Machine{here}}}
+	v, err := a.AccountsView()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells := map[string]CellDTO{}
+	for _, c := range v.Machines[0].Cells {
+		cells[c.Tool] = c
+	}
+	term, desk := cells["opencode-terminal"], cells["opencode-desktop"]
+	if !term.Installed || term.Version != "OpenCode 2.3.0" || len(term.SignIns) != 2 {
+		t.Fatalf("terminal cell: %+v", term)
+	}
+	if !desk.Installed || desk.Version != "OpenCode 2.2.7, running OpenCode 2.2.7" || desk.Note != "same sign-in as the terminal" || len(desk.SignIns) != 1 {
+		t.Fatalf("desktop cell: %+v", desk)
+	}
+	folders := map[string]FolderDTO{}
+	for _, f := range v.Folders {
+		folders[f.Profile] = f
+	}
+	d, w := folders["oc-default"], folders["oc-work"]
+	if d.Name != "default" || !d.SignedIn || d.Tools != "Terminal and OpenCode share one sign-in (signed in)" {
+		t.Fatalf("default folder: %+v", d)
+	}
+	if w.Name != "Work" || w.SignedIn || w.Default || w.Tools != "Terminal only (not signed in)" || w.Port != 49375 || d.Port != 0 {
+		t.Fatalf("Work folder: %+v", w)
+	}
+}

@@ -515,3 +515,48 @@ func TestDeniedTablesAreNeverRead(t *testing.T) {
 		}
 	}
 }
+
+// Decision D2: with no program of the running service's version here, a resume is
+// refused as one that restarts the service (agent.ErrRestartsService); once the person
+// agrees, it runs the PATH opencode.
+func TestResumeRestartingTheService(t *testing.T) {
+	fh, f := newMachine(t, setup{})
+	f.status, f.version = serviceURL, "2.2.7"
+	m, h, in := open(t, fh)
+	key := sessionKey(in, sesFiles)
+	pl := agent.Placement{CWD: "/home/u/git/demo"}
+	_, err := m.ResumeOn(ctx, h, in, key, pl, agent.ResumeOptions{})
+	if !errors.Is(err, agent.ErrRestartsService) || !strings.Contains(err.Error(), "which the desktop app shares") || strings.Contains(err.Error(), "agree") {
+		t.Fatalf("not asked: %v", err)
+	}
+	// An added folder's service is its own: the desktop app does not use it.
+	in.Profile = &agent.RuntimeProfile{ID: "opencode-work", Name: "Work", Agent: id}
+	_, err = m.ResumeOn(ctx, h, in, key, pl, agent.ResumeOptions{})
+	if !errors.Is(err, agent.ErrRestartsService) || !strings.Contains(err.Error(), "OpenCode's Work folder") || strings.Contains(err.Error(), "desktop") {
+		t.Fatalf("an added folder: %v", err)
+	}
+	in.Profile = nil
+	c, err := m.ResumeOn(ctx, h, in, key, pl, agent.ResumeOptions{RestartService: true})
+	if err != nil || c.Argv[0] != "opencode" && !strings.HasSuffix(c.Argv[0], "/opencode") {
+		t.Fatalf("agreed: %v %v", c.Argv, err)
+	}
+	// A new session is asked about the same way (its TUI would restart the service too).
+	if _, err := m.StartProgram(ctx, h, in, false); !errors.Is(err, agent.ErrRestartsService) {
+		t.Fatalf("a new session not asked: %v", err)
+	}
+	if p, err := m.StartProgram(ctx, h, in, true); err != nil || p != in.Binary {
+		t.Fatalf("a new session agreed: %q %v", p, err)
+	}
+	// Agreeing changes nothing when the service is stopped or of the program's version.
+	f.version = "2.3.0"
+	if c, err = m.ResumeOn(ctx, h, in, key, pl, agent.ResumeOptions{RestartService: true}); err != nil || !strings.HasSuffix(c.Argv[0], "opencode") {
+		t.Fatalf("same version: %v %v", c.Argv, err)
+	}
+	if p, err := m.StartProgram(ctx, h, in, false); err != nil || p != in.Binary {
+		t.Fatalf("a new session, same version: %q %v", p, err)
+	}
+	f.status = "stopped"
+	if p, err := m.StartProgram(ctx, h, in, false); err != nil || p != in.Binary {
+		t.Fatalf("a new session, service stopped: %q %v", p, err)
+	}
+}

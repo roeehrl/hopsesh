@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,10 @@ type RuntimeProfile struct {
 	// Command is the shell command hopsesh added on its machine to run the agent in this
 	// folder ("claude-work"; "" none).
 	Command string `json:"command,omitempty"`
+	// Port is the port the agent's background service listens on for this folder, when
+	// hopsesh gave it one (OpenCode: each account folder's own, so its service can run
+	// beside the default one); 0 none.
+	Port int `json:"port,omitempty"`
 }
 
 func (in Install) ProfileID() string {
@@ -421,4 +426,25 @@ func jsonPut(m map[string]any, path []string, v any) {
 		m = next
 	}
 	m[path[len(path)-1]] = v
+}
+
+// AccountPreparer readies an account folder hopsesh has just made for the agent, before
+// anyone signs in to it: h runs commands with the folder's variables (in.Profile is the
+// new folder's). OpenCode gives the folder its own background-service port, so its
+// service can run beside the default one. It returns what to record with the folder.
+type AccountPreparer interface {
+	PrepareAccount(ctx context.Context, h Host, in Install, o AccountPrep) (AccountPrepared, error)
+}
+
+// AccountPrep is what hopsesh knows of the machine for PrepareAccount.
+type AccountPrep struct {
+	// Taken are the ports other account folders on the machine were given.
+	Taken []int
+	// Free reports whether nothing listens on a port of the machine now (nil: unknown).
+	Free func(port int) bool
+}
+
+// AccountPrepared is what PrepareAccount set up, recorded with the folder.
+type AccountPrepared struct {
+	Port int // its background service's port; 0 none
 }

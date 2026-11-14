@@ -6,14 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/roeehrl/hopsesh/internal/core/host"
 	"github.com/roeehrl/hopsesh/internal/core/peer"
 	"github.com/roeehrl/hopsesh/internal/core/profiles"
 	"github.com/roeehrl/hopsesh/sdk/agent"
@@ -119,14 +123,91 @@ func (a *App) addLocalAccount(ctx context.Context, id agent.ID, name string, tag
 		root = real
 	}
 	p := agent.RuntimeProfile{Machine: m.Name, ID: profiles.ID(), Endpoint: endpoint, Agent: id, Name: name, Tags: tags, Root: root, Managed: true}
+	prepared := false
+	if prep, ok := mod.(agent.AccountPreparer); ok {
+		if err := a.prepareAccount(ctx, m, mod, prep, &p); err != nil {
+			// The folder is hopsesh's, made just now: nothing of the person's is in it.
+			_ = os.RemoveAll(root)
+			return agent.RuntimeProfile{}, fmt.Errorf("setting up the %s folder: %w", mod.Spec().Name, err)
+		}
+		prepared = true
+	}
 	if o.Command {
 		cmd, err := addShellCommand(m.Facts.Home, string(id)+"-"+slug, mod, root)
 		if err != nil {
+			if prepared {
+				// Not registered, so its port would be given again: nobody signed in to it yet.
+				_ = os.RemoveAll(root)
+			}
 			return p, err
 		}
 		p.Command = cmd
 	}
-	return a.accountStore().Register(p)
+	out, err := a.accountStore().Register(p)
+	if err != nil && prepared {
+		// Another folder took its port meanwhile (the store checks again), or it could not
+		// be registered: it goes, as a folder the module could not set up does.
+		if p.Command != "" {
+			removeShellCommand(m.Facts.Home, p.Command)
+		}
+		_ = os.RemoveAll(root)
+	}
+	return out, err
+}
+
+// prepareAccount has the module ready a folder it just made (agent.AccountPreparer), with
+// the folder's variables, and records what it set up (OpenCode: its service's port).
+func (a *App) prepareAccount(ctx context.Context, m *host.Machine, mod agent.Module, prep agent.AccountPreparer, p *agent.RuntimeProfile) error {
+	spec := mod.Spec()
+	scoped := spec.PinMain(agent.Install{Agent: spec.ID, Accounts: spec.Accounts, Profile: p}, p.Root)
+	h, err := m.For(ctx, spec, scoped, nil)
+	if err != nil {
+		return err
+	}
+	in, err := mod.Detect(ctx, h)
+	if err != nil {
+		return err
+	}
+	in.Profile = p
+	if in.Binary == "" {
+		return fmt.Errorf("%w: install %s first", agent.ErrNotInstalled, spec.Name)
+	}
+	if h, err = m.For(ctx, spec, in, nil); err != nil {
+		return err
+	}
+	var taken []int
+	if ps, err := a.Accounts(); err == nil {
+		for _, q := range ps {
+			if q.Endpoint == p.Endpoint && q.Port != 0 {
+				taken = append(taken, q.Port)
+			}
+		}
+	}
+	done, err := prep.PrepareAccount(ctx, h, in, agent.AccountPrep{Taken: taken, Free: portFree})
+	if err != nil {
+		return err
+	}
+	p.Port = done.Port
+	return nil
+}
+
+// portFree reports whether nothing listens on a port of this machine: nothing answers on
+// its loopback, and the port can be bound there and on every IPv4 address (a test bind
+// alone misses a wildcard listener on macOS and Windows, where it may share the port).
+func portFree(port int) bool {
+	p := strconv.Itoa(port)
+	if c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", p), 300*time.Millisecond); err == nil {
+		_ = c.Close()
+		return false
+	}
+	for _, host := range []string{"127.0.0.1", "0.0.0.0"} {
+		l, err := net.Listen("tcp", net.JoinHostPort(host, p))
+		if err != nil {
+			return false
+		}
+		_ = l.Close()
+	}
+	return true
 }
 
 // inherit copies settings (by file) from the default folders (base) to the new account
