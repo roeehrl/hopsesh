@@ -1783,8 +1783,9 @@ job and the drift watcher. Done here from the earlier notes:
   the converter renders a result whose call is not in the read on its own, as text, with its
   coverage. §7's legs: `context_capacity_test.go` (Claude Code and Codex into OpenCode, OpenCode
   into both, from a compacted session), `lineage_routes_test.go` (`TestLineageRoutesThreeAgents`:
-  13 routes per pull request, every assignment of agents to the stops, 63, nightly; a return to
-  an OpenCode original continues it in a new session, D4), the peer leg is PR 4's
+  13 routes per pull request in their own CI step, every assignment of agents to the stops, 63,
+  nightly; a return to an OpenCode original continues it in a new session, D4: the test checks
+  the new session's rollover names a copy there and the original is unchanged), the peer leg is PR 4's
   `TestOpenCodePeerPackage`, and a continue into OpenCode on another machine is the matrix's
   continue rows over SSH. Tests set the desktop app's folders by placing them in their home
   (since #162 a test never reads this machine's `/Applications`);
@@ -1800,9 +1801,9 @@ job and the drift watcher. Done here from the earlier notes:
   the earlier rows: the per-PR Windows loopback and the two OS-pair jobs (one job, two systems,
   close to their time limits) use it; the Linux and macOS loopbacks, the nightly triples (now
   three shards) and the mesh run all three. The helper reaches OpenCode only through the
-  stand-in: it checks the `opencode` on PATH is the stand-in (the stand-in logs to
-  `FAKE_AGENT_LOG`, OpenCode does not) and refuses otherwise, and the runner checks the same
-  before any row; it imports and deletes sessions with the stand-in, adds a turn to the
+  stand-in: it checks the `opencode` on PATH is the stand-in by the package its build
+  recorded (`debug/buildinfo`, without running it, so a real OpenCode first on PATH never
+  runs) and refuses otherwise, and the runner checks the same before any row; it imports and deletes sessions with the stand-in, adds a turn to the
   stand-in's database, finds sessions by their export and makes OpenCode's data folder as a
   first start would (hopsesh counts OpenCode installed only then). The skill row also checks the
   copy OpenCode shares with Codex in `~/.agents/skills`. Run locally with `matrix-local.sh`
@@ -1824,7 +1825,8 @@ Left:
   macOS↔Windows, not blocking): the stand-in on Windows, the API-only remote tier and the
   helper there were never run. If the nightly mesh fails there, set `HSMATRIX_AGENTS` in
   `mesh.yml` while it is fixed. The real-agent job does not install OpenCode on Windows (its
-  docs: no supported install there), and the plugin's Bun tests do not run on Windows.
+  docs list no install there, though npm's `@opencode/cli` 2.3.0 ships Windows builds: not
+  tried), and the plugin's Bun tests do not run on Windows.
 - **Plugin loading** by a real OpenCode is not tested: a private server lists no plugins before
   loading them (PR 6), and no test starts the service. Likewise the plugin floor is still judged
   by the program's version, not the running service's (PR 7), and the remote D2 path between two
@@ -1843,11 +1845,16 @@ Left:
   (`ResumeHere`) is still not reached with OpenCode. The fork-on-resume sandbox check (PR 7)
   needs `api POST …/fork` on a session with messages: not added to the real-agent tests. Whether
   OpenCode's TUI rings the bell when it waits needs a model call.
+- **CI time.** The three-agent lineage routes have their own steps: per pull request (13
+  routes, about 2.5 minutes here with `-race`) and on nightly shard 2 (63 routes, about 11
+  minutes here, 40-minute deadline). The per-PR scenario job's limit went from 30 to 40
+  minutes and the nightly triples job's from 60 to 90; check both after the first runs.
 - **Stability (D10).** `Experimental` stays; the flip to `Stable` is a one-line PR after two green
   nightly weeks of the OpenCode real-agent job and the manual checklist (§7).
 - **PR 10:** `CONTRIBUTING.md` (running the matrix with OpenCode, `HSMATRIX_AGENTS`, the real-agent
-  tests and their guard), `docs/drift.md` (the snapshots), and the CHANGELOG lines for the
-  matrices and the nightly job.
+  tests and their guard), `docs/drift.md` (the snapshots, written with sorted keys), and the
+  CHANGELOG lines for the matrices and the nightly job. The SDK lines (`ir.WriteResult.Stamp`,
+  the stricter conformance suite) are in already.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.

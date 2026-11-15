@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- For module authors: `ir.WriteResult.Stamp`, the stamp a writer for an agent that keeps
+  sessions in a database read right after the write. hopsesh records it when it is given
+  and reads one itself otherwise, so writers that give none work as before.
+
+### Changed
+
+- For module authors (the SDK is v0 and changes with the app): the conformance suite
+  (`agenttest.Run`) now checks every optional capability a module has, for each listed
+  session. A module that passed before can fail these: `Rename` must refuse an empty title,
+  `ResumeOn` must refuse a session that is not there, every `SessionWatchPaths` path must be
+  inside one of the install's roots, `Stop` of a session that is not open must leave it as
+  it was, `ContextCapacity` must give a window above zero or say it is unknown, and the
+  identity move is planned for every listed session.
+
 ### Security
 
 - Built with Go 1.27.4, which fixes a vulnerability in `net/http`
