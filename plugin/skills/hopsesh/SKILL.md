@@ -1,23 +1,23 @@
 ---
 name: hopsesh
 description: >-
-  Lists coding-agent sessions (Claude Code and Codex) on this and the user's other machines, moves
+  Lists coding-agent sessions (Claude Code, Codex and OpenCode) on this and the user's other machines, moves
   one here, or continues it in another agent, with the hopsesh CLI: paths are rewritten and
   the repository, worktree and code are set up. Use when the user wants to continue, pull,
   hand off, bring back or resume a session from another computer, to continue a session in a
-  different agent ("continue this in Codex", "take my Claude session to Codex"), to hand a
+  different agent ("continue this in Codex", "take my Claude session to OpenCode"), to hand a
   session off to an agent's cloud ("hand this off to Claude Code cloud", "hand this off to
   Codex cloud"), to bring a cloud session or Codex cloud task back, asks which
   sessions are open elsewhere, or mentions hopsesh.
 license: Apache-2.0
 compatibility: Requires the hopsesh CLI; other machines need SSH access.
 metadata:
-  hopsesh-version: "0.8.0"
+  hopsesh-version: "0.9.0"
 ---
 
 # Moving coding-agent sessions with hopsesh
 
-hopsesh finds sessions of Claude Code and Codex on this machine and the user's other machines.
+hopsesh finds sessions of Claude Code, Codex and OpenCode on this machine and the user's other machines.
 It moves a session here in the same agent, or continues it in another agent. Run it as
 `hopsesh`. Always pass `--json` and read the JSON; never scrape the text output.
 
@@ -32,15 +32,15 @@ It moves a session here in the same agent, or continues it in another agent. Run
    Give the user the `command` from the result to run in a new terminal tab.
 4. **Do not change hopsesh's setup for the user**: `hosts allow`, `hosts add`, `hosts auth`,
    `hosts setup-key`, `clouds allow`, `clouds deny`, setting an environment with `clouds env`,
-   `terminals --use` or `--resume`, `trust`, `skill`, `undo` and `update` are the user's to
-   run. Tell them the exact command instead.
+   `terminals --use` or `--resume`, `trust`, `skill`, `notices`, `undo` and `update` are the
+   user's to run. Tell them the exact command instead.
 5. **Never ask for, accept or pass a password.** Do not use `--password-stdin`. If the user types
    a password into the conversation, do not use it; suggest they change it.
 
 ## Find sessions
 
 - `hopsesh ls --json` lists every agent's sessions on this machine and every allowed machine.
-  Narrow it with `--host <machine>`, `--agent <claude|codex>`, `--repo <text>`, `--live` or
+  Narrow it with `--host <machine>`, `--agent <claude|codex|opencode>`, `--repo <text>`, `--live` or
   `--no-git` (faster). Remote machines can take a minute; use a generous timeout.
 - The JSON has `machines` (status, hint, the agents found) and `groups` (one per repository).
   Each item's `entry` has `machine`, `agent`, `session` (`key`, `title`, `cwd`, `lastActive`,
@@ -48,22 +48,26 @@ It moves a session here in the same agent, or continues it in another agent. Run
   from lineage; hopsesh never changes titles). `copies` lists every place and agent that has
   the session when it moved before; the entry is the newest copy.
 - After a move, hopsesh usually **blocks the original**: prompts there are refused with a
-  "Blocked by hopsesh" reason until the session moves back. If you run in such a session,
+  "Blocked by hopsesh" reason until the session moves back (in OpenCode the prompt goes
+  through, and every tool call fails with that reason instead). If you run in such a session,
   tell the user where the moved copy is. Never run `hopsesh unblock` yourself: only the
   user decides to continue an original, because the copies then diverge.
 - A session reference is `[<machine>:][<agent>/]<id-prefix-or-title>`. Without a machine,
   hopsesh takes the newest copy: that is how a session comes back after working on it elsewhere.
 - To act on the session you are running in, find it in `hopsesh ls --host <this machine> --json`:
-  the live session of your agent in this folder.
+  the live session of your agent in this folder. In OpenCode, `$OPENCODE_SESSION_ID` is this
+  session's id: the reference is `opencode/$OPENCODE_SESSION_ID`.
 
 ## Move a session here, or continue it in another agent
 
-1. `hopsesh plan <ref> --json`, adding `--in <claude|codex>` to continue in another agent.
+1. `hopsesh plan <ref> --json`, adding `--in <claude|codex|opencode>` to continue in another agent.
    Summarise: where it comes from, the folder it continues in, the repository action
    (`repo.action`: `use`, `clone`, `needs-clone`), `sync` (code),
    `warnings` and `blockers`. For another agent also `continue.relation` (`new`, or `append`
    when only the new work goes to an earlier copy there) and `continue.report.summary` (what
-   does not carry over, such as hidden reasoning).
+   does not carry over, such as hidden reasoning). OpenCode cannot add to a session it has,
+   so into OpenCode an `append` becomes `new`: a new session that continues the copy there
+   (a warning says so).
 2. Resolve blockers by asking the user, then plan again with the matching flag:
    - repository not here: `--clone` or `--to <dir>`;
    - the session is open here: `--stop-local`;
@@ -88,7 +92,7 @@ briefing the other agent reads.
 
 `hopsesh hosts status --json` lists every machine's checks (`hopsesh`, `receiving`,
 `login`, `cli`, `copies` (every hopsesh there one version; `installs` lists them), and each
-agent folder's `hook` and `skill`), each with a `state` (ok, warn,
+agent folder's `hook` (OpenCode's is a plugin) and `skill`), each with a `state` (ok, warn,
 error, off, unknown), a `reason`, and a `fix` when one exists. When a move's plan says the
 original can't be blocked (`cannotProtect`), these say why; tell the user the fix (an
 update is `hopsesh hosts setup <machine>`, which is theirs to run).
@@ -103,7 +107,7 @@ hopsesh there makes the change; it must be set up there and receive sessions.
 Plan with `hopsesh cd <ref> <dir> --dry-run --json` and show `plan.from`, `plan.to`,
 `plan.warnings` and `plan.blockers`; after a yes, run `hopsesh cd <ref> <dir> --json --yes`.
 A folder in another repository is blocked unless the user asks for `--other-repo`. When
-`open` is true and `inSession` is set (Claude Code's `/cd <dir>`), the change happens inside
+`open` is true and `inSession` is set (`/cd <dir>` in Claude Code and OpenCode), the change happens inside
 the open session: tell the user to type `inSession` there, and run the command again only if
 they want hopsesh to wait and check (`--wait`). If you run in that session yourself, you
 cannot type it: `/cd` is the user's command. When the session is open and `inSession` is

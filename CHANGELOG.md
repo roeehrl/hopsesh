@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## [0.9.0] - 2026-11-15
+
+OpenCode joins Claude Code and Codex, as an experimental third agent: hopsesh lists, moves
+and continues OpenCode 2.x sessions, between machines and between agents, and protects a
+moved session's original with a plugin. A Codex 0.166 fork can now be continued, and a
+session whose earlier copies cannot be checked continues as a separate conversation instead
+of being refused.
+
 ### Added
 
 - **OpenCode, experimental** ([docs/opencode.md](docs/opencode.md)). hopsesh lists, moves
@@ -1283,6 +1291,7 @@ is refused and set aside (the app offers this), and machines are added again.
 - The terminal UI no longer carries out a plan you pressed `y` on while a changed one was
   still being worked out.
 
+[0.9.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.9.0
 [0.8.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.8.0
 [0.7.0]: https://github.com/roeehrl/hopsesh/releases/tag/v0.7.0
 [0.6.4]: https://github.com/roeehrl/hopsesh/releases/tag/v0.6.4
