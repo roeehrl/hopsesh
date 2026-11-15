@@ -304,7 +304,7 @@ jobs:
           - {family: macos, os: macos-15}
           - {family: windows, os: windows-2025}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
@@ -332,7 +332,12 @@ jobs:
       - name: mandatory lineage and context routes, forks and recovery
         shell: bash
         run: |
-          go test ./internal/e2e -run 'TestLineage|TestContext' -race -count=1 -timeout 10m
+          go test ./internal/e2e -run 'TestLineage|TestContext' -skip 'TestLineageRoutesThreeAgents' -race -count=1 -timeout 10m
+      # The three-agent routes alone take about half of that batch; they get their own deadline.
+      - name: mandatory lineage routes through three agents
+        shell: bash
+        run: |
+          go test ./internal/e2e -run 'TestLineageRoutesThreeAgents' -race -count=1 -timeout 10m
       - name: mandatory account routes and progressive discovery
         shell: bash
         run: |

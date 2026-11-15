@@ -85,10 +85,11 @@ jobs:
         env:
           HOPSESH_REAL_AGENTS: "1"
         run: go test ./internal/e2e/ -run 'Codex' -count=1 -v
-      # OpenCode's install methods do not support Windows yet (its docs), so Linux and macOS.
+      # Linux and macOS only: OpenCode's docs list no Windows install, though its npm package
+      # ships Windows builds (not tried here yet).
       - name: install OpenCode ${{ env.OPENCODE_VERSION }}
         if: runner.os != 'Windows'
-        run: npm install -g --silent "@opencode/cli@$OPENCODE_VERSION" # zizmor: ignore[adhoc-packages]
+        run: npm install -g "@opencode/cli@$OPENCODE_VERSION" # zizmor: ignore[adhoc-packages]
       - name: hopsesh finds OpenCode and reads its version
         if: runner.os != 'Windows'
         run: |
@@ -166,7 +167,7 @@ jobs:
   matrix-triples:
     name: scenario matrix, every triple (linux ${{ matrix.shard }}/3)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -189,7 +190,14 @@ jobs:
         if: matrix.shard == 1 # these stateful tests run once; only the matrix rows are sharded
         env:
           HOPSESH_LINEAGE_NIGHTLY: "1"
-        run: go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext' -race -count=1 -timeout 12m
+        run: go test ./internal/e2e -run 'TestMovement|TestLineage|TestAccountProfile|TestContext' -skip 'TestLineageRoutesThreeAgents' -race -count=1 -timeout 12m
+      # Every assignment of agents to the stops (63 routes, about 11 minutes on a fast Mac
+      # with -race) runs on its own shard and deadline.
+      - name: lineage routes through three agents, every assignment
+        if: matrix.shard == 2
+        env:
+          HOPSESH_LINEAGE_NIGHTLY: "1"
+        run: go test ./internal/e2e -run 'TestLineageRoutesThreeAgents' -race -count=1 -timeout 40m
       - run: scripts/matrix-loopback.sh bin "linux→linux, covering triples $SHARD" "$RUNNER_TEMP/hsmatrix" -t 3 -shard "$SHARD"
         env:
           SHARD: ${{ matrix.shard }}/3
