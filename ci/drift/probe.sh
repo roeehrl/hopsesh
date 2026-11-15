@@ -21,6 +21,8 @@
 #   issues/<id>-search.json, code/<id>-commits.txt, code/<id>-canaries.tsv
 #   schema/         Codex app-server schema diffs (baseline → latest, and each floor's methods)
 #   real-agents-<id>.txt  hopsesh's real-agent tests against the latest CLI (go test -v)
+#   snapshots/<id>/  what those tests write for the review (OpenCode: its migration ids and
+#                   OpenAPI document), and *.diff against last week's
 # The engine is the hopsesh checkout this script is in; it can run from any folder. Needs
 # node, go, gh, git, jq and curl.
 #   DRIFT_MANIFEST=file   a manifest another repository wrote (ci/drift/manifest.schema.json);
@@ -39,7 +41,8 @@ mkdir -p "$OUT/sources" "$OUT/docs" "$OUT/schema" "$OUT/help" "$OUT/feeds/full" 
 OUT=$(cd "$OUT" && pwd)
 SCRATCH=$(mktemp -d)
 trap 'rm -rf "$SCRATCH"' EXIT
-mkdir -p "$SCRATCH/home/.claude" "$SCRATCH/home/.codex" "$SCRATCH/cache" "$SCRATCH/tools"
+mkdir -p "$SCRATCH/home/.claude" "$SCRATCH/home/.codex" "$SCRATCH/home/xdg/data" "$SCRATCH/home/xdg/state" "$SCRATCH/home/xdg/cache" \
+  "$SCRATCH/home/xdg/config/opencode" "$SCRATCH/cache" "$SCRATCH/tools"
 SECTIONS=$SCRATCH/sections.md
 ROWS=$SCRATCH/rows.md
 : > "$SECTIONS"
@@ -79,12 +82,16 @@ fetched() {
 }
 
 # cli PREFIX ARGV...: runs a CLI with no login and no inherited secrets: an empty home,
-# private agent folders, no GH_TOKEN. PREFIX is an npm prefix, or empty for PATH.
+# private agent folders (OpenCode's XDG data, state, cache and config folders too, with
+# its auto-update off), no GH_TOKEN. PREFIX is an npm prefix, or empty for PATH.
 cli() {
   p=$1
   shift
   limited 60 env -i PATH="${p:+$p/bin:}$PATH" HOME="$SCRATCH/home" CLAUDE_CONFIG_DIR="$SCRATCH/home/.claude" \
-    CODEX_HOME="$SCRATCH/home/.codex" CODEX_SQLITE_HOME="$SCRATCH/home/.codex" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 TERM=dumb NO_COLOR=1 LANG=C.UTF-8 \
+    CODEX_HOME="$SCRATCH/home/.codex" CODEX_SQLITE_HOME="$SCRATCH/home/.codex" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+    XDG_DATA_HOME="$SCRATCH/home/xdg/data" XDG_STATE_HOME="$SCRATCH/home/xdg/state" XDG_CACHE_HOME="$SCRATCH/home/xdg/cache" \
+    XDG_CONFIG_HOME="$SCRATCH/home/xdg/config" OPENCODE_CONFIG_DIR="$SCRATCH/home/xdg/config/opencode" OPENCODE_DISABLE_AUTOUPDATE=1 \
+    TERM=dumb NO_COLOR=1 LANG=C.UTF-8 \
     "$@" < /dev/null 2>&1
 }
 
@@ -371,7 +378,10 @@ while read -r T <&3; do
   # not found) proves nothing, and says so.
   tests=$(get '.watch.tests // empty')
   if [ -n "$tests" ] && [ -n "$NEW" ]; then
-    (cd "$ENGINE" && env -u GH_TOKEN PATH="$NEW/bin:$PATH" HOPSESH_REAL_AGENTS=1 go test ./internal/e2e/ -run "$tests" -count=1 -v) > "$OUT/real-agents-$ID.txt" 2>&1
+    SN=$OUT/snapshots/$ID
+    mkdir -p "$SN"
+    (cd "$ENGINE" && env -u GH_TOKEN PATH="$NEW/bin:$PATH" HOPSESH_REAL_AGENTS=1 HOPSESH_DRIFT_SNAPSHOTS="$SN" OPENCODE_DISABLE_AUTOUPDATE=1 \
+      go test ./internal/e2e/ -run "$tests" -count=1 -v) > "$OUT/real-agents-$ID.txt" 2>&1
     st=$?
     pass=$(grep -cE '^ *--- PASS' "$OUT/real-agents-$ID.txt" || true)
     fail=$(grep -cE '^ *--- FAIL' "$OUT/real-agents-$ID.txt" || true)
@@ -381,6 +391,23 @@ while read -r T <&3; do
     say "" '```'
     grep -E '^ *--- (FAIL|SKIP)|^(FAIL|ok|panic)' "$OUT/real-agents-$ID.txt" | tail -n 25 >> "$SECTIONS"
     say '```'
+    # The tests' snapshots against last week's: a new migration or API change shows here.
+    if [ "$(count "$SN")" -gt 0 ]; then
+      diffs=0
+      for f in "$SN"/*; do
+        n=$(basename "$f")
+        case $n in *.diff) continue ;; esac
+        if [ -f "$BASE/snapshots/$ID/$n" ] && ! diff -u --label "$n, last week" --label "$n, this week" "$BASE/snapshots/$ID/$n" "$f" > "$SN/$n.diff"; then
+          diffs=$((diffs + 1))
+        else
+          rm -f "$SN/$n.diff"
+        fi
+        printf '%s\t%s\n' "$n" "$(sha "$f")" >> "$SN/sha256.tsv"
+      done
+      say "Snapshots from those tests: $(count "$SN") files, $diffs changed since last week (snapshots/$ID/*.diff, sha256.tsv)."
+    else
+      rmdir "$SN" 2> /dev/null
+    fi
   fi
 
   # Docs: hashed, and diffed against last week's copy when they changed.
