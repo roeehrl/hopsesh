@@ -218,7 +218,8 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 			results[n.Result.CallID] = n.Result
 			resultCoverage[n.Result.CallID] = n.Coverage
 		}
-		if n.Kind == ir.KindToolCall && n.Tool != nil {
+		// Only a call that is rendered carries its result; a skipped one does not.
+		if n.Kind == ir.KindToolCall && n.Tool != nil && (!n.Generated || r.IncludeGenerated) {
 			calls[n.Tool.CallID] = true
 		}
 	}
