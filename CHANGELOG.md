@@ -8,6 +8,59 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **OpenCode, experimental** ([docs/opencode.md](docs/opencode.md)). hopsesh lists, moves
+  and continues OpenCode 2.x sessions (2.1.0 or newer; tested with 2.2 and 2.3) as it does
+  Claude Code and Codex sessions:
+  - **Listing and the session's details:** on this machine and over SSH, with preview,
+    rename, whether a turn is running, Stop (an interrupt through OpenCode) and the context
+    window. A session's subagent sessions are counted with it; archived sessions are a kind
+    you can show in Settings › Agents. Sizes are message counts ("7 messages").
+  - **Moves** between machines go through OpenCode's own export and import, with subagent
+    sessions, keep-both copies, `hopsesh cd` and undo. A move leaves out OpenCode's `/undo`
+    snapshots, archived state, slug, fork link, times, instruction state and jobs; the plan
+    says so.
+  - **Continuing** from Claude Code or Codex into OpenCode (`--in opencode`) and back. A
+    return into OpenCode makes a new session that continues the copy there, since OpenCode
+    can't add to a session it has.
+  - **Protection:** `hopsesh notices install` puts a hopsesh plugin in OpenCode's config
+    folder. In a moved session's original, prompts go through, but every tool call fails with
+    hopsesh's reason. Settings, the Machines page and `hopsesh notices status` say whether
+    OpenCode loaded it, count failed checks and offer to update an older copy.
+    `hopsesh skill install --add-rules` writes approval rules the plugin applies; the skill
+    itself is the copy OpenCode reads in `~/.agents/skills`.
+  - **Account folders:** `hopsesh accounts add opencode <name>`, with its own data, state and
+    config folders and its own service port. Sign-ins are per provider, read from
+    `opencode auth list`.
+  - **OpenCode's background service** is never started, stopped or restarted: commands run
+    with `--standalone` when it is stopped, and a resume uses an `opencode` of the running
+    service's version (yours, the desktop app's bundled one or one it staged). When there is
+    none, hopsesh asks first, since OpenCode would restart its service: the window asks,
+    `hopsesh open` and `hopsesh terminals run` ask or take `--restart-service`, and the client
+    API's `terminal.open` refuses with `blocked` and takes `restartService`.
+  - **Never touched:** OpenCode's database is read only (a fixed list of tables) and never
+    copied, every change goes through OpenCode's own program, and its credentials,
+    `auth.json`, `service.json` and `opencode.json` are never read. No model is called.
+
+  Experimental means it is tested against a stand-in OpenCode in every pull request and,
+  nightly, against a pinned real OpenCode without model calls. It becomes stable after two
+  green weeks of those nightly runs and a manual check on real machines.
+- The secret scan also finds OpenRouter, Groq and xAI API keys.
+- A Claude Code or Codex session running in OpenCode desktop's terminal panel reads
+  "Working in OpenCode desktop".
+- For contributors: the scenario matrix runs Claude Code, Codex and OpenCode as source and
+  target (98 pairwise rows; `-agents` or `HSMATRIX_AGENTS` limits a run), the lineage routes
+  and context transfers run through OpenCode, the nightly job runs the real-agent tests
+  against a pinned OpenCode 2.3.0 (no model calls, `--standalone` enforced, every OpenCode
+  folder the test's own), and the weekly drift check keeps OpenCode's migration ids and
+  OpenAPI document as snapshots and diffs them.
+- For module authors: optional SDK contracts for agents that keep sessions in a database they
+  own: read-only SQL through the Host (`Spec.SQLFiles`, `SQLTables`, `SQLDenied`), roots set
+  inside a variable's folder (`Root.EnvSub`), virtual sessions (`VirtualSessions`,
+  `Materializer`, `SessionStamper`), changes through the agent's program (`SessionStore`,
+  `VendorInstaller`, `InstallChecker`, `SessionIDMinter`), plugin folders (`HookDir`) and the
+  notice hook's own protocol (`NoticeHookProtocol`), `HostResumer`, `HostStarter`,
+  `AccountPreparer`, `ResumeOptions.RestartService` with `ErrRestartsService`,
+  `Bundle.Warnings` and `ListingSummaryKey`. Claude Code and Codex use none of them.
 - For module authors: `ir.WriteResult.Stamp`, the stamp a writer for an agent that keeps
   sessions in a database read right after the write. hopsesh records it when it is given
   and reads one itself otherwise, so writers that give none work as before.
@@ -21,6 +74,42 @@ All notable changes to this project are documented here. The format follows
   inside one of the install's roots, `Stop` of a session that is not open must leave it as
   it was, `ContextCapacity` must give a window above zero or say it is unknown, and the
   identity move is planned for every listed session.
+- For module authors: `HookTrustReporter` now only reports whether the agent runs hopsesh's
+  hook; an agent that runs a new hook only after the user approves it (Codex) also
+  implements the new `HookApprover`.
+- In `hopsesh hosts status` and Settings › Machines, a Codex hook that is installed but that
+  Codex does not run reads "installed, not running in Codex" (a warning, with Codex's
+  detail) instead of "installed", and `hopsesh notices status` says "NOT RUNNING: not seen by
+  the agent".
+- Settings' bell option describes how any agent says it is waiting (the bell or a
+  notification), not Claude Code alone, and the "experimental" badge says what it means in
+  visible text.
+
+### Fixed
+
+- A Codex session forked in Codex 0.166 could not be continued anywhere ("inherited
+  paginated history is not materialized"). Codex 0.166 forks a long thread by naming its
+  parent's first records instead of copying them; hopsesh now reads the parent's records up
+  to that point, checks they are the ones the fork names (a fork of a fork too), then the
+  fork's own. Native fork checks pair them the same way. Adding to such a fork is still
+  refused. (#159)
+- A session whose lineage hopsesh could not verify ("both copies changed: history was
+  compacted or rewound") was refused for every transfer. Continuing it in another agent, or
+  with `--keep-both`, now makes a separate conversation from what it holds now, with a
+  warning in the plan. A plain move of it is still refused. (#159)
+- Fable 5.2 and Mythos 5.1/5.2 have a 1M token window by default; hopsesh used its 64K
+  fallback, so a continuation into Claude Code with those models condensed far more history
+  than needed. (#159)
+- Continuing a session again could lose a tool result whose call an earlier continuation had
+  already carried (such as an OpenCode subagent's answer that came after its parent was
+  continued).
+  Such a result is now carried as text.
+- For contributors: tests on a developer's machine could run that machine's real agents,
+  since hopsesh also looks for agent programs in system folders, inside desktop apps and on
+  the login shell's PATH. A test binary now marks itself a test machine
+  (`HOPSESH_APP_RUNTIMES=off`), so it and every program it starts look only on PATH and under
+  the test's own home; real-agent tests (`HOPSESH_REAL_AGENTS=1`) still find the installed
+  agents. (#162)
 
 ### Security
 
