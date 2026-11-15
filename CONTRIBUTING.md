@@ -63,7 +63,7 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
   background service starts; the test fails if one was registered. The nightly job pins
   the OpenCode it installs (`OPENCODE_VERSION`).
 - OpenCode's protection plugin (`agents/opencode/plugin`, plain JavaScript) has its own tests,
-  `plugin/hopsesh.test.js`, which `go test ./agents/opencode` runs with [Bun](https://bun.sh)
+  `agents/opencode/plugin/hopsesh.test.js`, which `go test ./agents/opencode` runs with [Bun](https://bun.sh)
   when it is installed (CI's Linux and macOS jobs) and skips otherwise.
 - `scripts/update-cli-golden.sh` rewrites `internal/ui/cli/testdata/cli-tree.golden` after a
   command or flag change. Every visible flag must be in the skill or in

@@ -1,7 +1,8 @@
 # Security policy
 
-hopsesh reads and copies Claude Code transcripts, which can contain secrets, between machines
-over SSH. Security reports are very welcome.
+hopsesh reads and copies coding-agent sessions (Claude Code, Codex and OpenCode), which can
+contain secrets, between machines over SSH. For OpenCode it also reads OpenCode's database and
+installs a plugin that runs inside OpenCode. Security reports are very welcome.
 
 ## Reporting a vulnerability
 

@@ -31,9 +31,11 @@ All notable changes to this project are documented here. The format follows
   - **Account folders:** `hopsesh accounts add opencode <name>`, with its own data, state and
     config folders and its own service port. Sign-ins are per provider, read from
     `opencode auth list`.
-  - **OpenCode's background service** is never started, stopped or restarted: commands run
-    with `--standalone` when it is stopped, and a resume uses an `opencode` of the running
-    service's version (yours, the desktop app's bundled one or one it staged). When there is
+  - **OpenCode's background service** is never started, stopped or restarted by hopsesh's own
+    commands, which run with `--standalone` when it is stopped. Opening a session runs
+    OpenCode itself, which starts a stopped service as opening OpenCode does, with an
+    `opencode` of the running service's version (yours, the desktop app's bundled one or one
+    it staged). When there is
     none, hopsesh asks first, since OpenCode would restart its service: the window asks,
     `hopsesh open` and `hopsesh terminals run` ask or take `--restart-service`, and the client
     API's `terminal.open` refuses with `blocked` and takes `restartService`.
@@ -102,8 +104,7 @@ All notable changes to this project are documented here. The format follows
   than needed. (#159)
 - Continuing a session again could lose a tool result whose call an earlier continuation had
   already carried (such as an OpenCode subagent's answer that came after its parent was
-  continued).
-  Such a result is now carried as text.
+  continued). Such a result is now carried as text.
 - For contributors: tests on a developer's machine could run that machine's real agents,
   since hopsesh also looks for agent programs in system folders, inside desktop apps and on
   the login shell's PATH. A test binary now marks itself a test machine
