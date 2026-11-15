@@ -40,6 +40,12 @@ jobs:
       - name: GUI build dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      # The OpenCode plugin's own tests (agents/opencode/plugin) run under go test where Bun
+      # is installed, and skip elsewhere (Windows: not yet run there).
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: runner.os != 'Windows'
+        with:
+          bun-version: 1.4.4
       - name: vet
         run: go vet ./...
       - name: the terminal's bundled pseudoconsole (Windows)
@@ -341,6 +347,8 @@ jobs:
       - name: scenario matrix over loopback SSH
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          HSMATRIX_AGENTS: claude,codex # OpenCode's rows run on Windows in the mesh (nightly), to keep this job short
         run: ./scripts/matrix-loopback.ps1 -Bin bin -Label "windows→windows" -Out "$env:RUNNER_TEMP\hsmatrix"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ failure() }}
@@ -375,6 +383,8 @@ jobs:
           done
       - name: scenario matrix, Windows → Linux (WSL2) and Linux → Windows
         shell: pwsh
+        env:
+          HSMATRIX_AGENTS: claude,codex # OpenCode's rows between systems run in the mesh, to keep this job in its time
         run: ./scripts/matrix-wsl.ps1 -Bin bin -LinuxBin bin-linux -Out "$env:RUNNER_TEMP\hsmatrix"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ failure() }}
@@ -407,6 +417,8 @@ jobs:
             CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "bin-linux/${p#*:}" "./${p%%:*}"
           done
       - name: scenario matrix, macOS → Linux (Lima VM) and Linux → macOS
+        env:
+          HSMATRIX_AGENTS: claude,codex # OpenCode's rows between systems run in the mesh, to keep this job in its time
         run: scripts/matrix-lima.sh bin bin-linux "$RUNNER_TEMP/hsmatrix"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ failure() }}
