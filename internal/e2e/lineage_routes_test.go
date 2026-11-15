@@ -130,6 +130,10 @@ func runRoute(t *testing.T, route string, at map[byte]string, patterns ...string
 	}
 	original := current.Key.Session
 	current.Key.Profile = installs['A'][currentAgent].ProfileID()
+	originalKey := current.Key
+	// The sessions at A of this conversation, and the original's text when it was last left.
+	aCopies := map[agent.SessionID]bool{original: true}
+	var originalText string
 	if len(patterns) > 0 && patterns[0] == "paginated" {
 		promoteCodexPaginated(t, current.Path)
 	}
@@ -159,6 +163,9 @@ func runRoute(t *testing.T, route string, at map[byte]string, patterns ...string
 			}
 		}
 		current = findRouteSession(t, src, mods[currentAgent], installs[from][currentAgent], current.Key)
+		if from == 'A' && current.Key.Session == original {
+			originalText = routeText(t, src, mods[currentAgent], installs[from][currentAgent], current)
+		}
 		lin, err := lineage.Read(host.LocalFS(), current.Path)
 		if err != nil {
 			t.Fatal(err)
@@ -282,8 +289,39 @@ func runRoute(t *testing.T, route string, at map[byte]string, patterns ...string
 		if journey.Transfers != transfers {
 			t.Fatalf("transfers %+v at hop %d", journey, i)
 		}
-		if pattern != "pressure" && to == 'A' && current.Key.Session != original && !rollsOver(mods[nextAgent]) {
-			t.Fatalf("return must select original: %s", current.Key)
+		if pattern != "pressure" && to == 'A' && current.Key.Session != original {
+			if !rollsOver(mods[nextAgent]) {
+				t.Fatalf("return must select original: %s", current.Key)
+			}
+			// D4: the return continues a copy here in a new session, and that copy stays as it was.
+			if len(p.Blockers) == 0 && !p.NoWork {
+				if aCopies[current.Key.Session] {
+					t.Fatalf("hop %d: the return wrote into the existing copy %s", i, current.Key)
+				}
+				var rolled *lineage.Rollover
+				for _, h := range graph.Hops {
+					if h.ID == p.OperationID && h.To == replica {
+						rolled = h.Rollover
+					}
+				}
+				if rolled == nil {
+					t.Fatalf("hop %d: the return to %s records no rollover", i, current.Key)
+				}
+				var continued agent.SessionID
+				for _, r := range graph.Replicas {
+					if r.ID == rolled.Replica {
+						continued = r.Key.Session
+					}
+				}
+				if !aCopies[continued] {
+					t.Fatalf("hop %d: the return to %s continues %q, not a copy here", i, current.Key, continued)
+				}
+				aCopies[current.Key.Session] = true
+			}
+			orig := findRouteSession(t, dst, mods[nextAgent], installs[to][nextAgent], originalKey)
+			if got := routeText(t, dst, mods[nextAgent], installs[to][nextAgent], orig); got != originalText {
+				t.Fatalf("hop %d: the original changed on a return:\n%s\nwas:\n%s", i, got, originalText)
+			}
 		}
 	}
 	graph, _ := lineage.Read(host.LocalFS(), current.Path)
@@ -291,6 +329,17 @@ func runRoute(t *testing.T, route string, at map[byte]string, patterns ...string
 	if j := graph.Journey(); j.RoundTrips != expected {
 		t.Fatalf("journey %+v; origin returns=%d", j, expected)
 	}
+}
+
+// routeText is a session's text as its agent reads it.
+func routeText(t *testing.T, l location, m agent.Module, in agent.Install, s agent.Summary) string {
+	t.Helper()
+	var b strings.Builder
+	for _, n := range readAll(t, l, m, in, s).Nodes {
+		b.WriteString(n.Text)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }
 
 // rollsOver reports whether a return into the agent's existing copy continues it in a
