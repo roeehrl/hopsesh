@@ -168,7 +168,7 @@ Works out a move or continuation. Nothing changes.
 |---|---|
 | `session` | a ref from the catalog |
 | `to` | `""` (or this machine's name) brings the session here. Another machine's name sends it there; only a session on this machine can be sent (feature `plan.push`). To bring a session to another machine, ask hopsesh there. |
-| `agent` | continue it in another agent (`"claude"`, `"codex"`); `""` keeps its own |
+| `agent` | continue it in another agent (`"claude"`, `"codex"`, `"opencode"`); `""` keeps its own |
 | `dir` | the folder it goes to (`""`: hopsesh finds or clones the same repository) |
 | `fork` | keep the original usable instead of blocking it |
 | `clone` | clone the repository there when it isn't (into hopsesh's repositories folder) |

@@ -220,8 +220,9 @@ unchanged. Scheduled runs acquire the new coverage when this change lands on mai
 **Floors.** The code gates features on versions (`agent.VersionAtLeast`,
 `HookVersionAtLeast`): Claude Code 2.1.284 (protection hooks) and 2.1.285 (`--desktop
 --resume`), Codex 0.129.0 (hooks and hook trust through app-server `hooks/list`) and 0.156.0
-(`--no-daemon` in hopsesh's own tabs), Claude desktop 2.19675.1 (focusing a running session
-through `claude://resume`). Each is a `floors` entry on its target, with its source file;
+(`--no-daemon` in hopsesh's own tabs), OpenCode 2.1.0 (every OpenCode command, API call and
+table hopsesh uses) and 2.2.7 (the protection plugin), Claude desktop 2.19675.1 (focusing a
+running session through `claude://resume`). Each is a `floors` entry on its target, with its source file;
 `TestFloorsDeclared` parses the code and fails on a floor no target declares. A target's
 `baseline` is the highest of its tested version (the newest fixture folder) and its floors,
 and the probe compares the latest help and app-server schema with the baseline's, so a
@@ -253,6 +254,35 @@ are the bundles, the bundled runtimes, the desktop sign-in and the URL schemes
 (`-v`) count in the removed/added lists; the real-agent tests run with `-v` and the probe
 counts passed, failed and skipped tests (all skipped is incomplete coverage), and it says
 when the installed CLI does not report the latest version.
+
+### OpenCode
+
+OpenCode (`opencode`, latest from npm's `@opencode/cli`) keeps its sessions in a SQLite
+database and changes its schema in bursts, so its target watches more than help text:
+
+- **Real-agent tests with snapshots.** The probe runs hopsesh's real-agent tests against the
+  latest OpenCode (`TestRealOpenCode`, no model calls, every OpenCode folder the test's own,
+  `--standalone` enforced). Besides passing or failing, they write two snapshots to
+  `HOPSESH_DRIFT_SNAPSHOTS`: the database's migration ids (`opencode-migrations.txt`) and
+  OpenCode's OpenAPI document (`opencode-openapi.json`, its keys sorted so a diff shows only
+  real changes). The probe keeps them in `intel/snapshots/opencode/` and diffs each against
+  last week's (`*.diff`), so a new migration or a changed API call shows up even when the
+  tests still pass. The schema gate and the API calls hopsesh makes are checked by the tests
+  themselves.
+- **Formats.** `opencode-session` and `opencode-message` (the `session_v2`, `session_message`
+  and `session_part` columns hopsesh reads), `opencode-catalog` (the models.dev catalog cached
+  in `kv`, for context windows) and `opencode-plugin` (the plugin API hopsesh's protection
+  plugin uses: `Plugin.define`, the tool, permission and session hooks, session events,
+  instruction entries and plugin storage).
+- **Canaries** in OpenCode's own code: the tables and columns above, the service's version
+  `mismatch` rule, `OPENCODE_DB`, and the plugin API's names.
+- **OpenCode desktop** is an `app` target (`opencode-desktop`): its bundled and staged CLIs,
+  which hopsesh picks to resume a session with the running service's version, its process
+  names and its `opencode://` scheme. Its `latest` is `none`: there is no public version feed
+  of the app, whose releases come with the CLI's.
+- **Isolation.** The probe runs every CLI with OpenCode's data, state, cache and config
+  folders in its scratch home and OpenCode's auto-update off, so no probe reads or writes a
+  real OpenCode database or starts a service.
 
 ### Movement and return coverage
 

@@ -1,10 +1,10 @@
 # hopsesh design
 
-*hopsesh is unofficial and not affiliated with Anthropic or OpenAI. §19 lists what is built and what is planned.*
+*hopsesh is unofficial and not affiliated with Anthropic, OpenAI or Anomaly. §19 lists what is built and what is planned.*
 
 ## 1. What it does, and what it deliberately doesn't
 
-**Does.** hopsesh moves coding-agent sessions between your machines and between agents. Today the agents are Claude Code and Codex; each is a module (§5), and more can be added without touching the core.
+**Does.** hopsesh moves coding-agent sessions between your machines and between agents. Today the agents are Claude Code, Codex and, experimentally, OpenCode; each is a module (§5), and more can be added without touching the core. OpenCode keeps its sessions in a database it owns, so its module reads that database read only and makes every change through OpenCode's own program ([OpenCode](opencode.md); the plan and its decisions: [opencode-design.md](opencode-design.md)).
 
 With your permission, hopsesh:
 - finds your machines (Tailscale and `~/.ssh/config`) and checks SSH access to each;
@@ -28,7 +28,7 @@ Either way it finds the repository here (or clones it), recreates the worktree, 
 
 ## 2. Name, repo and license
 
-The trademark constraint first: Anthropic forbids "Claude Code" or "Anthropic" in a product name, and hopsesh applies the same caution to OpenAI's marks. The tool says "works with Claude Code and Codex" in plain text, with an "unofficial, not affiliated" notice naming both vendors.
+The trademark constraint first: Anthropic forbids "Claude Code" or "Anthropic" in a product name, and hopsesh applies the same caution to OpenAI's marks. The tool says "works with Claude Code, Codex and OpenCode" in plain text, with an "unofficial, not affiliated" notice naming every vendor (the notice is made from the modules' vendors).
 
 **Name.** `hopsesh` ("hop a session") was free on GitHub, Homebrew, Scoop, winget, Debian, Arch, npm, PyPI and crates.io when checked (2026-10-02), and isn't tied to one vendor.
 
@@ -58,7 +58,7 @@ The trademark constraint first: Anthropic forbids "Claude Code" or "Anthropic" i
                 hosts · repos · rewrite · scan · launch · integrate · registry · audit · lnp
                 term (the relay) · pty (the app's terminal tabs)
        │
-  modules       agents/claude · agents/codex          (registered in internal/agents/all)
+  modules       agents/claude · agents/codex · agents/opencode   (registered in internal/agents/all)
        │
   contract      sdk/agent (Module, Host, capabilities) · sdk/ir (conversation IR, node ids)
 ```
@@ -84,17 +84,19 @@ A module is compiled in (no plugins, no WASM: revisit if third parties ask, a mo
 
 Optional interfaces add capabilities, computed from what a module implements (`agent.Capabilities`) plus `Spec.Features`:
 
-| Interface | Capability | Claude Code | Codex |
-|---|---|---|---|
-| `LiveDetector`, `Stopper` | `live`, `stop` | pid registry, SIGTERM | writer-lock probe, working or idle from the last turn; quits only an idle thread's `codex` process (the lock's holder) |
-| `AccountProber`, `Sanitizer` | `account`, `sanitize` | `claude auth status`; drop signed reasoning across accounts | Codex's own `account/read`; drop encrypted reasoning and compaction across accounts |
-| `Reader`, `Writer` | `read`, `write` | both; native replay of exact shell calls | both; history as text |
-| `Importer` | `import` | | Codex's own importer of Claude Code sessions |
-| `PostInstaller` | `post-install` | | makes Codex list the session (`thread/read`, `thread/name/set`) |
-| `Integrator` | `integrate` | skill folder, permission rules | `~/.agents/skills`, a `.rules` file |
-| `MovementHookIntegrator` | local hooks | deterministic movement context on resume or prompt submission | |
-| `Previewer` | `preview` | the end of the transcript, walked back by `parentUuid` from the last message | the end of the rollout's messages |
-| `Renamer` | `rename` | `custom-title` record (as `/rename`) | thread name in `session_index.jsonl` |
+| Interface | Capability | Claude Code | Codex | OpenCode (experimental) |
+|---|---|---|---|---|
+| `LiveDetector`, `Stopper` | `live`, `stop` | pid registry, SIGTERM | writer-lock probe, working or idle from the last turn; quits only an idle thread's `codex` process (the lock's holder) | the turn claim in the database, the service's active turns; interrupts a turn through OpenCode's API, never ends the service |
+| `AccountProber`, `Sanitizer` | `account`, `sanitize` | `claude auth status`; drop signed reasoning across accounts | Codex's own `account/read`; drop encrypted reasoning and compaction across accounts | the providers `opencode auth list` names (no person, so no account key); drop reasoning across accounts |
+| `Reader`, `Writer` | `read`, `write` | both; native replay of exact shell calls | both; history as text | both; native replay of exact shell calls; never adds to a session it has (a return makes a new one) |
+| `Importer` | `import` | | Codex's own importer of Claude Code sessions | |
+| `PostInstaller` | `post-install` | | makes Codex list the session (`thread/read`, `thread/name/set`) | the install itself: `opencode session import` (`VendorInstaller`) |
+| `Integrator` | `integrate` | skill folder, permission rules | `~/.agents/skills`, a `.rules` file | Codex's `~/.agents/skills` copy; rules the plugin reads |
+| `MovementHookIntegrator` | local hooks | deterministic movement context on resume or prompt submission | | a plugin folder that refuses a moved original's tool calls |
+| `Previewer` | `preview` | the end of the transcript, walked back by `parentUuid` from the last message | the end of the rollout's messages | the last settled messages, from the database |
+| `Renamer` | `rename` | `custom-title` record (as `/rename`) | thread name in `session_index.jsonl` | OpenCode's API (`PATCH /api/session/{id}`) |
+
+**Sessions in a database (OpenCode).** OpenCode keeps every session in one SQLite file that its own background service writes. The module never writes it and never copies it: the Host gives it read-only SQL over the tables its Spec allows (`SQLFiles`, `SQLTables`; the credential tables are denied), and every change goes through OpenCode's program (`session import|delete|export`, `opencode api`), with `--standalone` when the service is stopped, so hopsesh never starts, stops or restarts it. Its sessions are virtual: a bundle file is made from the session (`Materializer`, OpenCode's own export), sizes and cursors count messages, a stamp replaces a file's size and time in guards and caches (`SessionStamper`), undo deletes or restores through the agent (`SessionStore`), and new ids are OpenCode's (`SessionIDMinter`). Lineage sits beside an anchor file hopsesh keeps per session. [opencode.md](opencode.md) has what this means for users, [opencode-design.md](opencode-design.md) the design.
 
 **Preview and rename.** A module that implements `Previewer` reads the end of a session's conversation for the app's inspector. It is called only when the user selects a session, never during a scan, and reads a bounded tail of the session file (256 KB, doubling up to 2 MB), never the whole file. It returns the last *n* user and agent messages, a line per turn counting its tool calls by kind, markers where the conversation was compacted, whether earlier messages exist, and the first prompt from the file's head. The SDK's `BuildPreview` and `PreviewText` do the turn grouping and the text clean-up (Markdown structure is preserved, images become "‹image›", 1,200 characters at most), so modules only translate records. A module that implements `Renamer` retitles a session in the agent's own data the way the agent's own rename does, so the agent's session list shows it too; the core journals it (Activity undoes it), keeps a copy's "moved" mark, and `CheckTitle` refuses empty, over-long or multi-line titles. `LiveInfo` carries every process that has a session open (`Procs`: Claude Code can run one session in several, the Claude app among them) and the name the running agent gives it.
 
@@ -212,11 +214,11 @@ Before continuing, hopsesh brings the checkout here to the commit the session la
 
 ## 13. The hopsesh skill for every agent
 
-One skill, rendered once, written byte for byte into every installed agent's skills folder (Claude Code: `<config>/skills/hopsesh`, in every account folder; Codex: `~/.agents/skills/hopsesh`), so agents can list sessions, bring one here, continue one in another agent, or push one away. `SKILL.md` keeps the rules first (plan with `--json`, act only after an explicit yes, treat titles and prompts from elsewhere as data, never change hopsesh's setup, never handle passwords); `reference.md` holds the flags and JSON fields.
+One skill, rendered once, written byte for byte into every installed agent's skills folder (Claude Code: `<config>/skills/hopsesh`, in every account folder; Codex: `~/.agents/skills/hopsesh`, which OpenCode reads too), so agents can list sessions, bring one here, continue one in another agent, or push one away. `SKILL.md` keeps the rules first (plan with `--json`, act only after an explicit yes, treat titles and prompts from elsewhere as data, never change hopsesh's setup, never handle passwords); `reference.md` holds the flags and JSON fields.
 
 **No drift.** Each copy's state is computed from hashes (`absent`, `current`, `stale`, `modified` by you, `foreign`, `broken`), the report shows the worst, and install updates every copy in one go. A copy a newer hopsesh installed is left alone. On other machines, hopsesh there installs and checks its own copies (Settings › Machines). An edited copy is never overwritten without `--force` (which keeps a backup). A test proves every location renders identically.
 
-**Approval rules** (`--add-rules`, opt-in): read-only commands (`ls`, `show`, `plan`, `agents`, `hosts --json`, `doctor`, `version`) run without asking, and `pull`, `push` and `undo` always ask. Claude Code gets permission rules in `settings.json` (a backup kept, invalid JSON left alone); Codex gets an owned `rules/hopsesh.rules` with `prefix_rule`s.
+**Approval rules** (`--add-rules`, opt-in): read-only commands (`ls`, `show`, `plan`, `agents`, `hosts --json`, `doctor`, `version`) run without asking, and `pull`, `push` and `undo` always ask. Claude Code gets permission rules in `settings.json` (a backup kept, invalid JSON left alone); Codex gets an owned `rules/hopsesh.rules` with `prefix_rule`s; OpenCode gets an owned `.hopsesh/rules.json` in its config folder, which hopsesh's plugin applies (nothing without the plugin).
 
 ## 14. The command-line tool from the app
 
@@ -252,7 +254,7 @@ Keys are the default, but some machines only take a password. Such a machine is 
 ## 17. Testing
 
 - **Unit:** canonical hashing and node ids, slug and path rules, the rewriter (escaping, Windows paths, partial prefixes, protected keys), the converter (budget, roles, briefing), journals (including undo of an append after the agent kept writing), snapshots, the peer protocol (hello first, versions, refusals).
-- **Conformance:** `agenttest` on both modules, with fixtures from Claude Code 2.1.284 and Codex 0.153.2.
+- **Conformance:** `agenttest` on every module, with fixtures from Claude Code 2.1.284, Codex 0.153.2 and OpenCode 2.3.0 (a sandbox capture, scrubbed; the database is built from SQL at test time). OpenCode's stand-in (`internal/testkit/fakeopencode`) keeps a real database with 2.3.0's schema and plays the commands hopsesh runs; differential runs against the real 2.3.0 checked its answers.
 - **End to end** (`internal/e2e`): moves, conflicts and keep-both; Claude ↔ Codex continuations with the round trip and the native copy; `--carry-rules`; the skill in every agent; a push to a real `hopsesh peer --stdio` process, with undo on both sides and refusal.
 - **Desktop backend:** the window's calls end to end (scan, continue, round trip, Activity and undo with and without force, sending to another machine, machines and receiving, starting fresh from an old configuration).
 - **Clouds:** a stand-in cloud (`internal/testkit/fakecloud`: a bare repository as the GitHub remote, the cloud verbs of the stand-in `claude`) under the conformance kit (`agenttest.RunCloud`), end-to-end hand-off and bring-back round trips, failures (refused push, signed out, not eligible, not on GitHub), the scenario matrix's `handoff`, `cloud-roundtrip` and `cloud-hop` rows, hops both ways between Claude Code cloud and Codex cloud, the branch clean-up, and browser specs. `scripts/cloud-smoke.sh` checks the real cloud by hand (a teleport; a hand-off whose codeword the cloud recalls).
@@ -269,7 +271,7 @@ Keys are the default, but some machines only take a password. Such a machine is 
 - **Terminal tabs:** `internal/core/pty` runs real programs in tabs and drives them through the stream protocol with a terminal emulator (`charmbracelet/x/vt`, via `ptytest`). The tests cover the device-attributes answer, raw keys, resize, exit codes, Ctrl-C, closing, states, the capture, scrollback, flow control, links, the environment and output that never leaves memory. On Windows they run on both the system's and the bundled ConPTY. A hand-off's `claude --cloud` step also runs in a tab (`internal/e2e`), and the gate is tested on its own. `scripts/app-terminal-check.sh` (nightly, macOS and Linux) and `scripts/windows-terminal-check.ps1` (CI) open the real hopsesh Terminal window (xterm.js in WebKit or WebView2) in a test build and check that a tab's program gets the emulator's answer through the stream; on Windows a real-window spec also opens a shell tab from the app's window and ends it.
 - **Layering:** `internal/archtest`.
 - **Over real SSH** (Linux CI, a second local user behind the runner's sshd): `integration-test.sh` (pull, continue in Codex, push and undo both sides, refusal), `roundtrip-test.sh` (code follows, titles unchanged, hop back, conflict, keep-both), `password-test.sh` (a separate password-only sshd).
-- **Against the installed agents**, opt-in: `HOPSESH_REAL_AGENTS=1 go test ./internal/e2e` (Codex lists what hopsesh writes; Codex's importer route; Codex's login; quitting a real Codex TUI found by its lock), and `HOPSESH_PAID_SMOKE=1 scripts/paid-smoke.sh`, a real Claude Code → Codex → Claude Code round trip with three short model calls. `HOPSESH_PAID_SMOKE=1 scripts/paid-paginated-smoke.py` uses two calls to verify a controlled standalone paginated Codex → Claude → original Codex return, including preserved native prefix and contiguous ordinals.
+- **Against the installed agents**, opt-in: `HOPSESH_REAL_AGENTS=1 go test ./internal/e2e` (Codex lists what hopsesh writes; Codex's importer route; Codex's login; quitting a real Codex TUI found by its lock; OpenCode's lifecycle, schema gate, API and the stand-in's answers against its own, with no model call, every OpenCode folder the test's own and `--standalone` enforced by a guard), and `HOPSESH_PAID_SMOKE=1 scripts/paid-smoke.sh`, a real Claude Code → Codex → Claude Code round trip with three short model calls. `HOPSESH_PAID_SMOKE=1 scripts/paid-paginated-smoke.py` uses two calls to verify a controlled standalone paginated Codex → Claude → original Codex return, including preserved native prefix and contiguous ordinals.
 
 ## 18. Distribution, signing, updates
 
@@ -280,10 +282,11 @@ Keys are the default, but some machines only take a password. Such a machine is 
 
 ## 19. Status
 
-**Built:** the module SDK with Claude Code and Codex modules; moves, continuations both ways (history, note, native replay, Codex's importer), the briefing and loss report, `--carry-rules`, the native copy; lineage manifests, round trips with append, conflicts and keep-both; code sync; peers and push; the skill in every agent with approval rules; CLI, TUI and the desktop app on macOS and Windows; password login (Keychain, Windows Credential Manager); self-update of the CLI and both apps; the release pipeline; cloud sessions (Claude Code cloud and Codex cloud both ways, Copilot, Jules, Devin and Amp, hops from one cloud to another through this machine, branch clean-up after merge; Copilot, Jules, Devin and Amp experimental, tested against stand-ins only); the app's hopsesh Terminal window (tabs on a PTY or Windows' ConPTY, xterm.js); the terminal-app adapter (iTerm2 tabs and labels, Terminal, Windows Terminal; showing a running session's tab) and the opt-in iTerm2 API client. Released: 0.4.0.
+**Built:** the module SDK with Claude Code and Codex modules, and an experimental OpenCode module (stable after two green weeks of the nightly real-agent job); moves, continuations both ways (history, note, native replay, Codex's importer), the briefing and loss report, `--carry-rules`, the native copy; lineage manifests, round trips with append, conflicts and keep-both; code sync; peers and push; the skill in every agent with approval rules; CLI, TUI and the desktop app on macOS and Windows; password login (Keychain, Windows Credential Manager); self-update of the CLI and both apps; the release pipeline; cloud sessions (Claude Code cloud and Codex cloud both ways, Copilot, Jules, Devin and Amp, hops from one cloud to another through this machine, branch clean-up after merge; Copilot, Jules, Devin and Amp experimental, tested against stand-ins only); the app's hopsesh Terminal window (tabs on a PTY or Windows' ConPTY, xterm.js); the terminal-app adapter (iTerm2 tabs and labels, Terminal, Windows Terminal; showing a running session's tab) and the opt-in iTerm2 API client. Released: 0.4.0.
 
 **Planned:**
-- more modules, Reader first: OpenCode, Hermes, Gemini CLI, Goose, Amp, Crush, Cursor CLI;
+- more modules, Reader first: Hermes, Gemini CLI, Goose, Amp, Crush, Cursor CLI;
+- OpenCode: adding to an existing session (delete and import again, with a backup) and OpenCode 1.x, both optional ([opencode-design.md](opencode-design.md) §8);
 - clouds that need an API key (Cursor, Claude Managed Agents), only on a concrete request;
 - quitting sessions and probing locks on Windows (no graceful signal there yet);
 - a compatibility matrix of pinned agent versions.
@@ -316,7 +319,7 @@ The redesign (approved 2026-10-02):
 13. Codex lists installed sessions at once (on for this machine).
 14. One skill, identical bytes in every agent's folder, with per-copy status and no drift.
 15. Global instructions are reported; `--carry-rules` carries them.
-16. Next modules Reader-first (OpenCode, Hermes, Gemini, Goose, Amp, Crush, Cursor); "coding-agent sessions" wording with a notice naming both vendors.
+16. Next modules Reader-first (Hermes, Gemini, Goose, Amp, Crush, Cursor; OpenCode came first, with a writer too); "coding-agent sessions" wording with a notice naming every vendor.
 
 ### Shared navigation and machine scan feedback
 

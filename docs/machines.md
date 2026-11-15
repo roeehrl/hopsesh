@@ -96,13 +96,16 @@ offers **Update hopsesh on ‹machine›**, which is the same setup.
 hopsesh reads who is signed in from each tool's own public answers and identity fields: Claude
 Code's `auth status` and the account ids in `~/.claude.json`, Claude desktop's last known
 account id and its session index folders, Codex's `account/read` and the account and user ids
-in `auth.json`. It never reads a token: not the Keychain's, `.credentials.json`, Codex's tokens,
-or Claude desktop's token caches and cookies. Machines exchange fingerprints and emails only;
+in `auth.json`, and which providers OpenCode names in `opencode auth list` (OpenCode signs in per
+provider, not per person). It never reads a token: not the Keychain's, `.credentials.json`,
+Codex's tokens, Claude desktop's token caches and cookies, or OpenCode's credential tables,
+`auth.json` and `opencode.json`. Machines exchange fingerprints and emails only;
 no credential ever crosses machines.
 
 ## Checking every machine
 
 `hopsesh doctor --all-machines` checks each allowed machine: SSH, hopsesh there and how it runs,
-its agents, its protection hooks and its skill. Settings › **Machines** shows the same for each
+its agents, its protection hooks (for OpenCode, hopsesh's plugin, and whether OpenCode
+loaded it) and its skill. Settings › **Machines** shows the same for each
 machine, sets up what it can from here (every agent folder's hooks and skill in one step), and
 holds this machine's command, skill and protection hooks in full.

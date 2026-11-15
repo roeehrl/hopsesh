@@ -1,6 +1,6 @@
 # Accounts and desktop opening
 
-Accounts are named **runtime profiles** for Claude Code and Codex. Each pins an independent
+Accounts are named **runtime profiles** for Claude Code, Codex and OpenCode. Each pins an independent
 vendor state directory to a persistent machine identity. Names and tags are labels: several
 profiles can share the Personal tag, have different emails, or have identical display names.
 Selection uses the profile ID, never an email or label.
@@ -13,20 +13,20 @@ Selection uses the profile ID, never an email or label.
   to each, and how many sessions each ran. An account seen only in session records (signed in
   nowhere hopsesh can check) is shown apart, until it is signed in somewhere.
 - **Where you're signed in**: machines × tools (Claude Code in the terminal, Claude desktop,
-  Codex in the terminal, the Codex app), each cell with the tool's version and who it is signed
+  Codex in the terminal, the Codex app, OpenCode in the terminal, OpenCode desktop), each cell with the tool's version and who it is signed
   in as in each folder. Claude desktop keeps its own sign-in, apart from the terminal's, and
   both write to `~/.claude`; when they are different accounts, the screen says so. The Codex
   app shares the sign-in of the folder it uses. A Mac reached over SSH alone can't show its
   sign-ins (the Keychain is locked to SSH): set up hopsesh there ([Machines](machines.md)).
 - **Folders**: where each tool keeps its sessions on each machine (`default` is the tool's own
-  `~/.claude` or `~/.codex`), which tools use it, the sessions each account ran in it, and
+  `~/.claude`, `~/.codex` or `~/.local/share/opencode`), which tools use it, the sessions each account ran in it, and
   **New session…** to start one there as its account.
 
 **Check all machines** rechecks every sign-in; each folder has its own check.
 
 ## Adding an account
 
-**Add an account…** makes a new folder for Claude Code or Codex on this machine or on any
+**Add an account…** makes a new folder for Claude Code, Codex or OpenCode on this machine or on any
 machine with hopsesh running, `~/.hopsesh/accounts/<agent>/<name>`, and signs it in. On
 another machine the sign-in runs there in a tab here: open its link in your browser on this
 machine (Codex prints a device code), or choose to sign in at that machine's screen. Your other
@@ -38,6 +38,12 @@ sign-ins are not touched, and nothing is copied between machines.
   there that runs the agent in that folder, for using it outside hopsesh. Forgetting the
   account removes it; a command of that name that hopsesh didn't add is never replaced.
 - Claude desktop always uses `~/.claude`, so sessions in an added folder open in a terminal.
+- An OpenCode folder holds its own `data`, `state` and `config` folders, and its background
+  service gets a port of its own (two services can't share one); the folder's row shows it.
+  It signs in with `opencode auth login --standalone` run in the folder. Only `cli.json`'s
+  display settings are copied from the default folder, never `opencode.json` (it may hold
+  provider keys). OpenCode desktop uses only the default folder. See
+  [OpenCode › Accounts](opencode.md#accounts).
 
 Afterwards hopsesh reads back which account the folder got. To use another account, add a
 folder for it rather than signing an existing folder in again: two folders for one account only
@@ -61,6 +67,9 @@ session is labelled with the accounts recorded running it, never with its folder
   record, since 2.1.281) and, with Remote Control, the owning user (`bridge-session`).
 - **Codex** records the account and user that created a session (`creator_account_id`,
   `creator_user_id`, since 0.157), never updated on resume.
+- **OpenCode** signs in per provider, not per person, and records no account in a session:
+  hopsesh shows which providers each folder is signed in to (from `opencode auth list`,
+  never a key or a label), and an OpenCode session shows no account.
 - **Hopsesh** records the account a session's root is signed in to each time the agent starts
   it or takes a prompt, through its hook, in `~/.local/state/hopsesh/owners/` (per folder).
   This covers Codex resumes, older versions and sessions without Remote Control from then on.
@@ -96,8 +105,10 @@ same account. Only fingerprints of these IDs are stored or sent to your other ma
   place, continues a cleaned copy instead, keeping the original.
 - A session with no record of its account counts as another account when it holds such
   reasoning.
+- **OpenCode**: a session taken into another OpenCode folder continues there as a new session
+  with its conversation (OpenCode's import), and the original stays as it was.
 
-In the TUI, `a` opens Accounts; `1`/`2` adds Claude/Codex, `n` renames, `t` edits tags, `/`
+In the TUI, `a` opens Accounts; `1`/`2`/`3` adds Claude/Codex/OpenCode, `n` renames, `t` edits tags, `/`
 filters, `u` selects untagged profiles, `g` cycles grouping, and the arrow keys collapse/expand
 groups. `d` forgets a registration after confirming its name; `l` signs in and `r` scans. The setup asks for a name, tags, an optional existing
 root and its machine. `A` on a selected session chooses a destination account and opens a plan.
@@ -108,6 +119,7 @@ hopsesh accounts list --json
 hopsesh accounts add claude "First personal" --tag Personal,Research
 hopsesh accounts add claude "Second personal" --tag Personal
 hopsesh accounts add codex "Client A" --tag Work
+hopsesh accounts add opencode Work --tag Work
 hopsesh accounts login <profile-id> --run
 hopsesh accounts edit <profile-id> --name "Research" --tag Personal,Research
 hopsesh accounts forget <profile-id>
