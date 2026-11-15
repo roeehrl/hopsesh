@@ -29,11 +29,11 @@ as OpenCode does. `hopsesh agents` shows what it found.
 ## Listing, moving and continuing
 
 ```sh
-hopsesh ls --agent opencode                     # OpenCode's sessions here and on your machines
-hopsesh plan studio:opencode/ses_3f1a2b --json   # what moving one here would do
-hopsesh pull studio:opencode/ses_3f1a2b          # move it here, in OpenCode
-hopsesh pull studio:claude/7f3c2a1e --in opencode   # continue a Claude Code session in OpenCode
-hopsesh pull opencode/ses_3f1a2b --in codex      # continue an OpenCode session in Codex
+hopsesh ls --agent opencode                       # OpenCode's sessions here and on your machines
+hopsesh plan studio:opencode/ses_3f1a2b --json    # what moving one here would do
+hopsesh pull studio:opencode/ses_3f1a2b           # move it here, in OpenCode
+hopsesh pull studio:claude/7f3c2a1e --in opencode # continue a Claude Code session in OpenCode
+hopsesh pull opencode/ses_3f1a2b --in codex       # continue an OpenCode session in Codex
 ```
 
 - **Listing.** A session's subagent sessions are counted with it, not listed apart. Sessions
@@ -48,7 +48,9 @@ hopsesh pull opencode/ses_3f1a2b --in codex      # continue an OpenCode session 
 - **Moves** go through OpenCode's own export and import: the copy is made by
   `opencode session import`, with its paths rewritten for the new machine, and its subagent
   sessions come with it. A session is not moved while a turn runs, nor one whose turn was cut
-  off by a service shutdown (OpenCode resumes such a turn at its next start).
+  off by a service shutdown (OpenCode resumes such a turn at its next start). When both copies
+  changed, the move stops until you choose `--keep-both` (a separate session) or `--replace`
+  (the copy here is set aside), as for the other agents.
 - **Continuing** in another agent reads the conversation into hopsesh's neutral form and
   writes it in the other agent's format, with the plan's loss report and briefing, as for
   Claude Code and Codex. Into OpenCode, hopsesh writes OpenCode's own import file and imports
@@ -62,12 +64,15 @@ hopsesh pull opencode/ses_3f1a2b --in codex      # continue an OpenCode session 
 ### Resuming, and OpenCode's background service
 
 OpenCode runs one background service that the command line, the terminal UI and the desktop
-app share. hopsesh never starts, stops or restarts it:
+app share. hopsesh's own commands never start, stop or restart it:
 
 - Before an OpenCode command that would start the service, hopsesh asks whether it runs
   (`opencode service status`). When it is stopped, hopsesh runs the command with
   `--standalone`, so the command ends without leaving a service behind.
-- OpenCode's terminal UI restarts a service of another version, which stops any turn it runs
+- Opening a session is different: the command hopsesh gives you, hopsesh's own terminal tabs
+  and `pull --run` run OpenCode's terminal UI, which starts the service if it is stopped, as
+  opening OpenCode yourself does.
+- OpenCode's terminal UI also restarts a service of another version, which stops any turn it runs
   and reconnects the desktop app. So the command hopsesh gives you to continue a session uses
   an `opencode` of the running service's version: the one on your PATH, the desktop app's
   bundled CLI, or a CLI the desktop app staged. When none matches, hopsesh asks before going
@@ -85,7 +90,8 @@ in the session instead, or to start OpenCode.
 ## Protecting the copy left behind
 
 For Claude Code and Codex, hopsesh's hooks refuse a prompt in the copy a move left behind.
-OpenCode has no such hook, so hopsesh installs an OpenCode plugin instead:
+OpenCode has no command hooks and its plugins cannot refuse a prompt, so hopsesh installs an
+OpenCode plugin that refuses tool calls instead:
 
 ```sh
 hopsesh notices install --agent opencode   # or Settings › Machines › Set up
@@ -96,6 +102,10 @@ hopsesh notices remove --agent opencode
 - The plugin is a folder, `plugins/hopsesh` in OpenCode's config folder
   (`~/.config/opencode/plugins/hopsesh`), and one per account folder. Nothing is installed
   from npm.
+- Install it on every machine you move OpenCode sessions from, since it guards the copy left
+  there (studio's, when you pull from studio). Settings › Machines sets it up on each machine
+  from here. Without it, a move's plan says the original can't be protected (`cannotProtect`
+  in `--json`).
 - In a session whose copy hopsesh moved or continued elsewhere, your prompt goes through,
   but **every tool call fails** with hopsesh's reason ("Blocked by hopsesh. …"), and an
   instruction tells the model why. So the old copy cannot edit files or run commands. A model
@@ -105,16 +115,19 @@ hopsesh notices remove --agent opencode
   hopsesh does not answer within 5 seconds, the call goes through, and the failure is counted;
   Settings and `hopsesh notices status` show the count.
 - `hopsesh notices status` and Settings › Machines say whether OpenCode loaded the plugin (asked
-  of the running service). When it did not, they say why: a `-hopsesh` or `-*` entry in your
+  of the running service). When it did not, they list the possible causes (hopsesh never
+  reads your OpenCode config, so it cannot tell which): a `-hopsesh` or `-*` entry in your
   OpenCode config's `plugins`, a policy that denies plugins, or OpenCode not having reloaded
-  its plugins yet. hopsesh never edits your OpenCode config.
+  its plugins yet; or the error OpenCode gave if the plugin failed to load. With OpenCode's
+  service stopped this stays unknown until OpenCode runs. hopsesh never edits your OpenCode
+  config.
 - An older hopsesh's plugin still runs; Settings offers to update it.
 - `hopsesh unblock <session>` lifts the block from one original, as for the other agents.
 
 `hopsesh skill install --add-rules` also writes the approval rules OpenCode's plugin reads
 (`.hopsesh/rules.json` in its config folder): hopsesh's read-only commands run without asking,
-and moves always ask. They do nothing without the plugin. The hopsesh skill itself needs no
-install of its own: OpenCode reads the copy hopsesh puts in `~/.agents/skills` for Codex.
+and moves always ask. They do nothing without the plugin. `hopsesh skill install` puts the
+hopsesh skill in `~/.agents/skills`, one copy that OpenCode and Codex share.
 
 ## Accounts
 
@@ -161,6 +174,13 @@ names stay).
   Code and Codex), it writes a new OpenCode session that continues it, and the earlier one
   stays as it is. The plan says so.
 - A subagent's session cannot be moved or continued on its own: move its parent.
+- Stop works only on a turn OpenCode's background service runs. A turn in a window started
+  with `--standalone`, or one waiting for the service to start again, has to be stopped in
+  OpenCode.
+- A session that holds media (attachments OpenCode keeps as `media:` references) moves only
+  through OpenCode's own export. When hopsesh cannot use the export on that machine (the
+  service is stopped and its `opencode` is older than the newest one that wrote the
+  database), it refuses to move such a session.
 - "Keep the old session running too" (a fork on resume) is not offered for OpenCode yet.
 - There is no link that opens an OpenCode session in the desktop app, so hopsesh opens it in a
   terminal. Sessions hopsesh imports show in the desktop app, which shares the database.
@@ -174,9 +194,11 @@ names stay).
 
 - It never writes OpenCode's database, and never copies the database file: it reads a fixed
   list of tables, read only, and every change goes through OpenCode's own commands
-  (`session import`, `session delete`, `session export`, `opencode api`).
+  (`session import`, `session delete`, `opencode api`, and `service set port` in an account
+  folder it has just made).
 - It never reads OpenCode's credentials: not the `credential` and account tables, not
   `auth.json`, `service.json` or `opencode.json`.
-- It never starts, stops or restarts OpenCode's background service, and never passes
+- It never starts, stops or restarts OpenCode's background service unasked (opening a session
+  runs OpenCode, which starts a stopped service as it always does), and never passes
   `--server` (that needs the service's password).
 - It never calls a model.

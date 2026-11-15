@@ -56,7 +56,7 @@
 - **多账号**：查看每台机器上各个工具（Claude Code、Claude 桌面版、Codex、Codex 应用、OpenCode、OpenCode
   桌面版）登录的账号，
   在任意装有 hopsesh 的机器上添加账号目录，用某个账号启动会话，再用另一个账号继续任何会话。
-  每个会话都会显示运行它的账号。参见 [Accounts](docs/accounts.md)。
+  Claude Code 和 Codex 的会话会显示运行它的账号（OpenCode 不记录账号）。参见 [Accounts](docs/accounts.md)。
 - **在 Codex 桌面应用中打开对话**：通过 Resume 菜单，直接定位到对应的线程。自定义账号根目录会使用
   终端，因为桌面链接无法选中它们。
 - **CLI、TUI，以及 macOS 和 Windows 桌面应用**，共用同一个引擎，所有关键命令都支持 `--json` 输出。
@@ -140,7 +140,7 @@ hopsesh ls --agent codex --json                # sessions of one agent, grouped 
 hopsesh plan studio:"fix flaky tests"          # read-only preview of a move
 hopsesh pull studio:"fix flaky tests"          # plan, confirm, move, print the command
 hopsesh pull studio:claude/7f3c2a1e --in codex # continue a Claude Code session in Codex
-hopsesh pull opencode/ses_3f1a2b --in claude    # continue an OpenCode session in Claude Code
+hopsesh pull opencode/ses_3f1a2b --in claude   # continue an OpenCode session in Claude Code
 hopsesh pull 7f3c2a1e                          # no machine name: bring back the newest copy
 hopsesh push 7f3c2a1e laptop                   # send it to a machine that runs hopsesh
 hopsesh cd 7f3c2a1e ~/git/app-2                # same session, another checkout here
@@ -236,15 +236,16 @@ Codex 来回切换，也能放进 OpenCode 的账号目录。OpenCode 把所有�
 
 - **从不写入或复制 OpenCode 的数据库。** 它只以只读方式读取固定的几张表；迁移用的是 OpenCode 自己的导出和导入，
   撤销用的是 OpenCode 自己的删除。
-- **从不启动、停止或重启 OpenCode 的后台服务。** 它给出的继续命令使用与正在运行的服务同一版本的 `opencode`
-  （你自己的，或桌面应用自带的）；没有这样的程序时，由于继续会话会重启服务，它会先问你。
+- **hopsesh 自己的命令从不启动、停止或重启 OpenCode 的后台服务**（服务停止时，它们以 `--standalone` 运行）。打开会话
+  运行的是 OpenCode 本身，和你自己打开 OpenCode 一样，会启动停止的服务；它给出的命令使用与正在运行的服务同一版本的
+  `opencode`（你自己的，或桌面应用自带的）；没有这样的程序时，由于那会重启服务，hopsesh 会先问你。
 - **留下的副本由一个插件保护**（`hopsesh notices install`）：那里的提示词可以发送，但每次工具调用都会以
   hopsesh 给出的原因失败。
 - **回到 OpenCode 时会新建一个会话**，因为 OpenCode 无法向已有的会话追加内容。迁移不会带上 OpenCode 的 `/undo`
   快照、归档状态和分叉关系。
 
 需要 OpenCode 2.1.0 或更高版本（插件需要 2.2.7）。“实验性”的意思是：它针对 OpenCode 的替身程序测试，并且每晚在不调用
-模型的情况下针对真实的 OpenCode 测试；这些测试连续两周通过后，它就会成为稳定版。设置、账号、插件以及全部限制见
+模型的情况下针对真实的 OpenCode 测试；这些测试连续两周通过、并在真实机器上手动检查之后，它就会成为稳定版。设置、账号、插件以及全部限制见
 [docs/opencode.md](docs/opencode.md)（英文）。
 
 <a id="round-trips"></a>
@@ -264,11 +265,12 @@ Codex 来回切换，也能放进 OpenCode 的账号目录。OpenCode 把所有�
 - **每个会话一行。** 列表会把同一会话在不同机器和智能体上的副本合并成一行。`hopsesh pull <id-or-title>`
   不带机器名时，会把最新的副本带回它原来所在的目录。
 - **回到原来的智能体时只追加新工作。** 原始会话自己的轮次，包括 Claude Code 带签名的推理内容，都逐字节保持不变。
+  回到 OpenCode 时会新建一个会话，因为 OpenCode 无法向已有的会话追加内容。
 - **从不合并。** 如果两份副本都有改动，迁移会停下，直到你选择 `--keep-both`（作为单独的会话）或
   `--replace`（把本机的副本放到一边；`hopsesh undo` 可以恢复）。
 - **代码会跟着走。** hopsesh 会获取会话所在的提交，如果它从未推送过，就直接从另一台机器获取，并对干净的
   检出做快进（fast-forward）。它从不 merge、rebase 或 stash；做不到时会准确说明缺了什么。
-- **历史随会话一起走。** 会话旁边有一个小文件 `<session>.hopsesh.json`，记录它的副本和每一跳，因此下一次
+- **历史随会话一起走。** 会话旁边有一个小文件 `<session>.hopsesh.json`（OpenCode 把会话存在数据库里，它的这个文件放在 hopsesh 自己的目录中），记录它的副本和每一跳，因此下一次
   迁移可以在任何机器上进行。
 
 <picture>
@@ -336,7 +338,7 @@ hopsesh doctor --all-machines                     # hopsesh, hooks and skill on 
 hopsesh 对接各智能体自己的云端：Claude Code on the web 和 Codex cloud，以及实验性支持的 GitHub Copilot
 cloud agent、Jules、Devin 和 Amp。它可以把本机（或你的其他机器）上的会话交给云端，把云端会话带回本地的
 Claude Code 或 Codex，还能经由本机把一个云端的会话转交给另一家厂商的云端。OpenCode 的会话也可以交出去（OpenCode
-没有自己的云端）。它不会取代厂商自己的命令，而是在本机
+没有自己的云端），云端的工作回到 OpenCode 时会成为一个新会话。它不会取代厂商自己的命令，而是在本机
 以你的身份运行这些命令（`claude --cloud`、`claude --teleport`、`codex cloud`、`gh agent-task`、`jules remote`、
 `devin`、`amp`），并补上它们做不到的部分：来自你其他机器或另一家厂商智能体的会话、交接说明和损失报告、分支、
 来源记录和撤销。它启动的云端会话属于你，计入你的套餐；hopsesh 从不读取登录凭据，也不调用厂商的服务器。
@@ -448,10 +450,10 @@ codex plugin marketplace add roeehrl/hopsesh # Codex
 npx skills add roeehrl/hopsesh               # any agent that reads Agent Skills
 ```
 
-这个 skill 会以相同的文件安装到每个已安装的智能体中（Claude Code 和 Codex；OpenCode 读取 Codex 放在
-`~/.agents/skills` 中的那份）。之后你可以问这样的问题：
+这个 skill 会以相同的文件安装到每个已安装的智能体中（Claude Code 和 Codex；OpenCode 读取
+`~/.agents/skills` 中与 Codex 共用的那份）。之后你可以问这样的问题：
 “把我笔记本上的会话拿过来”、“在 OpenCode 里继续这个”或者“studio 上有哪些会话在运行？”。智能体会先做计划，
-**只有在你同意之后才会迁移**。`--add-rules` 让只读命令（`ls`、`show`、`plan`、`agents`、`clouds`、`doctor` 等）
+**只有在你同意之后才会迁移**。`--add-rules`（在 OpenCode 中通过 hopsesh 的插件生效）让只读命令（`ls`、`show`、`plan`、`agents`、`clouds`、`doctor` 等）
 无需询问即可运行，而 `pull`、`push`、`handoff`、`followup` 和 `undo` **始终会询问**，即使在自动模式下也是如此。
 “把这个交给 Claude Code cloud”（或 Codex cloud、Copilot、Jules、Devin、Amp）也是一样：智能体会展示计划和
 留下的内容，询问 Codex cloud 所需的环境，在你同意后再交接（交给 Claude Code cloud 时，它会给你一条在自己终端里
@@ -464,7 +466,7 @@ npx skills add roeehrl/hopsesh               # any agent that reads Agent Skills
 
 hopsesh 通过 `tailscale status --json` 和 `~/.ssh/config` 发现机器，用你系统自带的 `ssh` 连接并列出会话；
 迁移时先生成计划，把会话文件复制到暂存目录，一次性重写路径（id、签名和加密内容都不会被改动），校验后安装到智能体
-查找的位置，并保留撤销日志。换智能体继续时，会话先被读成一种中立的形式，再写成另一个智能体的格式。详见英文原文的
+查找的位置，并保留撤销日志（OpenCode 的会话通过 OpenCode 自己的导出和导入来迁移）。换智能体继续时，会话先被读成一种中立的形式，再写成另一个智能体的格式。详见英文原文的
 [How it works](README.md#how-it-works) 和 [docs/design.md](docs/design.md)。
 
 ### 如何对待你的数据
@@ -476,7 +478,7 @@ hopsesh 通过 `tailscale status --json` 和 `~/.ssh/config` 发现机器，用�
   macOS 钥匙串或 Windows 凭据管理器中，或者每次都询问，永远不会写入 hopsesh 的文件或命令行。
 - **对话记录里可能有密钥。** hopsesh 在迁移时会扫描疑似密钥，并可以对副本做脱敏（`--redact`）。每一个远程操作都会
   记入本地审计日志。
-- **只有你的智能体会和它们的模型通信。** hopsesh 从不调用 Anthropic 或 OpenAI 的 API。
+- **只有你的智能体会和它们的模型通信。** hopsesh 从不调用 Anthropic、OpenAI 或任何其他模型的 API。
 - **只通过你的智能体访问云端。** 访问厂商的云端只能通过该智能体自己的命令、以你的身份登录，并且只在你允许之后；
   hopsesh 从不读取其登录信息，也不调用其服务器。一次交接只发送交接说明（密钥已遮盖，尽力而为）和一个分支；类似凭据的
   文件从不上传，快照提交中除了一个不透明的 id 之外不包含任何信息。
@@ -490,7 +492,7 @@ hopsesh 通过 `tailscale status --json` 和 `~/.ssh/config` 发现机器，用�
 - **Claude Code 在所有设备上的会话列表？** 你从另一台设备打开的会话，仍然运行在它启动的那台机器上，用的是那台机器的
   文件。hopsesh 则会把它搬过来：在你所在的地方、在你那份仓库中继续，之后还能搬回去。
 - **Codex 应用的“交接到 SSH 主机”？** 它把一个 Codex 对话及其 Git 状态迁移到一台已连接、已保存项目的主机上。
-  hopsesh 对 Claude Code 和 Codex 一视同仁，可以在你的任意机器之间迁移、换到另一个智能体，以及与云端之间来回。
+  hopsesh 对 Claude Code、Codex 和 OpenCode 一视同仁，可以在你的任意机器之间迁移、换到另一个智能体，以及与云端之间来回。
 - **Remote Control？** Remote Control 让你远程操控一个仍在原处运行的会话。hopsesh 则迁移会话本身，让它在你所在的
   机器上、用那台机器的文件和工具继续。它也可以为迁移后的会话开启 Remote Control。
 - **复制 `.jsonl` 然后运行 `claude --resume`？** 只有在两台机器上所有路径都相同、项目目录名符合 Claude Code 的命名规则、
@@ -512,8 +514,8 @@ hopsesh 通过 `tailscale status --json` 和 `~/.ssh/config` 发现机器，用�
 <details>
 <summary><b>会有东西离开我的机器吗？</b></summary>
 
-只有你交给云端的内容。会话通过 SSH 直接在你的机器之间传输。hopsesh 没有服务器、没有遥测，也从不调用 Anthropic 或
-OpenAI 的 API。一次交接会通过你所选厂商自己的命令、以你的身份，把交接说明和一个分支发送到该云端
+只有你交给云端的内容。会话通过 SSH 直接在你的机器之间传输。hopsesh 没有服务器、没有遥测，也从不调用 Anthropic、
+OpenAI 或任何其他模型的 API。一次交接会通过你所选厂商自己的命令、以你的身份，把交接说明和一个分支发送到该云端
 （参见[云端会话](#cloud-sessions)）。
 </details>
 
@@ -554,6 +556,7 @@ hopsesh 在连接时会询问密码：
 
 在写入任何东西之前，计划都会告诉你。通常对话会以文本形式到达，工具调用会显示为前一个智能体的活动，较长的输出会被缩短，
 来自另一家厂商的推理内容会被省略。当你把会话带回来时，只有新的工作会追加到原始会话中，所以原始会话中的内容不会丢失。
+回到 OpenCode 时例外：OpenCode 无法向已有的会话追加内容，所以会新建一个会话，原始会话保持原样。
 </details>
 
 <details>
@@ -561,7 +564,9 @@ hopsesh 在连接时会询问密码：
 
 hopsesh 会按原样复制并完成交接：之后在留下的副本中产生的消息会留在那里，而原始会话会被锁定，直到你搬回来。hopsesh
 拒绝替换本机上正在打开的会话，除非用 `--stop-local` 先退出它。对 Codex 来说，这只能在两轮之间进行，因为 Codex 没有
-在一轮中途优雅停止的方式：如果它正在工作，hopsesh 会请你等它完成。列表中运行中的会话显示为 “live working” 或
+在一轮中途优雅停止的方式：如果它正在工作，hopsesh 会请你等它完成。OpenCode 的
+会话在一轮正在运行时不会被迁移（`--stop-local` 会通过 OpenCode 中断它），被 OpenCode 后台服务停止打断、等待恢复的一轮
+也一样。列表中运行中的会话显示为 “live working” 或
 “live idle”。
 </details>
 

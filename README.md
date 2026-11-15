@@ -62,8 +62,9 @@ with the repository, worktree and paths fixed up. Then it gives you the command 
   here" and it plans with hopsesh, then moves only after you say yes.
 - **Multiple accounts**: see who each tool (Claude Code, Claude desktop, Codex, the Codex app,
   OpenCode, OpenCode desktop) is signed in as on every machine, add account folders on any
-  machine with hopsesh, start a session as one, and continue any session as another. Every session shows the account that
-  ran it. See [Accounts](docs/accounts.md).
+  machine with hopsesh, start a session as one, and continue any session as another. Claude
+  Code and Codex sessions show the account that ran them (OpenCode records none). See
+  [Accounts](docs/accounts.md).
 - **Open a Codex conversation in its desktop app** from the Resume menu, with the exact
   thread selected. Custom account roots use a terminal because desktop links cannot select them.
 - **CLI, TUI and a desktop app for macOS and Windows** on one engine, with `--json` output
@@ -148,7 +149,7 @@ hopsesh ls --agent codex --json                # sessions of one agent, grouped 
 hopsesh plan studio:"fix flaky tests"          # read-only preview of a move
 hopsesh pull studio:"fix flaky tests"          # plan, confirm, move, print the command
 hopsesh pull studio:claude/7f3c2a1e --in codex # continue a Claude Code session in Codex
-hopsesh pull opencode/ses_3f1a2b --in claude    # continue an OpenCode session in Claude Code
+hopsesh pull opencode/ses_3f1a2b --in claude   # continue an OpenCode session in Claude Code
 hopsesh pull 7f3c2a1e                          # no machine name: bring back the newest copy
 hopsesh push 7f3c2a1e laptop                   # send it to a machine that runs hopsesh
 hopsesh cd 7f3c2a1e ~/git/app-2                # same session, another checkout here
@@ -290,9 +291,11 @@ terminal UI and desktop app, so hopsesh works through OpenCode's own commands:
 
 - **It never writes or copies OpenCode's database.** It reads a fixed list of tables, read
   only; a move is OpenCode's own export and import, and undo is OpenCode's delete.
-- **It never starts, stops or restarts OpenCode's background service.** The command it gives
-  you to continue a session uses an `opencode` of the running service's version (yours, or the
-  desktop app's), and asks first when there is none, since a resume would restart it.
+- **hopsesh's own commands never start, stop or restart OpenCode's background service**
+  (with it stopped they run with `--standalone`). Opening a session runs OpenCode itself,
+  which starts the service if it is stopped, as opening OpenCode does; the command uses an
+  `opencode` of the running service's version (yours, or the desktop app's), and hopsesh asks
+  first when there is none, since that would restart it.
 - **The copy left behind is protected by a plugin** (`hopsesh notices install`): prompts there
   go through, but every tool call fails with hopsesh's reason.
 - **A return into OpenCode makes a new session**, because OpenCode can't add to a session it
@@ -300,8 +303,8 @@ terminal UI and desktop app, so hopsesh works through OpenCode's own commands:
 
 It needs OpenCode 2.1.0 or newer (2.2.7 for the plugin). Experimental means it is tested
 against stand-ins of OpenCode and, every night, against a real OpenCode without a model; it
-becomes stable after two green weeks of those runs. Setup, accounts, the plugin and every
-limit: [docs/opencode.md](docs/opencode.md).
+becomes stable after two green weeks of those runs and a manual check on real machines.
+Setup, accounts, the plugin and every limit: [docs/opencode.md](docs/opencode.md).
 
 
 ## Round trips
@@ -322,15 +325,17 @@ Move a session to your laptop, or into Codex, work on it, and bring it back late
   agents. `hopsesh pull <id-or-title>` without a machine name brings back the newest one,
   into the folder it came from.
 - **Coming back to the original agent adds only the new work.** The original session's own
-  turns, including Claude Code's signed reasoning, stay byte for byte.
+  turns, including Claude Code's signed reasoning, stay byte for byte. Into OpenCode, which
+  can't add to a session it has, a return makes a new session instead.
 - **It never merges.** If both copies changed, the move stops until you choose `--keep-both`
   (a separate session) or `--replace` (the copy here is set aside; `hopsesh undo` brings it
   back).
 - **The code follows.** hopsesh fetches the session's commit, straight from the other machine
   if it was never pushed, and fast-forwards a clean checkout. It never merges, rebases or
   stashes; otherwise it says exactly what's missing.
-- **The history travels with the session.** A small `<session>.hopsesh.json` beside it records
-  its copies and hops, so the next move works from any machine.
+- **The history travels with the session.** A small `<session>.hopsesh.json` beside it (for
+  OpenCode, which keeps sessions in a database, in hopsesh's own folder) records its copies
+  and hops, so the next move works from any machine.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/round-trip-dark.png">
@@ -421,9 +426,9 @@ hopsesh works with the agents' own clouds: Claude Code on the web and Codex clou
 experimentally, the GitHub Copilot cloud agent, Jules, Devin and Amp. It hands a session on
 this machine (or on another of yours) to a cloud, brings a cloud session home into Claude
 Code or Codex, and hands one cloud's session on to another vendor's cloud through this
-machine. An OpenCode session can be handed off too (OpenCode has no cloud of its own). It
-doesn't replace the vendors' own commands; it runs them (`claude --cloud`,
-`claude --teleport`, `codex cloud`, `gh agent-task`, `jules remote`, `devin`, `amp`), here,
+machine. An OpenCode session can be handed off too (OpenCode has no cloud of its own), and
+the cloud's work comes back into OpenCode as a new session. It doesn't replace the vendors'
+own commands; it runs them (`claude --cloud`, `claude --teleport`, `codex cloud`, `gh agent-task`, `jules remote`, `devin`, `amp`), here,
 signed in as you, and adds what they don't do: a session from another of your machines or
 the other vendor's agent, a briefing and a loss report, the branches, lineage and undo. The
 cloud sessions it starts are yours, on your plan, and hopsesh never reads a login or calls a
@@ -561,10 +566,11 @@ npx skills add roeehrl/hopsesh               # any agent that reads Agent Skills
 ```
 
 The skill goes into every installed agent as identical files (Claude Code and Codex; OpenCode
-reads Codex's copy in `~/.agents/skills`). Then ask things like "bring my laptop session
-here", "continue this in OpenCode" or "which sessions are running on the studio?". The agent
-plans first and **moves only after you say yes**.
-`--add-rules` lets the read-only commands (`ls`, `show`, `plan`, `agents`, `clouds`, `doctor`, …)
+reads the copy in `~/.agents/skills`, which it shares with Codex). Then ask things like
+"bring my laptop session here", "continue this in OpenCode" or "which sessions are running on
+the studio?". The agent plans first and **moves only after you say yes**.
+`--add-rules` (in OpenCode, through hopsesh's plugin) lets the read-only commands (`ls`,
+`show`, `plan`, `agents`, `clouds`, `doctor`, …)
 run without asking, while `pull`, `push`, `handoff`, `followup` and `undo` **always ask**, even
 in auto mode. "Hand this off to Claude Code cloud" (or to Codex cloud, Copilot, Jules, Devin
 or Amp) works the same way: the agent shows the plan and what stays behind, asks you for the
@@ -600,10 +606,10 @@ app.
    unpushed/uncommitted counts. Failed scans retain saved rows with unknown live status.
    `hopsesh ls --cached` reads saved results without SSH or agent commands. See
    [session discovery](docs/session-discovery.md) for refresh and cache behavior.
-3. **Moving** builds a plan, then copies the session's files into a staging folder. It
-   rewrites paths in one pass, so ids, signatures and encrypted content are never touched.
-   It checks the result, installs it where the agent looks for it, and keeps an undo
-   journal.
+3. **Moving** builds a plan, then copies the session's files into a staging folder (for
+   OpenCode, OpenCode's own export of it). It rewrites paths in one pass, so ids, signatures
+   and encrypted content are never touched. It checks the result, installs it where the agent
+   looks for it (OpenCode imports it), and keeps an undo journal.
 4. **Continuing in another agent** reads the session into a neutral form (a chain of
    content-hashed steps), then writes it in the other agent's format with the loss report
    and briefing.
@@ -641,8 +647,8 @@ including the file-format traps hopsesh handles, are in [docs/design.md](docs/de
   still runs on the machine it started on, with that machine's files. hopsesh moves it: it
   continues where you are, in your copy of the repository, and can come back.
 - **The Codex app's hand-off to an SSH host?** It moves a Codex chat and its Git state to a
-  connected host with a saved project. hopsesh does that for Claude Code and Codex alike,
-  between any of your machines, into another agent, and to and from the clouds.
+  connected host with a saved project. hopsesh does that for Claude Code, Codex and OpenCode
+  alike, between any of your machines, into another agent, and to and from the clouds.
 - **Remote Control?** Remote Control lets you drive a session that keeps running where it
   is. hopsesh moves the session, so it continues on the machine you're at, with that
   machine's files and tools. It can turn Remote Control on for the moved session.
@@ -719,7 +725,8 @@ No. `pull` only needs an SSH server there. hopsesh on the other machine is neede
 The plan tells you before anything is written. Usually the conversation arrives as text, tool
 calls appear as the previous agent's activity, long outputs are shortened, and reasoning
 from the other vendor is left out. When you bring the session back, only the new work is
-added to the original, so nothing in the original is lost.
+added to the original, so nothing in the original is lost. Into OpenCode, which can't add to
+a session it has, the return is a new session, and the original stays as it was.
 </details>
 
 <details>
@@ -729,7 +736,9 @@ hopsesh copies it as it is and hands it off: later messages in the copy left beh
 there, and the original is blocked until you move back. hopsesh refuses to
 replace a session that's open on this machine, unless `--stop-local` quits it first. For
 Codex that works only between turns, because Codex has no graceful way to stop mid-turn: if
-it's working, hopsesh asks you to let it finish. Listings show running sessions as "live
+it's working, hopsesh asks you to let it finish. An OpenCode session is not moved while a
+turn runs (`--stop-local` interrupts it through OpenCode), nor while a turn cut off when
+OpenCode's background service stopped waits to resume. Listings show running sessions as "live
 working" or "live idle".
 </details>
 
