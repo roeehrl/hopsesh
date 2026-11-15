@@ -52,13 +52,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: go run ./internal/devtools/conptyfetch -arch amd64 -out "$RUNNER_TEMP/conpty"
+      # The three-agent lineage routes run in the scenarios job, in a step of their own on
+      # every OS; here they would only push internal/e2e past its deadline on macOS.
       - name: test
         shell: bash
         run: >-
           if [ "$RUNNER_OS" = Windows ]; then export HOPSESH_CONPTY_DIR="$RUNNER_TEMP/conpty"; fi;
           go run gotest.tools/gotestsum@v1.13.0 --format github-actions
           --junitfile "junit-${{ matrix.family }}.xml" --rerun-fails=2 --rerun-fails-report reruns.txt
-          --packages ./... -- -race -count=1 -timeout 25m
+          --packages ./... -- -race -count=1 -timeout 30m -skip 'TestLineageRoutesThreeAgents'
       - name: test summary
         if: ${{ !cancelled() }}
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
