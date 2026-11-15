@@ -4,7 +4,7 @@
 
 # hopsesh
 
-**Claude Code や Codex のセッションを別のコンピューターに移す、もう一方のエージェントで続ける、クラウドに引き渡す。そして、また手元に戻す。**
+**Claude Code、Codex、OpenCode のセッションを別のコンピューターに移す、別のエージェントで続ける、クラウドに引き渡す。そして、また手元に戻す。**
 
 <p><a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.ja.md">日本語</a></p>
 
@@ -15,7 +15,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![macOS · Linux · Windows](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-0b6b62)
 
-[インストール](#install) · [クイックスタート](#quick-start) · [別のエージェントへ](#continue-in-another-agent) · [往復](#round-trips) · [プッシュ](#send-a-session-to-another-machine) · [クラウドセッション](#cloud-sessions) · [エージェントから使う](#use-it-from-your-agent) · [なぜ…ではないのか](#why-not) · [FAQ](#faq)
+[インストール](#install) · [クイックスタート](#quick-start) · [別のエージェントへ](#continue-in-another-agent) · [OpenCode](#opencode-experimental) · [往復](#round-trips) · [プッシュ](#send-a-session-to-another-machine) · [クラウドセッション](#cloud-sessions) · [エージェントから使う](#use-it-from-your-agent) · [なぜ…ではないのか](#why-not) · [FAQ](#faq)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.gif">
@@ -30,9 +30,9 @@
 
 > この文書は英語版 README の翻訳です。**[英語版 README](README.md) が正式かつ最新の版**であり、内容に違いがある場合は英語版が優先されます。長いリファレンス的な節は要約のみとし、英語版の該当箇所へのリンクを付けています。
 
-デスクトップの Claude Code で始めた作業を、いまはノートパソコンで続けたい。あるいは Codex に引き継ぎたい。
+デスクトップの Claude Code で始めた作業を、いまはノートパソコンで続けたい。あるいは Codex や OpenCode に引き継ぎたい。
 hopsesh は、すべてのマシン上にあるすべてのエージェントのセッションを一覧表示し、選んだものをこのマシンに持ってきます。
-同じエージェントのままでも、もう一方のエージェントに切り替えても構いません。リポジトリ、ワークツリー、パスはきちんと
+同じエージェントのままでも、別のエージェントに切り替えても構いません。リポジトリ、ワークツリー、パスはきちんと
 整えられ、最後に作業を再開するためのコマンドが表示されます。
 
 - **マシンを見つける**：Tailscale と `~/.ssh/config` から探し、許可したマシンにだけ、あなた自身の `ssh`、鍵、
@@ -42,11 +42,12 @@ hopsesh は、すべてのマシン上にあるすべてのエージェントの
   この hopsesh を相手側にコピーし、ログインのたびにログインセッション内で起動させます。以後 hopsesh は、そこでどの
   アカウントがサインインしているか（Mac のキーチェーンを含む）を把握し、そこに残したオリジナルを保護し、手元で操作する
   セッションをそこで実行できます。詳しくは [Machines](docs/machines.md) を参照してください。
-- **すべてのエージェントのすべてのセッションを一覧表示**（Claude Code と Codex）。リポジトリ別に、マシン、エージェント、
+- **すべてのエージェントのすべてのセッションを一覧表示**（Claude Code、Codex、そして実験的に
+  [OpenCode](docs/opencode.md)）。リポジトリ別に、マシン、エージェント、
   パス、ブランチ、ワークツリー、最後のプロンプト、最終アクティビティ、実行中かどうか、これまでにどこにあったかを表示します。
 - **セッションを安全に移動**：このマシンでリポジトリを見つけるか clone し、ワークツリーを作り直し、コードをセッションの
   コミットに合わせ、パスを書き換えます。実行前には必ずプランを表示します。`hopsesh undo` で元に戻せます。
-- **別のエージェントで続ける**：`--in codex` または `--in claude`。別のマシンでもこのマシンでも可能です。プランには、
+- **別のエージェントで続ける**：`--in codex`、`--in claude`、`--in opencode`。別のマシンでもこのマシンでも可能です。プランには、
   何が引き継がれ何が引き継がれないか、そして相手のエージェントが受け取るブリーフィングが正確に表示されます。
 - **往復とフォークを追跡**：互換性が確認された戻りでは、新しい作業だけが追加されます。アカウントプロファイルをまたぐ場合は
   ポータブルな会話を作り、元の保護された状態を保持します。両方のコピーが変更されていれば別ブランチを提案し、黙って
@@ -54,9 +55,10 @@ hopsesh は、すべてのマシン上にあるすべてのエージェントの
 - **各エージェントのクラウドと連携**：セッションを Claude Code on the web や Codex cloud（実験的に Copilot、Jules、Devin、
   Amp も）に引き渡し、クラウドのセッションを手元に持ち帰り、あるクラウドのセッションを別のクラウドに渡すこともできます。
   すべてベンダー自身のコマンドを使い、あなたとしてサインインした状態で行います。
-- **エージェントの中から使える**：Claude Code や Codex に「ノートパソコンのセッションをここに持ってきて」と頼めば、
+- **エージェントの中から使える**：Claude Code、Codex、OpenCode に「ノートパソコンのセッションをここに持ってきて」と頼めば、
   hopsesh でプランを立て、あなたが承認してから移動します。
-- **複数アカウント**：各マシンで各ツール（Claude Code、Claude デスクトップ、Codex、Codex アプリ）がどのアカウントで
+- **複数アカウント**：各マシンで各ツール（Claude Code、Claude デスクトップ、Codex、Codex アプリ、OpenCode、
+  OpenCode デスクトップ）がどのアカウントで
   サインインしているかを確認し、hopsesh のある任意のマシンにアカウントフォルダーを追加し、あるアカウントでセッションを
   始め、別のアカウントで続けられます。各セッションには、それを実行したアカウントが表示されます。詳しくは
   [Accounts](docs/accounts.md) を参照してください。
@@ -67,8 +69,9 @@ hopsesh は、すべてのマシン上にあるすべてのエージェントの
   アップデートされます。
 
 > ステータス：アルファ版。macOS と Linux ではエンドツーエンドで動作し、Windows アプリとインストーラーは CI 上の
-> Windows Server 2025 で実際のウィンドウも含めてテストされています。hopsesh は独立した非公式プロジェクトであり、
-> Anthropic および OpenAI とは一切関係ありません。
+> Windows Server 2025 で実際のウィンドウも含めてテストされています。OpenCode への対応は実験的です
+> （[その意味](docs/opencode.md)）。hopsesh は独立した非公式プロジェクトであり、Anthropic、OpenAI、Anomaly（OpenCode）
+> とは一切関係ありません。
 
 <a id="install"></a>
 
@@ -145,6 +148,7 @@ hopsesh ls --agent codex --json                # sessions of one agent, grouped 
 hopsesh plan studio:"fix flaky tests"          # read-only preview of a move
 hopsesh pull studio:"fix flaky tests"          # plan, confirm, move, print the command
 hopsesh pull studio:claude/7f3c2a1e --in codex # continue a Claude Code session in Codex
+hopsesh pull opencode/ses_3f1a2b --in claude    # continue an OpenCode session in Claude Code
 hopsesh pull 7f3c2a1e                          # no machine name: bring back the newest copy
 hopsesh push 7f3c2a1e laptop                   # send it to a machine that runs hopsesh
 hopsesh cd 7f3c2a1e ~/git/app-2                # same session, another checkout here
@@ -233,6 +237,29 @@ hopsesh は会話を相手のエージェント自身のセッション形式に
 セッションを開始します。あなたがセッションを開始しない限り、モデルには何も送信されません。詳細：
 [docs/design.md §8](docs/design.md#8-continuing-in-another-agent)。
 
+<a id="opencode-experimental"></a>
+
+## OpenCode（実験的）
+
+hopsesh は [OpenCode](https://opencode.ai) 2.x のセッションも一覧表示し、移動し、続けられます：マシン間で、Claude Code
+や Codex との間で行き来し、OpenCode のアカウントフォルダーにも入れられます。OpenCode はすべてのセッションを 1 つの
+データベースに保存し、ターミナル UI とデスクトップアプリで 1 つのバックグラウンドサービスを共有しているため、hopsesh は
+OpenCode 自身のコマンドを通して動作します。
+
+- **OpenCode のデータベースに書き込むことも、コピーすることもありません。** 決まったテーブルだけを読み取り専用で読みます。
+  移動は OpenCode 自身のエクスポートとインポート、undo は OpenCode 自身の削除です。
+- **OpenCode のバックグラウンドサービスを起動、停止、再起動することはありません。** 再開用に示すコマンドは、実行中の
+  サービスと同じバージョンの `opencode`（あなたのもの、またはデスクトップアプリのもの）を使い、それがない場合は
+  再開でサービスが再起動されるため、先に確認します。
+- **残されたコピーはプラグインで保護されます**（`hopsesh notices install`）：そこでのプロンプトは通りますが、
+  ツール呼び出しはすべて hopsesh の理由で失敗します。
+- **OpenCode への戻りは新しいセッションになります。** OpenCode は既存のセッションに追加できないためです。移動では
+  OpenCode の `/undo` スナップショット、アーカイブ状態、フォークのつながりは引き継がれません。
+
+OpenCode 2.1.0 以降が必要です（プラグインは 2.2.7 以降）。実験的とは、OpenCode のスタンドインに対して、そして毎晩
+モデルを使わずに実際の OpenCode に対してテストしているという意味で、その実行が 2 週間続けて成功すると安定版になります。
+セットアップ、アカウント、プラグイン、すべての制限は [docs/opencode.md](docs/opencode.md)（英語）を参照してください。
+
 <a id="round-trips"></a>
 
 ## 往復
@@ -245,7 +272,8 @@ hopsesh は会話を相手のエージェント自身のセッション形式に
 - **オリジナルはあなたの帰りを待つ。** デフォルトでは、残されたコピーはセッションを戻すまで新しいプロンプトを受け付けません。
   そのため 2 つのコピーが食い違うことはなく、戻すときもきれいに戻せます。設定で「Shows a warning」や「Is left alone」を
   選ぶことも、警告の上で特定のオリジナルのブロックを外すこと（`hopsesh unblock`）もできます。Codex では hopsesh の
-  フックを一度承認する必要があります（`/hooks`）。待機中のときは hopsesh が知らせます。
+  フックを一度承認する必要があります（`/hooks`）。待機中のときは hopsesh が知らせます。OpenCode ではプラグインが
+  その役目を担います：プロンプトは通りますが、セッションを戻すまでツール呼び出しはすべて失敗します。
 - **1 セッション 1 行。** 一覧では、マシンやエージェントをまたいだ同じセッションのコピーが 1 行にまとめられます。
   マシン名なしの `hopsesh pull <id-or-title>` は、最新のコピーを元のフォルダーに持ち帰ります。
 - **元のエージェントに戻るときは新しい作業だけを追加。** 元のセッション自身のターンは、Claude Code の署名付き推理も含め、
@@ -315,7 +343,8 @@ hopsesh doctor --all-machines                     # hopsesh, hooks and skill on 
 `hopsesh cd <session> <dir>` は、同じマシン上の別のフォルダー（同じリポジトリの別のワークツリーや clone）でセッションを
 続け、しかも同じセッションのまま保ちます：同じ id、すべてのメッセージ、ツール呼び出し、推理ブロックがエージェントの書いた
 とおりに残ります。アプリではセッションの ⋯ メニューにある **Change folder…** です。`hopsesh undo` で元に戻せます。
-Claude Code と Codex ではそれぞれ処理が異なります。詳細は[英語版](README.md#another-folder-same-session)を参照してください。
+Claude Code、Codex、OpenCode ではそれぞれ処理が異なります（OpenCode ではバックグラウンドサービスが動いている必要が
+あります）。詳細は[英語版](README.md#another-folder-same-session)を参照してください。
 
 <a id="cloud-sessions"></a>
 
@@ -324,7 +353,8 @@ Claude Code と Codex ではそれぞれ処理が異なります。詳細は[英
 hopsesh は各エージェント自身のクラウドと連携します：Claude Code on the web と Codex cloud、そして実験的に GitHub Copilot
 cloud agent、Jules、Devin、Amp。このマシン（または手持ちの別のマシン）のセッションをクラウドに引き渡し、クラウドの
 セッションを手元の Claude Code や Codex に持ち帰り、このマシンを経由してあるクラウドのセッションを別ベンダーのクラウドに
-渡すことができます。ベンダー自身のコマンドを置き換えるのではなく、それらを（`claude --cloud`、`claude --teleport`、
+渡すことができます。OpenCode のセッションも引き渡せます（OpenCode 自身のクラウドはありません）。
+ベンダー自身のコマンドを置き換えるのではなく、それらを（`claude --cloud`、`claude --teleport`、
 `codex cloud`、`gh agent-task`、`jules remote`、`devin`、`amp`）このマシン上で、あなたとしてサインインした状態で実行し、
 それらにできないことを補います：別のマシンや他ベンダーのエージェントのセッション、ブリーフィングと損失レポート、ブランチ、
 系譜（lineage）、undo。hopsesh が開始するクラウドセッションはあなたのもので、あなたのプランで動きます。hopsesh がログイン
@@ -448,8 +478,9 @@ codex plugin marketplace add roeehrl/hopsesh # Codex
 npx skills add roeehrl/hopsesh               # any agent that reads Agent Skills
 ```
 
-スキルは、インストールされているすべてのエージェント（Claude Code と Codex）に同一のファイルとして入ります。あとは
-「ノートパソコンのセッションをここに持ってきて」「これを Codex で続けて」「studio で動いているセッションは？」のように
+スキルは、インストールされているすべてのエージェントに同一のファイルとして入ります（Claude Code と Codex。OpenCode は
+`~/.agents/skills` にある Codex のコピーを読みます）。あとは
+「ノートパソコンのセッションをここに持ってきて」「これを OpenCode で続けて」「studio で動いているセッションは？」のように
 頼むだけです。エージェントはまずプランを立て、**あなたが承認してから移動します**。`--add-rules` を使うと読み取り専用の
 コマンド（`ls`、`show`、`plan`、`agents`、`clouds`、`doctor` など）は確認なしで実行されますが、`pull`、`push`、`handoff`、
 `followup`、`undo` は auto モードでも**必ず確認します**。「これを Claude Code cloud に引き渡して」（Codex cloud、Copilot、
@@ -601,6 +632,10 @@ hopsesh は各エージェントに、どのアカウントでサインインし
 Codex 自身に尋ねます（`auth.json` は決して読みません）。アカウントが異なる場合は、元のアカウントでしか使えないものを除外します：
 Claude Code の署名付き thinking ブロック、Codex の暗号化された推理と compaction の記録です。これらは編集されることなく丸ごと
 取り除かれ、会話そのものは残ります。
+
+OpenCode は人ではなくプロバイダーごとにサインインします：hopsesh は各 OpenCode フォルダーがどのプロバイダーにサインイン
+しているかを表示し（`opencode auth list`。鍵は読みません）、別の OpenCode フォルダーに移したセッションはそこで新しい
+セッションとして続きます。
 </details>
 
 <details>
@@ -651,4 +686,5 @@ hopsesh はこれを、自身の起動コマンドを実行するタブを開く
 ## ライセンス
 
 [Apache License 2.0](LICENSE)。「Claude」および「Claude Code」は Anthropic, PBC の商標です。「Codex」および「OpenAI」は
-OpenAI の商標です。hopsesh は Anthropic および OpenAI とは提携関係になく、承認や後援も受けていません。
+OpenAI の商標です。「OpenCode」は Anomaly のオープンソースのコーディングエージェントの名称です。hopsesh は Anthropic、
+OpenAI、Anomaly とは提携関係になく、承認や後援も受けていません。
