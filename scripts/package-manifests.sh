@@ -8,7 +8,7 @@
 set -eu
 v=$1 sums=$2 out=$3
 url="https://github.com/roeehrl/hopsesh/releases/download/v$v"
-desc="Move Claude Code and Codex sessions between machines and agents"
+desc="Move Claude Code, Codex and OpenCode sessions between machines and agents"
 sha() {
 	h=$(awk -v f="$1" '$2 == f { print $1 }' "$sums")
 	[ -n "$h" ] || { echo "checksums.txt has no $1" >&2; exit 1; }

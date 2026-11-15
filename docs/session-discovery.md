@@ -33,6 +33,15 @@ network filesystems and account-root changes. Remote/cloud listing remains expli
 or scheduled by the existing frontend refresh policy; local file notifications do
 not authenticate to another machine.
 
+OpenCode keeps every session in one database, so there is no file per session to key on.
+Its summaries are keyed by the session's row instead: its id, update time, settled message
+and part counts, subagent count, profile and whether hopsesh titled it. The database is read
+read-only with SQL, one consistent snapshot per read, through a schema check of every table
+and column hopsesh reads. The watcher covers the database the module chose and its `-wal`
+file (every change lands there) and hopsesh's own folder for OpenCode
+(`<data>/hopsesh/opencode`). On another machine without `sqlite3` or `python3`, sessions are
+listed through OpenCode's own API, without counts, so nothing is cached for them.
+
 The catalog stores summaries, public account labels and repository/lineage metadata,
 including bounded prompt excerpts, never credential files or complete transcripts.
 It is isolated by enabled sources, root overrides and account registration bindings.

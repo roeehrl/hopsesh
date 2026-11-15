@@ -43,6 +43,28 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
   on a Mac with Docker, nothing changed on the Mac: `scripts/remote-scenarios.sh --docker
   [path to hopsesh 0.4.5 for linux/<docker arch>]`. `go test ./...` skips them
   (`HOPSESH_REMOTE_SCENARIOS=1` runs them).
+- The scenario matrix (`internal/devtools/hsmatrix`) runs every operation between two
+  machines with stand-in agents (`internal/devtools/fakeagent`, built as `claude`, `codex` and
+  `opencode`). `scripts/matrix-local.sh` runs it on this machine alone, with a stand-in ssh and
+  both homes in a scratch folder; CI runs it over real SSH (`matrix-loopback.sh`, Lima, WSL,
+  the mesh). The agents are Claude Code, Codex and OpenCode as source and target;
+  `-agents claude,codex` (or `HSMATRIX_AGENTS=claude,codex`) limits a run to the rows of
+  those agents. The matrix touches OpenCode only through the stand-in: it reads the
+  `opencode` on PATH's Go build info (without running it) and refuses one not built from
+  `internal/devtools/fakeagent`.
+- Every test binary marks itself a test machine (`HOPSESH_APP_RUNTIMES=off`), so tests never
+  find or run the agents installed on your machine: hopsesh then looks for agent programs
+  only on PATH and under the test's own home, and never inside desktop apps.
+- Tests against the installed agents run only with `HOPSESH_REAL_AGENTS=1` (CI's nightly
+  job installs them; on your own machine they run your real agents). OpenCode's
+  (`go test ./internal/e2e -run TestRealOpenCode`) call no model: every folder OpenCode
+  uses is the test's own, and `opencode` runs behind a guard that refuses any command
+  without `--standalone` (but `--version`, `service status` and `debug paths`), so no
+  background service starts; the test fails if one was registered. The nightly job pins
+  the OpenCode it installs (`OPENCODE_VERSION`).
+- OpenCode's protection plugin (`agents/opencode/plugin`, plain JavaScript) has its own tests,
+  `agents/opencode/plugin/hopsesh.test.js`, which `go test ./agents/opencode` runs with [Bun](https://bun.sh)
+  when it is installed (CI's Linux and macOS jobs) and skips otherwise.
 - `scripts/update-cli-golden.sh` rewrites `internal/ui/cli/testdata/cli-tree.golden` after a
   command or flag change. Every visible flag must be in the skill or in
   `internal/ui/cli/testdata/skill-undocumented-flags.txt` with a reason; CI and the release
@@ -94,15 +116,21 @@ make app      # macOS only: builds dist/macos/hopsesh.app (unsigned unless SIGN_
 ## Add an agent module
 
 Each coding agent hopsesh supports is a module: a Go package under `agents/<id>/` behind a
-small SDK. Claude Code and Codex keep sessions on machines; the GitHub Copilot cloud agent,
-Jules, Devin and Amp are cloud-only modules that reach their vendors' clouds. Adding one, such as OpenCode
-([#10](https://github.com/roeehrl/hopsesh/issues/10)), doesn't touch the core. Please open an
-issue or discussion first so we can agree on the approach.
+small SDK. Claude Code, Codex and OpenCode keep sessions on machines; the GitHub Copilot cloud
+agent, Jules, Devin and Amp are cloud-only modules that reach their vendors' clouds. Adding
+one doesn't touch the core. Please open an issue or discussion first so we can agree on the
+approach.
 
 **Start from a template:**
 - `agents/claude`: full-featured and stable.
 - `agents/codex`: experimental; talks to the agent through its `app-server` (JSON-RPC) and
   uses its own importer.
+- `agents/opencode`: experimental; for an agent that keeps every session in a database it
+  owns. It reads a fixed list of tables through the Host's read-only SQL (`Spec.SQLFiles`,
+  `SQLTables`, `SQLDenied`), never writes the database, and makes every change through the
+  agent's own program (`SessionStore`, `VendorInstaller`). Its sessions are virtual
+  (`VirtualSessions`, `Materializer`, `SessionStamper`, `SessionIDMinter`), and it protects a
+  moved session's original with a plugin folder (`HookDir`) instead of a hook file.
 
 **The rules:**
 - A module imports only `sdk/agent` (and `sdk/ir` if it converts conversations).
@@ -138,6 +166,11 @@ issue or discussion first so we can agree on the approach.
 | `Importer` | "use the agent's own importer" (`--via import`) |
 | `Integrator` | where the skill and approval rules go |
 | `MovementHookIntegrator` | passive local movement notices on resume or prompt submission |
+| `Previewer`, `Renamer`, `DirChanger` | the inspector's preview, rename, `hopsesh cd` |
+| `HostResumer`, `HostStarter` | resume and new-session commands checked on the machine (a program of the right version) |
+| `AccountPreparer` | setting up an account folder hopsesh has just made (OpenCode: its service's port) |
+| `HookTrustReporter`, `HookApprover` | whether the agent runs hopsesh's hook, and whether it waits for the user's approval |
+| `VirtualSessions`, `Materializer`, `SessionStamper`, `SessionStore`, `SessionIDMinter`, `VendorInstaller`, `InstallChecker` | sessions kept in a database the agent owns (see `agents/opencode`) |
 
 **Cloud capabilities.** A module whose agent has a cloud declares it in `Spec.Clouds` (the
 program that drives it, fidelity each way, how code travels, what it needs, its sign-in
@@ -185,8 +218,9 @@ chips, the palette and Settings → Agents. The app picks the first of these tha
 - Optional: tests against the real installed agent, behind `HOPSESH_REAL_AGENTS=1` (never run
   by default).
 
-**Then document it:** add the agent to the README, add an entry to `CHANGELOG.md`, and a line to
-`docs/design.md`.
+**Then document it:** add the agent to the README (in all three languages), add an entry to
+`CHANGELOG.md`, and a line to `docs/design.md`; an agent with limits of its own gets a page
+under `docs/`, as [OpenCode](docs/opencode.md) has.
 
 ## Contribute to the test bundle
 

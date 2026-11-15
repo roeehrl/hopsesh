@@ -92,8 +92,12 @@ For Codex, active context counts response items once, excluding their duplicate 
 A verified `replacement_history` resets the active-context count; a compacted record without
 a readable replacement prevents append. Paginated history must have contiguous ordinals and
 no unmaterialized inherited prefix. Claude follows its active native branch and resets only
-on an explicit readable compaction summary. Neither adapter equates archive file size with
-active context.
+on an explicit readable compaction summary. OpenCode's window is the session's model's in
+the models.dev catalog OpenCode caches in its database, else the fallback (a custom or local
+model the catalog does not list gets the fallback). Its active context is the last reply's
+token counts plus the messages after it, or, after a newer compaction, the compaction and
+what follows. Nothing comes from a configuration file: OpenCode's `opencode.json` may hold
+provider keys and is never read. No adapter equates archive file size with active context.
 
 Planning counts the final text after path mapping, redaction, notes and framing. Application
 rechecks the source revision, destination cursor and capacity. The native writer checks
