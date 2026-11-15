@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql"
+	"debug/buildinfo"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,28 +27,28 @@ import (
 // stand-in's database as OpenCode would add it, and sessions are found by their export.
 // The helper refuses everything else, so it never touches a real OpenCode's data.
 
-// standIn is whether the opencode on PATH is the stand-in, asked once.
+// fakeAgent is the stand-in's package, which its build records in the program.
+const fakeAgent = "github.com/roeehrl/hopsesh/internal/devtools/fakeagent"
+
+// standIn is whether the opencode on PATH is the stand-in, asked once. The program is
+// identified by the package its build recorded, without running it: a real OpenCode first
+// on PATH must not run here at all.
 var standIn = sync.OnceValues(func() (bool, error) {
-	if _, err := exec.LookPath("opencode"); err != nil {
+	p, err := exec.LookPath("opencode")
+	if err != nil {
 		return false, nil // no OpenCode on this machine
 	}
-	// The stand-in logs every call to $FAKE_AGENT_LOG; OpenCode does not know it.
-	f, err := os.CreateTemp("", "hsmatrix-opencode-*.log")
-	if err != nil {
-		return false, err
-	}
-	f.Close()
-	defer os.Remove(f.Name())
-	cmd := exec.Command("opencode", "--version")
-	cmd.Env = append(os.Environ(), "FAKE_AGENT_LOG="+f.Name())
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return false, fmt.Errorf("opencode --version: %v: %s", err, out)
-	}
-	if b, _ := os.ReadFile(f.Name()); !strings.Contains(string(b), "opencode --version") {
-		return false, errors.New("the opencode on PATH is not the stand-in (internal/devtools/fakeagent built as opencode); the matrix never runs a real OpenCode")
+	if !isStandIn(p) {
+		return false, fmt.Errorf("the opencode on PATH (%s) is not the stand-in (internal/devtools/fakeagent built as opencode); the matrix never runs a real OpenCode", p)
 	}
 	return true, nil
 })
+
+// isStandIn is whether the program at path is a build of the stand-in. It is read, never run.
+func isStandIn(path string) bool {
+	bi, err := buildinfo.ReadFile(path)
+	return err == nil && bi.Path == fakeAgent
+}
 
 // needStandIn is an error unless this machine's opencode is the stand-in.
 func needStandIn() error {
@@ -230,18 +232,24 @@ func opencodeTurn(r AppendReq) error {
 		return err
 	}
 	defer db.Close()
-	now := time.Now()
-	data, _ := json.Marshal(map[string]any{"time": map[string]any{"created": now.UnixMilli()}, "text": r.Text, "files": []any{}})
+	return ocAddTurn(db, r.ID, r.Text, time.Now())
+}
+
+// ocAddTurn adds a user message after a session's last one and moves its update time.
+func ocAddTurn(db *sql.DB, id, text string, now time.Time) error {
+	data, _ := json.Marshal(map[string]any{"time": map[string]any{"created": now.UnixMilli()}, "text": text, "files": []any{}})
+	// One row only when the session is there: no orphan message for a missing one.
 	res, err := db.Exec(`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
-		SELECT ?, ?, 'user', coalesce(max(seq), 0) + 1, ?, ?, ? FROM session_message WHERE session_id = ?`,
-		fakeopencode.MessageID(now), r.ID, now.UnixMilli(), now.UnixMilli(), string(data), r.ID)
+		SELECT ?, s.id, 'user', (SELECT coalesce(max(seq), 0) + 1 FROM session_message WHERE session_id = s.id), ?, ?, ?
+		FROM session_v2 s WHERE s.id = ?`,
+		fakeopencode.MessageID(now), now.UnixMilli(), now.UnixMilli(), string(data), id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("no OpenCode session %s", r.ID)
+		return fmt.Errorf("no OpenCode session %s", id)
 	}
-	_, err = db.Exec(`UPDATE session_v2 SET time_updated = max(time_updated + 1, ?) WHERE id = ?`, now.UnixMilli(), r.ID)
+	_, err = db.Exec(`UPDATE session_v2 SET time_updated = max(time_updated + 1, ?) WHERE id = ?`, now.UnixMilli(), id)
 	return err
 }
 
