@@ -1,7 +1,13 @@
-# Plan: first-class OpenCode support in hopsesh (for approval)
+# Plan: first-class OpenCode support in hopsesh
+
+**Status: built (PRs 0–10), shipping as `Experimental` (D10).** The decisions in §0 were
+accepted as recommended. The text below is the plan as approved; where a PR built something
+differently, its "Left by PR N" note in §8 says how and why, and what it left. The user
+documentation is [opencode.md](opencode.md). Still to come: the switch to `Stable` once D10's
+condition is met, and the optional PRs 11 (D4) and 12 (D1).
 
 Baseline: hopsesh `main` @ 011555f. OpenCode CLI 2.3.0 (Homebrew) and OpenCode Desktop 2.2.7
-(Electron, `ai.opencode.desktop`) on this Mac. Nothing below is implemented yet.
+(Electron, `ai.opencode.desktop`) on the machine the plan was written on.
 
 This revision applies two reviews of the first draft: a parity and completeness review against the
 hopsesh source, and an accuracy review against the OpenCode 2.3.0 source and a copy of the local
@@ -97,7 +103,7 @@ N/P = not possible; ✗ = intentionally not done.
 Abbreviations:
 - `src:` = github.com/anomalyco/opencode at tag v2.3.0 (a6b15d33), checked out under `$S/src/oc`.
 - `local:` = observed on this Mac.
-- `$S` = `/private/tmp/claude-501/-Users-tnt-git-hopsesh/6149fe06-a1ca-4a87-9fa0-af58e0246275/scratchpad/opencode`
+- `$S` = the scratch folder the plan's research used (a source checkout, schema dumps, sandbox copies); not kept.
 
 | # | Fact | Source | Status |
 |---|---|---|---|
@@ -1855,6 +1861,39 @@ Left:
   tests and their guard), `docs/drift.md` (the snapshots, written with sorted keys), and the
   CHANGELOG lines for the matrices and the nightly job. The SDK lines (`ir.WriteResult.Stamp`,
   the stricter conformance suite) are in already.
+
+**Left by PR 10 for later PRs.** The docs and packaging now name OpenCode: the three
+READMEs (a section of their own, marked experimental, and #10 closed), a user page
+([opencode.md](opencode.md): setup, listing and moves, the service, protection, accounts,
+what does not carry, limits, what hopsesh never does), `CONTRIBUTING.md` (the matrix with
+OpenCode and `HSMATRIX_AGENTS`, test machines, the real-agent tests and their guard, Bun, the
+module as a template), `docs/design.md` (the capability table's OpenCode column, sessions in a
+database, the skill, testing, status), `docs/accounts.md`, `docs/drift.md` (the snapshots,
+floors, formats and the desktop app target), `docs/session-discovery.md`,
+`docs/context-safety.md`, `docs/machines.md`, `docs/client-api.md`, the skill template (an
+OpenCode example, `notices` among the user's commands, the `append` that becomes `new`, the
+plugin as OpenCode's hook, rules through the plugin), the plugin and marketplace
+descriptions, and the package descriptions (Homebrew and Scoop, deb/rpm/apk, the Windows
+installer's welcome text, the macOS local-network reason). `CHANGELOG.md` has OpenCode, the
+SDK, the tests and the fixes since 0.8.0 (#159, #162) under Unreleased. Left:
+- **The plugin's skill** (`plugin/skills/hopsesh`) stays 0.8.0's until the release:
+  `scripts/update-plugin.sh` renders it for the newest release in the CHANGELOG
+  (`TestPlugin`), so the release that ships OpenCode regenerates it (RELEASING step 1).
+  The manifests' descriptions already name OpenCode.
+- **The demo and the recordings.** `demo/` (an `opencode` stub in the Dockerfile,
+  `laptop-setup.sh`, `studio-entrypoint.sh`) has no OpenCode, so the README's GIFs and
+  screenshots show Claude Code and Codex only, and their alt texts say so. Re-recording them
+  with OpenCode is a separate change.
+- **Design records** (`accounts-design.md`, `accounts-discovery-refresh.md`,
+  `movement-return.md`, `daemon-presence-proposal.md`, `lineage-plan.md`,
+  `embedded-terminal-families-design.md`, `return-conflict-review.md`,
+  `desktop-presence-design.md`) describe designs as they were made for Claude Code and Codex
+  and are not rewritten; `opencode.md` and this plan cover OpenCode.
+- `opencode.md` is in English only; the Japanese and Chinese READMEs link to it.
+- **Out of the repository:** winget's description lives in its manifests in
+  microsoft/winget-pkgs (each release's pull request copies the last one's), so it changes
+  with a hand edit there; the codonic.dev product page after the release (§6 F); the
+  `launch/` texts were not touched.
 
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
