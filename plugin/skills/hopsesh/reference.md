@@ -1,4 +1,4 @@
-# hopsesh reference (version 0.8.0)
+# hopsesh reference (version 0.9.0)
 
 ## Read-only commands
 
@@ -29,8 +29,8 @@ their own terminal (Claude Code starts the session there and may ask them a ques
 which are merged, and `hopsesh clouds cleanup --yes` deletes the merged ones (undo pushes them
 back); the approval rule covers both. `hopsesh clouds continue <hop>` takes a hop whose first
 leg waited for a terminal on to the next cloud. `hopsesh cd <ref> <dir> --json --yes [--other-repo] [--stop-local]` continues a session on this
-machine in another folder, keeping the session (`--dry-run` plans; an open Claude Code session
-changes folder when the user types `/cd <dir>` in it, which hopsesh waits for, up to `--wait`).
+machine in another folder, keeping the session (`--dry-run` plans; an open Claude Code or OpenCode
+session changes folder when the user types `/cd <dir>` in it, which hopsesh waits for, up to `--wait`).
 `hopsesh installs --align --yes` brings the other copies of hopsesh on this machine to this
 version (the app with its own updater). `hopsesh undo <id>` reverses a pull, a push, a folder change or
 a hand-off (a cloud session itself stays in the cloud).
@@ -55,7 +55,7 @@ a hand-off (a cloud session itself stays in the cloud).
 
 | Flag | Meaning |
 |---|---|
-| `--in <claude|codex>` | continue in this agent (default: the session's own agent) |
+| `--in <claude|codex|opencode>` | continue in this agent (default: the session's own agent) |
 | `--fidelity history\|note` | another agent gets the whole conversation as text (default), or only a briefing |
 | `--native` | another agent that can replays exact tool calls as its own (experimental) |
 | `--note-file <path>` | a handoff note for the other agent's briefing |
@@ -92,4 +92,5 @@ lists each repository's Codex cloud environment.
 hopsesh reads other machines over SSH and writes into the agents' data folders, which agent
 sandboxes usually block. `hopsesh skill install --add-rules` adds approval rules for each agent:
 the read-only commands run without asking (and, in Codex, outside its sandbox), while `pull`,
-`push`, `handoff`, `undo`, `clouds cleanup` and `clouds continue` always ask.
+`push`, `handoff`, `undo`, `clouds cleanup` and `clouds continue` always ask. In OpenCode the
+rules work through hopsesh's plugin, which `hopsesh notices install` adds.
