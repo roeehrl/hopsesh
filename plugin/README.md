@@ -1,10 +1,12 @@
 # hopsesh plugin
 
-The hopsesh skill for Claude Code and Codex. Ask your agent things like "bring my laptop
-session here", "continue this in Codex" or "which sessions are open on the studio?", and it
-uses the hopsesh command to list your coding-agent sessions on all your machines, move one
-here with the repository, worktree and paths fixed up, continue it in the other agent, hand
-it to a cloud, or undo a move. It always shows the plan first and moves only after you say yes.
+The hopsesh skill for Claude Code and Codex, and, through `npx skills add`, for any agent that
+reads Agent Skills (`hopsesh skill install` also puts it where OpenCode reads it). Ask your
+agent things like "bring my laptop session here", "continue this in Codex" or "which sessions
+are open on the studio?", and it uses the hopsesh command to list your coding-agent sessions
+on all your machines, move one here with the repository, worktree and paths fixed up,
+continue it in another agent, hand it to a cloud, or undo a move. It always shows the plan
+first and moves only after you say yes.
 
 The plugin needs the hopsesh command on this machine:
 
@@ -24,4 +26,4 @@ signed in as you.
 
 Source and documentation: <https://github.com/roeehrl/hopsesh>. Issues:
 <https://github.com/roeehrl/hopsesh/issues>. Apache-2.0. hopsesh is
-unofficial and not affiliated with Anthropic or OpenAI.
+unofficial and not affiliated with Anthropic, OpenAI or Anomaly.

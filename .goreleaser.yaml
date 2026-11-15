@@ -53,7 +53,7 @@ nfpms:
     vendor: hopsesh contributors
     homepage: https://github.com/roeehrl/hopsesh
     maintainer: roeehrl <82368940+roeehrl@users.noreply.github.com>
-    description: Move Claude Code sessions between your machines (not affiliated with Anthropic).
+    description: Move Claude Code, Codex and OpenCode sessions between your machines and agents (unofficial; not affiliated with Anthropic, OpenAI or Anomaly).
     license: Apache-2.0
     formats: [deb, rpm, apk]
     bindir: /usr/bin
