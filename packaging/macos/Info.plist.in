@@ -22,6 +22,6 @@
       <key>CFBundleURLSchemes</key><array><string>hopsesh</string></array>
     </dict>
   </array>
-  <key>NSHumanReadableCopyright</key><string>Apache-2.0. Not affiliated with Anthropic.</string>
+  <key>NSHumanReadableCopyright</key><string>Apache-2.0. Not affiliated with Anthropic, OpenAI or Anomaly.</string>
 </dict>
 </plist>

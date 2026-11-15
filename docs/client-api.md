@@ -315,7 +315,7 @@ per process: `~/.hopsesh/owners/<program>/<pid>.json`. On Windows that is
 
 ```json
 {"owner":"mycnc","pid":4812,"started":"2026-10-31T12:00:00Z",
- "session":{"agent":"claude","profile":"","session":"6149fe06-…"},
+ "session":{"agent":"claude","profile":"","session":"7f3c2a1e-…"},
  "endpoint":"b536…bf49","stop":"Stop it in MyCNC, or MyCNC stops it when you confirm the move"}
 ```
 

@@ -90,4 +90,4 @@ release:
     [release-key.pub](https://github.com/roeehrl/hopsesh/blob/main/packaging/release-key.pub).
     Linux and Windows files also carry build provenance: `gh attestation verify <file> --repo roeehrl/hopsesh`.
 
-    hopsesh is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic or OpenAI.
+    hopsesh is an independent project and is not affiliated with, endorsed by or sponsored by Anthropic, OpenAI or Anomaly.

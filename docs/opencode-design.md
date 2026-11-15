@@ -102,7 +102,7 @@ N/P = not possible; ✗ = intentionally not done.
 
 Abbreviations:
 - `src:` = github.com/anomalyco/opencode at tag v2.3.0 (a6b15d33), checked out under `$S/src/oc`.
-- `local:` = observed on this Mac.
+- `local:` = observed on the machine the plan was written on.
 - `$S` = the scratch folder the plan's research used (a source checkout, schema dumps, sandbox copies); not kept.
 
 | # | Fact | Source | Status |
@@ -686,7 +686,7 @@ change to the writer must pass a real `--standalone` sandbox import (run locally
   adding `XDG_*`, `OPENCODE_CONFIG_DIR` and auto-update off.
 - `ci/drift/focus/local.md`, `groups.json`.
 
-**Manual end-to-end checklist (this Mac, then a second machine over SSH)**
+**Manual end-to-end checklist (a Mac, then a second machine over SSH)**
 1. Sandbox (`XDG_*` → scratch, `--standalone`): list / preview / continue-into-OpenCode /
    move-loopback / undo; confirm with `opencode session list`.
 2. Real install with the desktop running (2.2.7 service, 2.3.0 CLI): `hopsesh list` shows both
@@ -1401,7 +1401,7 @@ left:
   and failures fail open and are counted, a failed check keeps a fresh block, subagent root
   with `session.get`'s real shape and a failed lookup not kept, notices on the root, an answer
   split inside a character, setup, events and a subscription made again) runs from `go test ./agents/opencode` where Bun is
-  installed and skips otherwise. Bun is not installed on this Mac: they ran under Node with a
+  installed and skips otherwise. Bun was not installed on the development machine: they ran under Node with a
   `bun:test` stand-in (not committed), all passing. CI has no Bun yet: PR 9 adds it
   (`oven-sh/setup-bun`) so they run there.
 - **Windows** (not run): the plugin spawns the argv as is (no shell, `windowsHide`), so the
@@ -1818,7 +1818,7 @@ job and the drift watcher. Done here from the earlier notes:
 - **Nightly.** The real-agent job installs OpenCode 2.3.0 with npm (`@opencode/cli`, pinned in
   `OPENCODE_VERSION`) on Linux and macOS, checks hopsesh reads that version, and runs
   `TestRealOpenCode` (no model calls). Pull requests that change the real-agent tests run it.
-  Before committing, the three tests ran once on this Mac against Homebrew's 2.3.0, with every
+  Before committing, the three tests ran once on the development machine against Homebrew's 2.3.0, with every
   folder in the session's scratch folder and a stricter guard that answered `service status`
   itself: all passed, 59 migrations (the latest `20261030054400_job`, none new), and
   `~/.local/share/opencode`, `~/.config/opencode` and `~/.local/state/opencode` unchanged.
@@ -1883,12 +1883,14 @@ SDK, the tests and the fixes since 0.8.0 (#159, #162) under Unreleased. Left:
 - **The demo and the recordings.** `demo/` (an `opencode` stub in the Dockerfile,
   `laptop-setup.sh`, `studio-entrypoint.sh`) has no OpenCode, so the README's GIFs and
   screenshots show Claude Code and Codex only, and their alt texts say so. Re-recording them
-  with OpenCode is a separate change.
+  with OpenCode is a separate change; `demoseed -opencode` and `testkit.DemoHome` already
+  write OpenCode sessions for it.
 - **Design records** (`accounts-design.md`, `accounts-discovery-refresh.md`,
   `movement-return.md`, `daemon-presence-proposal.md`, `lineage-plan.md`,
   `embedded-terminal-families-design.md`, `return-conflict-review.md`,
   `desktop-presence-design.md`) describe designs as they were made for Claude Code and Codex
-  and are not rewritten; `opencode.md` and this plan cover OpenCode.
+  and are not rewritten; `opencode.md` and this plan cover OpenCode. `desktop-presence.md`
+  (in §6 F's list) is agent-neutral and needed no change.
 - `opencode.md` is in English only; the Japanese and Chinese READMEs link to it.
 - **Out of the repository:** winget's description lives in its manifests in
   microsoft/winget-pkgs (each release's pull request copies the last one's), so it changes
