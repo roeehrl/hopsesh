@@ -346,8 +346,8 @@ func TestHookTrust(t *testing.T) {
 	}
 }
 
-// The plugin's own tests run with Bun where it is installed (not yet in CI: PR 9 adds it);
-// without Bun they skip.
+// The plugin's own tests run with Bun where it is installed (CI's Linux and macOS test
+// jobs); without Bun they skip.
 func TestPluginJS(t *testing.T) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {

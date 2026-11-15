@@ -86,7 +86,8 @@ func TestImportShapes(t *testing.T) {
 		t.Fatalf("unknown members: %+v", r)
 	}
 	exp := m.must("session", "export", sid, "--standalone")
-	for _, gone := range []string{"hopsesh", "unknownMember", "1794598001500", "extra", "1794598001000.5"} {
+	// Keys, quoted: the session's folder (under TMPDIR) may hold any word.
+	for _, gone := range []string{`"hopsesh"`, `"unknownMember"`, "1794598001500", `"extra"`, "1794598001000.5"} {
 		if strings.Contains(exp, gone) {
 			t.Errorf("the export keeps %s:\n%s", gone, exp)
 		}

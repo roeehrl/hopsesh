@@ -229,7 +229,12 @@ func TestRealOpenCodeSchemaAndAPI(t *testing.T) {
 		}
 	}
 	if dir := os.Getenv("HOPSESH_DRIFT_SNAPSHOTS"); dir != "" {
-		pretty, _ := json.MarshalIndent(json.RawMessage(out), "", "  ")
+		// Keys sorted, so a weekly diff shows only real changes, not OpenCode's key order.
+		var v any
+		if err := json.Unmarshal([]byte(out), &v); err != nil {
+			t.Fatal(err)
+		}
+		pretty, _ := json.MarshalIndent(v, "", "  ")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
