@@ -211,11 +211,16 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 	fragments := map[ir.NodeID][]ir.Fragment{}
 	generated := map[ir.NodeID]bool{}
 	kinds := map[ir.NodeID]ir.Kind{}
+	calls := map[string]bool{}
 	for _, n := range nodes {
 		kinds[n.ID] = n.Kind
 		if n.Kind == ir.KindToolResult && n.Result != nil {
 			results[n.Result.CallID] = n.Result
 			resultCoverage[n.Result.CallID] = n.Coverage
+		}
+		// Only a call that is rendered carries its result; a skipped one does not.
+		if n.Kind == ir.KindToolCall && n.Tool != nil && (!n.Generated || r.IncludeGenerated) {
+			calls[n.Tool.CallID] = true
 		}
 	}
 	var items []ir.Item
@@ -303,9 +308,32 @@ func (res *Result) history(r Request, nodes []ir.Node) []ir.Item {
 				continue
 			}
 			add(ir.RoleAgent, n.ID, n.Time, flatten(r.From, n.Tool, out, &res.Report))
+		case ir.KindToolResult:
+			// A result whose call is not here (an incremental read after the call was
+			// carried: a subagent's answer that came later) is rendered on its own; a
+			// result whose call is here is rendered with it.
+			if n.Result != nil && !calls[n.Result.CallID] {
+				add(ir.RoleAgent, n.ID, n.Time, flattenResult(r.From, n.Result, &res.Report))
+			}
 		}
 	}
 	return items
+}
+
+// flattenResult renders a result whose call came in an earlier part of the conversation.
+func flattenResult(from string, out *ir.ToolResult, rep *Report) string {
+	head := fmt.Sprintf("[prior agent · %s · result of an earlier call", from)
+	if out.ExitCode != nil {
+		head += fmt.Sprintf(" · exit %d", *out.ExitCode)
+	} else if out.Status == ir.StatusFailed {
+		head += " · failed"
+	}
+	body := "(no output)\n"
+	if strings.TrimSpace(out.Output) != "" {
+		lines := strings.Count(strings.TrimRight(out.Output, "\n"), "\n") + 1
+		body = fmt.Sprintf("[output · %d line(s)]\n%s\n[/output]", lines, strings.TrimRight(shorten(out.Output, rep), "\n"))
+	}
+	return "**" + head + "]**\n\n" + literalHistory(body)
 }
 
 // nativeable: only calls a target agent has an exact equivalent for.

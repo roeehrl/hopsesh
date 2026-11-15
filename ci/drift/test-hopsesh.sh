@@ -17,12 +17,14 @@ jq -e '
 # and the probe's per-target tables are there.
 jq -e '
   ([.targets[] | select(.id == "claude" or .id == "codex") | (.floors | length > 0) and .baseline != .tested] | all) and
-  ([.targets[] | select(.kind == "app") | .id] | sort == ["claude-desktop", "codex-desktop"]) and
+  ([.targets[] | select(.kind == "app") | .id] | sort == ["claude-desktop", "codex-desktop", "opencode-desktop"]) and
   ([.targets[].watch.formats // [] | .[].id] | index("codex-session-meta") != null and index("claude-live-registry") != null and
-    index("claude-remote-control-default") != null and index("claude-desktop-handoff") != null)
+    index("claude-remote-control-default") != null and index("claude-desktop-handoff") != null and
+    index("opencode-session") != null and index("opencode-plugin") != null and index("opencode-desktop-bundle") != null) and
+  ([.targets[] | select(.id == "opencode") | .watch.tests == "TestRealOpenCode" and (.floors | length >= 2)] | all)
 ' "$OUT/manifest.json" > /dev/null
 jq -e 'map(select(.id == "claude")) | .[0].baseline == "2.1.300"' "$OUT/versions.json" > /dev/null
-for id in claude codex claude-desktop codex-desktop; do test -s "$OUT/formats/$id.tsv"; done
+for id in claude codex opencode claude-desktop codex-desktop opencode-desktop; do test -s "$OUT/formats/$id.tsv"; done
 grep -q '^auth status	' "$OUT/help/claude/relies.tsv" 2> /dev/null || ! command -v claude > /dev/null
 mkdir -p "$OUT/prompts"
 jq -r '.[].group' ci/drift/groups.json | while IFS= read -r group; do

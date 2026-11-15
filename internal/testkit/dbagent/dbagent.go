@@ -40,6 +40,12 @@ type Module struct {
 	OwnIDs atomic.Bool
 	// BeforeDelete runs as Delete starts (set before the module is used).
 	BeforeDelete func(id agent.SessionID)
+	// WriteStamps makes Write give the stamp its import left (ir.WriteResult.Stamp),
+	// checked against the messages it wrote, as OpenCode's writer does.
+	WriteStamps atomic.Bool
+	// AfterImport runs right after Write's import, before the write reads anything back
+	// (set before the module is used): a turn added there.
+	AfterImport func(id agent.SessionID)
 }
 
 // New returns the stand-in agent.
@@ -464,7 +470,23 @@ func (m *Module) Write(ctx context.Context, h agent.Host, in agent.Install, req 
 	if err := m.AfterInstall(ctx, h, in, agent.SessionKey{Agent: ID, Session: id}, agent.Placement{}); err != nil {
 		return ir.WriteResult{}, err
 	}
-	return m.result(ctx, h, in, id, items)
+	if m.AfterImport != nil {
+		m.AfterImport(id)
+	}
+	var stamp agent.SessionStamp
+	if m.WriteStamps.Load() {
+		st, err := m.SessionStamp(ctx, h, in, id)
+		if err != nil {
+			return ir.WriteResult{}, err
+		}
+		stamp = st
+		if !strings.HasPrefix(string(st), fmt.Sprintf("v1:%d@", len(msgs))) {
+			stamp = "v1:used-since-written"
+		}
+	}
+	res, err := m.result(ctx, h, in, id, items)
+	res.Stamp = string(stamp)
+	return res, err
 }
 
 func (m *Module) result(ctx context.Context, h agent.Host, in agent.Install, id agent.SessionID, items map[string]ir.Item) (ir.WriteResult, error) {

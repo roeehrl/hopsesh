@@ -5,7 +5,7 @@ name: mesh
 # and no secret), and the runners swap tickets and keys through this run's artifacts
 # (internal/devtools/meshrdv). Pull requests run macOS ↔ Windows, the one pair no single
 # runner covers, without blocking the PR (public relays are best effort); the nightly run
-# covers all three systems and blocks.
+# covers all three systems and blocks. Rows use Claude Code, Codex and OpenCode (stand-ins).
 
 on:
   pull_request:
@@ -81,6 +81,8 @@ jobs:
           bin/meshrdv connect -node "$NODE" -peers "$peers" -dir rdv
       - name: scenario matrix from this runner to each other one
         run: |
+          # The stand-in agents here, as there (matrix-loopback.ps1 puts them in C:\hsm-bin).
+          [ "$RUNNER_OS" = Windows ] && export PATH="/c/hsm-bin:$PATH"
           failed=0
           for p in $peers; do
             echo "== $NODE → $p"

@@ -25,8 +25,8 @@ import (
 
 // SeedReq makes a repository (if missing) and one session in it.
 type SeedReq struct {
-	Agent   string `json:"agent"`
-	ID      string `json:"id"`
+	Agent   string `json:"agent"` // claude | codex | opencode
+	ID      string `json:"id"`    // an OpenCode session's is ses_…
 	Title   string `json:"title"`
 	Text    string `json:"text"`    // the user's message (with the row's marker)
 	Large   bool   `json:"large"`   // pad the conversation to about 2 MB
@@ -86,6 +86,9 @@ func removeSession(r RemoveReq) error {
 	}
 	for _, f := range found {
 		if f.Agent == r.Agent && f.ID == r.ID {
+			if f.Agent == "opencode" {
+				return opencodeRemove(f.ID) // the anchor and its lineage stay
+			}
 			return os.Remove(f.Path)
 		}
 	}
@@ -98,6 +101,18 @@ type HeadReq struct {
 }
 
 func homeDir() string { h, _ := os.UserHomeDir(); return h }
+
+// short is eight characters that tell a row's session apart: a UUID's first, an
+// OpenCode id's last (its first ones are the clock's and a prefix).
+func short(id string) string {
+	if strings.HasPrefix(id, "ses_") && len(id) > 8 {
+		return id[len(id)-8:]
+	}
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
 
 // base is where this machine's scenario repositories live.
 // It is resolved (no symlinks), as agents record the folders they run in.
@@ -144,8 +159,11 @@ var fixed = []string{"GIT_AUTHOR_NAME=hsmatrix", "GIT_AUTHOR_EMAIL=hsmatrix@exam
 
 func seed(r SeedReq) (SeedRes, error) {
 	var res SeedRes
+	if err := ocRanOnce(); err != nil {
+		return res, err
+	}
 	if r.State == "none" {
-		res.Cwd = filepath.Join(base(), "loose-"+r.ID[:8])
+		res.Cwd = filepath.Join(base(), "loose-"+short(r.ID))
 		if err := os.MkdirAll(res.Cwd, 0o755); err != nil {
 			return res, err
 		}
@@ -169,22 +187,22 @@ func seed(r SeedReq) (SeedRes, error) {
 		who := []string{"GIT_AUTHOR_NAME=hsmatrix", "GIT_AUTHOR_EMAIL=hsmatrix@example.invalid", "GIT_COMMITTER_NAME=hsmatrix", "GIT_COMMITTER_EMAIL=hsmatrix@example.invalid"}
 		switch r.State {
 		case "unpushed":
-			if err := os.WriteFile(filepath.Join(dir, "work-"+r.ID[:8]+".txt"), []byte(r.ID+"\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "work-"+short(r.ID)+".txt"), []byte(r.ID+"\n"), 0o644); err != nil {
 				return res, err
 			}
 			if _, err := git(dir, who, "add", "-A"); err != nil {
 				return res, err
 			}
-			if _, err := git(dir, who, "commit", "-q", "-m", "work on "+r.ID[:8]); err != nil {
+			if _, err := git(dir, who, "commit", "-q", "-m", "work on "+short(r.ID)); err != nil {
 				return res, err
 			}
 		case "uncommitted":
-			if err := os.WriteFile(filepath.Join(dir, "draft-"+r.ID[:8]+".txt"), []byte("not committed\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, "draft-"+short(r.ID)+".txt"), []byte("not committed\n"), 0o644); err != nil {
 				return res, err
 			}
 		case "worktree":
-			wt := filepath.Join(dir, ".claude", "worktrees", r.ID[:8])
-			if _, err := git(dir, who, "worktree", "add", "-q", "-b", "feat/"+r.ID[:8], wt); err != nil {
+			wt := filepath.Join(dir, ".claude", "worktrees", short(r.ID))
+			if _, err := git(dir, who, "worktree", "add", "-q", "-b", "feat/"+short(r.ID), wt); err != nil {
 				return res, err
 			}
 			res.Cwd = wt
@@ -204,6 +222,8 @@ func seed(r SeedReq) (SeedRes, error) {
 		res.File, err = claudeSession(r, res.Cwd)
 	case "codex":
 		res.File, err = codexThread(r, res.Cwd)
+	case "opencode":
+		res.File, err = opencodeSession(r, res.Cwd)
 	default:
 		err = fmt.Errorf("unknown agent %q", r.Agent)
 	}
@@ -392,7 +412,11 @@ func find(r FindReq) ([]Found, error) {
 	}); err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
-	return out, nil
+	oc, err := opencodeFind(r)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, oc...), nil
 }
 
 // jsonEscape is s as it appears inside a JSON string (paths on Windows have \\).
@@ -402,6 +426,9 @@ func jsonEscape(s string) string {
 }
 
 func appendTurn(r AppendReq) error {
+	if r.Agent == "opencode" {
+		return opencodeTurn(r)
+	}
 	var rec map[string]any
 	now := time.Now().UTC()
 	if r.Agent == "claude" {

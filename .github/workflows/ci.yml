@@ -40,6 +40,12 @@ jobs:
       - name: GUI build dependencies (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      # The OpenCode plugin's own tests (agents/opencode/plugin) run under go test where Bun
+      # is installed, and skip elsewhere (Windows: not yet run there).
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: runner.os != 'Windows'
+        with:
+          bun-version: 1.4.4
       - name: vet
         run: go vet ./...
       - name: the terminal's bundled pseudoconsole (Windows)
@@ -298,7 +304,7 @@ jobs:
           - {family: macos, os: macos-15}
           - {family: windows, os: windows-2025}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         if: runner.os != 'Windows' # its Windows agent floods the log with PID-reuse warnings
@@ -326,7 +332,12 @@ jobs:
       - name: mandatory lineage and context routes, forks and recovery
         shell: bash
         run: |
-          go test ./internal/e2e -run 'TestLineage|TestContext' -race -count=1 -timeout 10m
+          go test ./internal/e2e -run 'TestLineage|TestContext' -skip 'TestLineageRoutesThreeAgents' -race -count=1 -timeout 10m
+      # The three-agent routes alone take about half of that batch; they get their own deadline.
+      - name: mandatory lineage routes through three agents
+        shell: bash
+        run: |
+          go test ./internal/e2e -run 'TestLineageRoutesThreeAgents' -race -count=1 -timeout 10m
       - name: mandatory account routes and progressive discovery
         shell: bash
         run: |
@@ -341,6 +352,8 @@ jobs:
       - name: scenario matrix over loopback SSH
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          HSMATRIX_AGENTS: claude,codex # OpenCode's rows run on Windows in the mesh (nightly), to keep this job short
         run: ./scripts/matrix-loopback.ps1 -Bin bin -Label "windows→windows" -Out "$env:RUNNER_TEMP\hsmatrix"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ failure() }}
@@ -375,6 +388,8 @@ jobs:
           done
       - name: scenario matrix, Windows → Linux (WSL2) and Linux → Windows
         shell: pwsh
+        env:
+          HSMATRIX_AGENTS: claude,codex # OpenCode's rows between systems run in the mesh, to keep this job in its time
         run: ./scripts/matrix-wsl.ps1 -Bin bin -LinuxBin bin-linux -Out "$env:RUNNER_TEMP\hsmatrix"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ failure() }}
@@ -407,6 +422,8 @@ jobs:
             CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "bin-linux/${p#*:}" "./${p%%:*}"
           done
       - name: scenario matrix, macOS → Linux (Lima VM) and Linux → macOS
+        env:
+          HSMATRIX_AGENTS: claude,codex # OpenCode's rows between systems run in the mesh, to keep this job in its time
         run: scripts/matrix-lima.sh bin bin-linux "$RUNNER_TEMP/hsmatrix"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ failure() }}

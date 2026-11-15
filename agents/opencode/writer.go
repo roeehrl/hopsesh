@@ -162,6 +162,9 @@ func (m *Module) importWritten(ctx context.Context, h agent.Host, in agent.Insta
 	if err := m.importSession(ctx, h, in, svc, w.sid, p.ids(), req.Header.CWD, func() (string, error) { return p.stage(h, in) }); err != nil {
 		return ir.WriteResult{}, err
 	}
+	// The stamp the import left, read before anything else: the core records it as the
+	// operation's, so it must hold only what was written.
+	stamp, stampErr := m.SessionStamp(ctx, h, in, w.sid)
 	if strings.TrimSpace(req.Header.Title) != "" {
 		recordTitle(ctx, h, in, w.sid, req.Header.Title)
 	}
@@ -170,6 +173,9 @@ func (m *Module) importWritten(ctx context.Context, h agent.Host, in agent.Insta
 		return ir.WriteResult{}, err
 	}
 	res := ir.WriteResult{SessionID: string(w.sid), Path: anchor, To: seg.Cursor.Offset, Cursor: seg.Cursor}
+	if stampErr == nil {
+		res.Stamp = string(writtenStamp(stamp, len(p.msgs)))
+	}
 	for _, n := range seg.Nodes {
 		if n.Native == nil {
 			continue
@@ -179,6 +185,21 @@ func (m *Module) importWritten(ctx context.Context, h agent.Host, in agent.Insta
 		}
 	}
 	return res, nil
+}
+
+// usedSince is the stamp a written session gets when it held more than the write's
+// messages when its stamp was read (a turn added right after the import): no state of a
+// session has it, so undo refuses to delete that session without force.
+const usedSince agent.SessionStamp = "v1:used-since-written"
+
+// writtenStamp is the stamp a write records for its session: the one read after the
+// import when its settled messages are the n written, else usedSince.
+func writtenStamp(st agent.SessionStamp, n int) agent.SessionStamp {
+	var settled, updated int64
+	if _, err := fmt.Sscanf(string(st), "v1:%d@%d", &settled, &updated); err != nil || settled != int64(n) {
+		return usedSince
+	}
+	return st
 }
 
 // writtenID is the id Write gives the session: the one the core asked for when it is in

@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/roeehrl/hopsesh/internal/testkit/fakecloud"
 )
 
 // machine is a home with the stand-in's environment: XDG and OpenCode variables unset.
@@ -76,8 +74,8 @@ func (m *machine) fixtureFile(name string, edit func(map[string]any)) string {
 
 func TestVersion(t *testing.T) {
 	m := newMachine(t)
-	if got := strings.TrimSpace(m.must("--version")); got != fakecloud.OpenCodeVersionLine || got != VersionLine(Version) {
-		t.Errorf("--version prints %q; fakecloud says %q", got, fakecloud.OpenCodeVersionLine)
+	if got := strings.TrimSpace(m.must("--version")); got != "opencode v2.3.0" || got != VersionLine(Version) {
+		t.Errorf("--version prints %q", got)
 	}
 	m.env["FAKE_OPENCODE_VERSION"] = "2.2.7"
 	if got := strings.TrimSpace(m.must("--version")); got != "opencode v2.2.7" {

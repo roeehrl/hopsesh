@@ -134,12 +134,29 @@ func TestFloorsDeclared(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range []string{"claude", "codex"} {
-		for _, x := range ts {
-			if x.ID == id && x.Baseline == x.Tested {
-				t.Errorf("%s: baseline %s did not rise to the code's floors", id, x.Baseline)
+	// Every agent's baseline is the highest of its tested version and its floors: a floor
+	// above the fixtures raises it, one below leaves it at the tested version.
+	agents := 0
+	for _, x := range ts {
+		if x.Kind != "agent" {
+			continue
+		}
+		agents++
+		want := x.Tested
+		for _, f := range x.Floors {
+			if versionLess(want, f.Version) {
+				want = f.Version
 			}
 		}
+		if x.Baseline != want {
+			t.Errorf("%s: baseline %s, want %s (tested %s, floors %v)", x.ID, x.Baseline, want, x.Tested, floorVersions(x))
+		}
+		if len(x.Floors) == 0 {
+			t.Errorf("%s: no version floor declared", x.ID)
+		}
+	}
+	if agents < 3 {
+		t.Fatalf("%d agent targets", agents)
 	}
 }
 
@@ -178,7 +195,8 @@ func TestFormatsRead(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"claude-oauth-account", "claude-transcript-identity", "claude-live-registry", "claude-hooks", "claude-desktop-identity",
-		"codex-auth", "codex-session-meta", "codex-writer-lock", "codex-hooks", "codex-app-bundle", "codex-app-link", "claude-desktop-link"} {
+		"codex-auth", "codex-session-meta", "codex-writer-lock", "codex-hooks", "codex-app-bundle", "codex-app-link", "claude-desktop-link",
+		"opencode-session", "opencode-message", "opencode-catalog", "opencode-plugin", "opencode-desktop-bundle", "opencode-desktop-staged", "opencode-desktop-process"} {
 		if !all[id] {
 			t.Errorf("no format %s", id)
 		}

@@ -14,7 +14,7 @@ import (
 type Row struct {
 	N       int    `json:"n"`
 	Op      string `json:"op"`      // what hopsesh does
-	From    string `json:"from"`    // the source session's agent: claude | codex
+	From    string `json:"from"`    // the source session's agent: claude | codex | opencode
 	To      string `json:"to"`      // the agent it ends up in
 	Content string `json:"content"` // the conversation's language, or large
 	Repo    string `json:"repo"`    // the source checkout's state
@@ -35,19 +35,50 @@ var dims = []struct {
 	values []string
 }{
 	{"op", []string{"move", "continue", "bounded", "push", "roundtrip", "quiet-roundtrip", "new-session", "conflict", "undo-used", "skill", "fetch", "handoff", "cloud-roundtrip", "cloud-hop"}},
-	{"agents", []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude"}},
+	{"agents", []string{"claude>claude", "codex>codex", "claude>codex", "codex>claude",
+		"opencode>opencode", "claude>opencode", "opencode>claude", "codex>opencode", "opencode>codex"}},
 	{"content", []string{"ascii", "zh", "ja", "ar", "el", "large"}},
 	{"repo", []string{"clean", "unpushed", "uncommitted", "worktree", "none"}},
 	{"naming", []string{"address", "alias"}},
 	{"location", []string{"machine", "claude-cloud", "codex-cloud"}},
 }
 
+// only, when set, limits the rows to sessions of these agents (-agents): pull requests
+// leave OpenCode out of the longest runs (two systems in one job), the nightly runs and
+// the mesh take all three.
+var only map[string]bool
+
+// setAgents takes the -agents flag: a comma-separated list, or "" for every agent.
+func setAgents(list string) error {
+	only = nil
+	if strings.TrimSpace(list) == "" {
+		return nil
+	}
+	known := map[string]bool{"claude": true, "codex": true, "opencode": true}
+	only = map[string]bool{}
+	for _, a := range strings.Split(list, ",") {
+		a = strings.TrimSpace(a)
+		if !known[a] {
+			return fmt.Errorf("-agents: unknown agent %q (claude, codex, opencode)", a)
+		}
+		only[a] = true
+	}
+	return nil
+}
+
 // valid rules out combinations that cannot happen.
 func valid(v []string) bool {
 	op, agents, repo, naming, location := v[0], v[1], v[3], v[4], v[5]
-	same := agents == "claude>claude" || agents == "codex>codex"
+	from, to, _ := strings.Cut(agents, ">")
+	if only != nil && (!only[from] || !only[to]) {
+		return false
+	}
+	same := from == to
 	if cloudOp(op) != (location != "machine") {
 		return false // only a fetch, a hand-off and a cloud round trip involve a cloud
+	}
+	if cloudOp(op) && (from == "opencode" || to == "opencode") {
+		return false // OpenCode's cloud legs are e2e tests (TestBringCloudWorkIntoOpenCode, the cloud hand-offs)
 	}
 	if op == "cloud-hop" {
 		// A cloud session goes on to the other vendor's cloud through this machine: Claude

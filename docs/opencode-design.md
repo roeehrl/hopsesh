@@ -1746,6 +1746,116 @@ Left:
 - Not done: the quick access window shows no size; sorting by size mixes no units but puts
   message counts last.
 
+**Left by PR 9 for later PRs.** OpenCode now runs in the matrices, the nightly real-agent
+job and the drift watcher. Done here from the earlier notes:
+- **PR 0:** the two-agent loops: `internal/e2e` (lineage routes, context transfers),
+  hsmatrix (3×3), `driftmanifest` (the floors test no longer names Claude Code and Codex: every
+  agent's baseline is the highest of its tested version and its floors), `scripts/matrix-*`,
+  `ci/drift` and the nightly, mesh and CI workflows. `skillcheck` was PR 3's.
+- **PR 2:** the conformance suite runs every optional capability a module has (preview, live
+  and stop, account, capacity, rename, resume on a host, watch paths) for its listed sessions,
+  and plans the identity move for every session. The drift entry has its real-agent `Tests`
+  (`TestRealOpenCode`), the migration ids and the OpenAPI document (as snapshots, below), the
+  plugin API (a format, canaries and OpenCode's plugin and permission sources) and an
+  `opencode-desktop` app target (its `Latest` is "none": hopsesh reads no public version feed
+  of the desktop app; its releases come with the CLI's).
+- **PR 3:** the differential runs are `TestRealOpenCodeMatchesStandIn` (12 commands hopsesh
+  relies on, each on its own copy of the same data; exit code and first line compared, folders
+  and times made alike). `fakecloud.Programs` has the stand-in `opencode` (PR 3's and 5's item):
+  it keeps a real database, so it sees only the variables it is given and refuses to run
+  without a HOME or `XDG_DATA_HOME` of its own. The capture scrubber (`ocscrub.py`) is not a
+  devtool: no fixture was captured again here (left for the next capture, with D9's sandbox).
+- **PR 4–7 real-binary harnesses:** `TestRealOpenCodeLifecycle` does what they did, without a
+  model: a captured session imported, listed, previewed, read (and read as the stand-in's import
+  of it reads), renamed, moved to another data folder and undone, a Claude Code session
+  continued into it and undone, a folder change refused with the service stopped, the sign-in
+  probe. `TestRealOpenCodeSchemaAndAPI` checks the schema gate on a database the installed
+  OpenCode made and every API call hopsesh makes against its OpenAPI document, and reports
+  migrations the stand-in's schema lacks. All three run behind a guard (every call logged; any
+  but `--version`, `service status` and `debug paths` refused without `--standalone`) with every
+  OpenCode folder the test's own, and fail if a call was refused or a service registered.
+- **PR 5:** `ir.WriteResult.Stamp`: OpenCode's writer reads its session's stamp right after the
+  import and gives it only while the session holds just the written messages, else a stamp no
+  state matches (`v1:used-since-written`), so a turn added in that window is never the
+  operation's and the unforced undo refuses; the core records the writer's stamp when there is
+  one (`recordVendorWritten`), and reads one itself otherwise (Claude Code, Codex). A subagent's
+  answer that arrives after its call was carried is no longer lost on the incremental return:
+  the converter renders a result whose call is not in the read on its own, as text, with its
+  coverage. §7's legs: `context_capacity_test.go` (Claude Code and Codex into OpenCode, OpenCode
+  into both, from a compacted session), `lineage_routes_test.go` (`TestLineageRoutesThreeAgents`:
+  13 routes per pull request in their own CI step, every assignment of agents to the stops, 63,
+  nightly; a return to an OpenCode original continues it in a new session, D4: the test checks
+  the new session's rollover names a copy there and the original is unchanged), the peer leg is PR 4's
+  `TestOpenCodePeerPackage`, and a continue into OpenCode on another machine is the matrix's
+  continue rows over SSH. Tests set the desktop app's folders by placing them in their home
+  (since #162 a test never reads this machine's `/Applications`);
+  `TestContinueIntoOpenCodeUsesStagedDesktopCLI` resumes with a staged CLI of the service's
+  version placed there, and is refused without one.
+- **PR 6:** Bun in CI (`oven-sh/setup-bun`, Bun 1.4.4) on the Linux and macOS test jobs, so
+  `plugin/hopsesh.test.js` runs under `go test ./agents/opencode` there. They had run only under
+  Node with a stand-in for `bun:test` (PR 6): the first CI run is their first under Bun.
+- **Scenario matrix.** hsmatrix's agent dimension is 3×3; pairwise rows rise from 81 to 98 (36
+  with OpenCode: every operation between machines, each of OpenCode's five pairings), triples
+  from 376 to 487. Cloud rows stay with Claude Code and Codex (OpenCode's cloud legs are e2e
+  tests). `-agents` (or `HSMATRIX_AGENTS`) limits a run, and `-agents claude,codex` gives exactly
+  the earlier rows: the per-PR Windows loopback and the two OS-pair jobs (one job, two systems,
+  close to their time limits) use it; the Linux and macOS loopbacks, the nightly triples (now
+  three shards) and the mesh run all three. The helper reaches OpenCode only through the
+  stand-in: it checks the `opencode` on PATH is the stand-in by the package its build
+  recorded (`debug/buildinfo`, without running it, so a real OpenCode first on PATH never
+  runs) and refuses otherwise, and the runner checks the same before any row; it imports and deletes sessions with the stand-in, adds a turn to the
+  stand-in's database, finds sessions by their export and makes OpenCode's data folder as a
+  first start would (hopsesh counts OpenCode installed only then). The skill row also checks the
+  copy OpenCode shares with Codex in `~/.agents/skills`. Run locally with `matrix-local.sh`
+  (stand-in ssh, HOME and TMPDIR in a scratch folder, both sides test machines through
+  `HOPSESH_APP_RUNTIMES=off`): all 98 rows passed.
+- **Nightly.** The real-agent job installs OpenCode 2.3.0 with npm (`@opencode/cli`, pinned in
+  `OPENCODE_VERSION`) on Linux and macOS, checks hopsesh reads that version, and runs
+  `TestRealOpenCode` (no model calls). Pull requests that change the real-agent tests run it.
+  Before committing, the three tests ran once on this Mac against Homebrew's 2.3.0, with every
+  folder in the session's scratch folder and a stricter guard that answered `service status`
+  itself: all passed, 59 migrations (the latest `20261030054400_job`, none new), and
+  `~/.local/share/opencode`, `~/.config/opencode` and `~/.local/state/opencode` unchanged.
+- **Drift.** The probe gives the real-agent tests `HOPSESH_DRIFT_SNAPSHOTS`: OpenCode's tests write
+  the migration ids and the OpenAPI document there, and the probe diffs them against last week's
+  (`snapshots/<id>/`). It runs every CLI with OpenCode's XDG folders and config in its scratch
+  home and auto-update off. The local review's focus says what to read first for OpenCode.
+Left:
+- **Windows.** OpenCode's rows run on Windows only in the mesh (nightly, blocking; pull requests
+  macOS↔Windows, not blocking): the stand-in on Windows, the API-only remote tier and the
+  helper there were never run. If the nightly mesh fails there, set `HSMATRIX_AGENTS` in
+  `mesh.yml` while it is fixed. The real-agent job does not install OpenCode on Windows (its
+  docs list no install there, though npm's `@opencode/cli` 2.3.0 ships Windows builds: not
+  tried), and the plugin's Bun tests do not run on Windows.
+- **Plugin loading** by a real OpenCode is not tested: a private server lists no plugins before
+  loading them (PR 6), and no test starts the service. Likewise the plugin floor is still judged
+  by the program's version, not the running service's (PR 7), and the remote D2 path between two
+  real hopsesh (PR 8) is not run: no matrix row runs a service.
+- **A written session that starts with a reply** (PR 5) imports into 2.3.0 (checked once in the
+  sandbox: OpenCode's export starts with the assistant message). Whether a provider that refuses
+  such a history gets it as it is needs a model call against such a provider (D9 allows only
+  omlx, which takes any order): not done.
+- **PR 7's default-folder pin** on remote machines: the matrix's remote OpenCode rows (stand-in
+  ssh locally, real sshd in CI) pass; a remote login shell that sets OpenCode's XDG variables
+  differently from the facts probe was not tried.
+- Not done: OpenCode legs in `scripts/roundtrip-test.sh` and `scripts/windows-peer-test.ps1` (the
+  matrix's roundtrip, push and conflict rows cover them over the same loopback SSH);
+  `password-test.sh`, `paid-smoke.sh` and `iterm-smoke.sh` need none (agent-agnostic, or paid
+  models). `forkInputs` (PR 4) still keys on anchor stats. A resume where the session already is
+  (`ResumeHere`) is still not reached with OpenCode. The fork-on-resume sandbox check (PR 7)
+  needs `api POST …/fork` on a session with messages: not added to the real-agent tests. Whether
+  OpenCode's TUI rings the bell when it waits needs a model call.
+- **CI time.** The three-agent lineage routes have their own steps: per pull request (13
+  routes, about 2.5 minutes here with `-race`) and on nightly shard 2 (63 routes, about 11
+  minutes here, 40-minute deadline). The per-PR scenario job's limit went from 30 to 40
+  minutes and the nightly triples job's from 60 to 90; check both after the first runs.
+- **Stability (D10).** `Experimental` stays; the flip to `Stable` is a one-line PR after two green
+  nightly weeks of the OpenCode real-agent job and the manual checklist (§7).
+- **PR 10:** `CONTRIBUTING.md` (running the matrix with OpenCode, `HSMATRIX_AGENTS`, the real-agent
+  tests and their guard), `docs/drift.md` (the snapshots, written with sorted keys), and the
+  CHANGELOG lines for the matrices and the nightly job. The SDK lines (`ir.WriteResult.Stamp`,
+  the stricter conformance suite) are in already.
+
 **Total:** about 13–14k lines production and 9.5k test across PRs 0–10. Flip to `Stable` is a separate
 one-line PR after D10's condition is met.
 

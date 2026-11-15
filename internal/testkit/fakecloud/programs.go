@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/roeehrl/hopsesh/internal/core/term"
+	"github.com/roeehrl/hopsesh/internal/testkit/fakeopencode"
 	"github.com/roeehrl/hopsesh/sdk/agent"
 )
 
@@ -19,11 +20,16 @@ const (
 	OpenCodeVersionLine = "opencode v2.3.0" // internal/testkit/fakeopencode plays it
 )
 
-// Programs are the stand-in claude, codex, gh, jules, devin, amp and fakecloud for
-// agenttest.FakeHost.Programs
+// Programs are the stand-in claude, codex, opencode, gh, jules, devin, amp and fakecloud
+// for agenttest.FakeHost.Programs
 // (and agenttest.RunCloud): they answer --version and the cloud verbs, in this process,
 // with the store in dir. A run's RunOptions.Env (FAKE_CLOUD_FAIL, say) is its environment
 // on top of vars, without its RunOptions.Unset.
+//
+// The stand-in opencode (internal/testkit/fakeopencode) keeps a real database on disk,
+// under the HOME or XDG_DATA_HOME that vars (or the run's Env) name, and sees no other
+// variable of this process: without either it refuses to run, so it never opens the
+// OpenCode folder of the machine the tests run on.
 func Programs(dir string, vars map[string]string) map[string]func(argv []string, o agent.RunOptions) agent.Result {
 	run := func(main func(Proc) int) func([]string, agent.RunOptions) agent.Result {
 		return func(argv []string, o agent.RunOptions) agent.Result {
@@ -64,6 +70,30 @@ func Programs(dir string, vars map[string]string) map[string]func(argv []string,
 			_, code := Codex(p)
 			return code
 		}),
+		"opencode": func(argv []string, o agent.RunOptions) agent.Result {
+			v := map[string]string{}
+			for k, x := range vars {
+				v[k] = x
+			}
+			for _, k := range o.Unset {
+				delete(v, k)
+			}
+			for _, kv := range o.Env {
+				if k, x, ok := strings.Cut(kv, "="); ok {
+					v[k] = x
+				}
+			}
+			if v["HOME"] == "" && v["XDG_DATA_HOME"] == "" {
+				return agent.Result{Code: 1, Stderr: []byte("the stand-in opencode needs HOME or XDG_DATA_HOME in its variables\n")}
+			}
+			if v["HOME"] == "" {
+				v["HOME"] = filepath.Dir(v["XDG_DATA_HOME"]) // never this process's own
+			}
+			var out, errOut bytes.Buffer
+			code := fakeopencode.Main(fakeopencode.Proc{Args: argv[1:], Dir: o.Dir, Stdin: bytes.NewReader(o.Stdin), Stdout: &out, Stderr: &errOut,
+				Getenv: func(k string) (string, bool) { x, ok := v[k]; return x, ok }})
+			return agent.Result{Stdout: out.Bytes(), Stderr: errOut.Bytes(), Code: code}
+		},
 		"gh":        run(logged("gh", Gh)),
 		"jules":     run(logged("jules", Jules)),
 		"devin":     run(logged("devin", Devin)),

@@ -16,7 +16,7 @@ UHOME=$(th_home "$U")
 sudo mkdir -p /usr/local/bin
 sudo install -m 0755 "$BIN/hopsesh" /usr/local/bin/hopsesh
 sudo install -m 0755 "$BIN/hsmatrix" /usr/local/bin/hsmatrix
-for a in claude codex; do sudo install -m 0755 "$BIN/fakeagent" "/usr/local/bin/$a"; done
+for a in claude codex opencode; do sudo install -m 0755 "$BIN/fakeagent" "/usr/local/bin/$a"; done
 
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
 [ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519

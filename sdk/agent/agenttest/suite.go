@@ -124,22 +124,28 @@ func Run(t *testing.T, m agent.Module, newHost func(t *testing.T) *FakeHost) {
 
 	t.Run("plan-move-identity", func(t *testing.T) {
 		_, h, in, l := setup(t)
-		s := l.Sessions[0]
-		b, _ := m.Bundle(ctx, h, in, s)
-		p := agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: s.CWD, Location: "fake"}
-		mp, err := m.PlanMove(in, in, s, b, p)
-		if err != nil {
-			t.Fatalf("PlanMove: %v", err)
-		}
-		if len(mp.Files) != len(b.Files) {
-			t.Fatalf("PlanMove placed %d of %d files", len(mp.Files), len(b.Files))
-		}
-		for _, f := range mp.Files {
-			if f.ToRoot != f.From.Root || f.ToRel != f.From.Rel {
-				t.Errorf("an identity move must keep %s/%s in place, got %s/%s", f.From.Root, f.From.Rel, f.ToRoot, f.ToRel)
+		for _, s := range l.Sessions {
+			b, err := m.Bundle(ctx, h, in, s)
+			if err != nil {
+				t.Fatalf("Bundle %s: %v", s.Key, err)
+			}
+			p := agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: s.CWD, Location: "fake"}
+			mp, err := m.PlanMove(in, in, s, b, p)
+			if err != nil {
+				t.Fatalf("PlanMove %s: %v", s.Key, err)
+			}
+			if len(mp.Files) != len(b.Files) {
+				t.Fatalf("PlanMove %s placed %d of %d files", s.Key, len(mp.Files), len(b.Files))
+			}
+			for _, f := range mp.Files {
+				if f.ToRoot != f.From.Root || f.ToRel != f.From.Rel {
+					t.Errorf("%s: an identity move must keep %s/%s in place, got %s/%s", s.Key, f.From.Root, f.From.Rel, f.ToRoot, f.ToRel)
+				}
 			}
 		}
 	})
+
+	runOptional(t, m, setup)
 
 	t.Run("confined", func(t *testing.T) {
 		_, h, _, _ := setup(t)
@@ -369,6 +375,145 @@ func Run(t *testing.T, m agent.Module, newHost func(t *testing.T) *FakeHost) {
 			a, b := mm.NewSessionID(in, now), mm.NewSessionID(in, now)
 			if a == "" || a == b {
 				t.Fatalf("minted ids must be new each time: %q, %q", a, b)
+			}
+		})
+	}
+}
+
+// runOptional checks the optional capabilities a module has: they answer for every
+// listed session, never read a secret (the confined host refuses it) and leave the
+// sessions as they were, but for a rename, which the listing then shows.
+func runOptional(t *testing.T, m agent.Module, setup func(t *testing.T) (*FakeHost, agent.Host, agent.Install, agent.Listing)) {
+	ctx := context.Background()
+	if p, ok := m.(agent.Previewer); ok {
+		t.Run("preview", func(t *testing.T) {
+			_, h, in, l := setup(t)
+			for _, s := range l.Sessions {
+				pv, err := p.Preview(ctx, h, in, s, 3)
+				if err != nil {
+					t.Fatalf("Preview %s: %v", s.Key, err)
+				}
+				if pv.Messages() > 3 {
+					t.Errorf("Preview %s gave %d messages for 3", s.Key, pv.Messages())
+				}
+			}
+		})
+	}
+	if ld, ok := m.(agent.LiveDetector); ok {
+		t.Run("live", func(t *testing.T) {
+			_, h, in, l := setup(t)
+			asked := map[agent.SessionID]bool{}
+			var ids []agent.SessionID
+			for _, s := range l.Sessions {
+				asked[s.Key.Session] = true
+				ids = append(ids, s.Key.Session)
+			}
+			live, err := ld.Live(ctx, h, in, ids)
+			if err != nil {
+				t.Fatalf("Live: %v", err)
+			}
+			for id := range live {
+				if !asked[id] {
+					t.Errorf("Live answered for %s, which was not asked", id)
+				}
+			}
+			if st, ok := m.(agent.Stopper); ok {
+				// Stopping a session that is not open changes nothing in it.
+				for _, s := range l.Sessions {
+					if live[s.Key.Session].State == agent.Live {
+						continue
+					}
+					_ = st.Stop(ctx, h, in, s, 0)
+					after, err := m.List(ctx, h, in)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, a := range after.Sessions {
+						if a.Key == s.Key && a.Size != s.Size {
+							t.Errorf("Stop of %s, which is not open, changed it (%d to %d)", s.Key, s.Size, a.Size)
+						}
+					}
+					break
+				}
+			}
+		})
+	}
+	if ap, ok := m.(agent.AccountProber); ok {
+		t.Run("account", func(t *testing.T) {
+			_, h, in, _ := setup(t)
+			if _, err := ap.Account(ctx, h, in); errors.Is(err, agent.ErrDenied) {
+				t.Fatalf("Account read what the module may not: %v", err)
+			}
+		})
+	}
+	if cs, ok := m.(agent.ContextSizer); ok {
+		t.Run("capacity", func(t *testing.T) {
+			_, h, in, l := setup(t)
+			if c, err := cs.ContextCapacity(ctx, h, in, nil); err != nil || c.Window <= 0 && !c.Unknown {
+				t.Fatalf("ContextCapacity for a new session: %+v, %v", c, err)
+			}
+			for _, s := range l.Sessions {
+				s := s
+				if c, err := cs.ContextCapacity(ctx, h, in, &s); err != nil || c.Window <= 0 && !c.Unknown {
+					t.Fatalf("ContextCapacity %s: %+v, %v", s.Key, c, err)
+				}
+			}
+		})
+	}
+	if rn, ok := m.(agent.Renamer); ok {
+		t.Run("rename", func(t *testing.T) {
+			_, h, in, l := setup(t)
+			s := l.Sessions[0]
+			if err := rn.Rename(ctx, h, in, s, ""); err == nil {
+				t.Fatal("an empty title must be refused")
+			}
+			if err := rn.Rename(ctx, h, in, s, "Renamed by the conformance suite"); err != nil {
+				t.Fatalf("Rename %s: %v", s.Key, err)
+			}
+			after, err := m.List(ctx, h, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, a := range after.Sessions {
+				if a.Key == s.Key && a.Title != "Renamed by the conformance suite" {
+					t.Fatalf("the listing does not show the new title: %q", a.Title)
+				}
+			}
+		})
+	}
+	if hr, ok := m.(agent.HostResumer); ok {
+		t.Run("resume-on", func(t *testing.T) {
+			_, h, in, l := setup(t)
+			s := l.Sessions[0]
+			cmd, err := hr.ResumeOn(ctx, h, in, s.Key, agent.Placement{Key: s.Key, SourceID: s.Key.Session, CWD: s.CWD, Location: "fake"}, agent.ResumeOptions{})
+			if err != nil && !errors.Is(err, agent.ErrRestartsService) {
+				t.Fatalf("ResumeOn %s: %v", s.Key, err)
+			}
+			if err == nil && (len(cmd.Argv) == 0 || !strings.Contains(strings.Join(cmd.Argv, " "), string(s.Key.Session))) {
+				t.Fatalf("ResumeOn %s gave %+v", s.Key, cmd.Argv)
+			}
+			missing := s.Key
+			missing.Session = s.Key.Session + "-missing"
+			if _, err := hr.ResumeOn(ctx, h, in, missing, agent.Placement{Key: missing, CWD: s.CWD, Location: "fake"}, agent.ResumeOptions{}); err == nil {
+				t.Fatal("a resume of a session that is not there must be refused")
+			}
+		})
+	}
+	if wp, ok := m.(agent.SessionWatchProvider); ok {
+		t.Run("watch-paths", func(t *testing.T) {
+			_, h, in, _ := setup(t)
+			paths := wp.SessionWatchPaths(in, h.Path())
+			if len(paths) == 0 {
+				t.Fatal("SessionWatchPaths named nothing to watch")
+			}
+			for _, p := range paths {
+				inside := false
+				for _, r := range in.Roots {
+					inside = inside || r != "" && (p == r || strings.HasPrefix(p, strings.TrimRight(r, "/\\")+h.Path().Sep()))
+				}
+				if !inside {
+					t.Errorf("watch path %s is in none of the install's roots %v", p, in.Roots)
+				}
 			}
 		})
 	}

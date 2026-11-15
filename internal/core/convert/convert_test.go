@@ -198,3 +198,57 @@ func TestGeneratedContextDoesNotBecomeNewWork(t *testing.T) {
 		}
 	}
 }
+
+// A result whose call came in an earlier read (a subagent's answer that arrived after its
+// call was carried) is rendered on its own, with its coverage; one whose call is in the
+// same read is rendered once, with the call.
+func TestLoneResultIsRendered(t *testing.T) {
+	answer := []ir.Node{
+		{Kind: ir.KindToolResult, Actor: ir.User, Result: &ir.ToolResult{CallID: "c9", Status: ir.StatusCompleted, Output: "The subagent found FIG-3.\n"}},
+		{Kind: ir.KindMessage, Actor: ir.User, Text: "Thanks."},
+	}
+	ir.Chain(answer, "earlier")
+	res := Render(Request{Nodes: answer, From: "OpenCode", To: "Claude Code", Fidelity: History, Window: 272000})
+	if len(res.Items) < 1 || res.Items[0].Role != ir.RoleAgent || !strings.Contains(res.Items[0].Text, "result of an earlier call") ||
+		!strings.Contains(res.Items[0].Text, "FIG-3") {
+		t.Fatalf("the lone result is not rendered: %+v", res.Items)
+	}
+	covered := false
+	for _, id := range res.Items[0].Coverage {
+		covered = covered || id == answer[0].ID
+	}
+	if !covered {
+		t.Fatalf("the rendered result does not cover its node: %v", res.Items[0].Coverage)
+	}
+	full := Render(Request{Nodes: session(), From: "Claude Code", To: "Codex", Fidelity: History, Window: 272000})
+	for _, it := range full.Items {
+		if strings.Contains(it.Text, "result of an earlier call") {
+			t.Fatalf("a result rendered with its call was rendered again: %s", it.Text)
+		}
+	}
+	// The same for any source: a long Task call's answer on Claude Code's incremental read.
+	task := []ir.Node{
+		{Kind: ir.KindToolResult, Actor: ir.User, Result: &ir.ToolResult{CallID: "toolu_9", Status: ir.StatusFailed, Output: "The task stopped at FIG-4.\n"}},
+		{Kind: ir.KindMessage, Actor: ir.User, Text: "Go on."},
+	}
+	ir.Chain(task, "earlier")
+	claude := Render(Request{Nodes: task, From: "Claude Code", To: "Codex", Fidelity: History, Window: 272000})
+	if len(claude.Items) < 1 || !strings.Contains(claude.Items[0].Text, "[prior agent · Claude Code · result of an earlier call · failed]") ||
+		!strings.Contains(claude.Items[0].Text, "FIG-4") {
+		t.Fatalf("the lone Claude Code result is not rendered: %+v", claude.Items)
+	}
+	// A call that is not rendered (hopsesh's own, left out) does not hide its result.
+	ns := session()
+	ns[2].Generated = true
+	skipped := Render(Request{Nodes: ns, From: "Codex", To: "Claude Code", Fidelity: History, Window: 272000})
+	shown := false
+	for _, it := range skipped.Items {
+		if strings.Contains(it.Text, "$ cat") {
+			t.Fatalf("a generated call was rendered: %s", it.Text)
+		}
+		shown = shown || strings.Contains(it.Text, "result of an earlier call") && strings.Contains(it.Text, "PLUM-7")
+	}
+	if !shown {
+		t.Fatalf("the result of a skipped call was dropped: %+v", skipped.Items)
+	}
+}

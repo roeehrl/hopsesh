@@ -69,7 +69,7 @@ claim it tested authenticated cross-account continuation or actual desktop prese
 The optional presence daemon is a proposal for a later release, not shipped functionality.
 
 Context capacity and bounded recovery (0.4.0): inspect `sdk/ir/capacity.go`,
-`agents/{claude,codex}/capacity.go`, `internal/core/convert`, and every writer/importer.
+`agents/{claude,codex,opencode}/capacity.go`, `internal/core/convert`, and every writer/importer.
 Watch effective model/profile context limits, Codex config profiles and compaction
 replacement_history, paginated ordinals/history_base, Claude active-branch compaction,
 and imported response items versus duplicate UI events. Unknown active state must
@@ -248,15 +248,16 @@ Large Codex rollout analysis must stay in the Codex module. Review incremental n
 
 Version floors, formats and desktop apps (phase 4): the code gates features on versions
 (`floors` per target: Claude Code 2.1.284 hooks and 2.1.285 `--desktop`, Codex 0.129.0
-hooks and hooks/list trust and 0.156.0 `--no-daemon`, Claude desktop 2.19675.1 resume
-focus). The help and schema are compared from the baseline (at or above every floor); read
+hooks and hooks/list trust and 0.156.0 `--no-daemon`, OpenCode 2.1.0 for every command,
+API call and table hopsesh reads and 2.2.7 for the protection plugin, Claude desktop
+2.19675.1 resume focus). The help and schema are compared from the baseline (at or above every floor); read
 `help/<target>/floors.tsv` for what each gated feature runs at its floor and at the latest.
 `formats/<target>.tsv` covers the identity and record formats hopsesh reads: Claude
 oauthAccount, `auth status --json`, credential_org attachments and bridge-session records,
 the live registry sessions/<pid>.json and hook payloads; Codex auth.json ids,
 session_meta creator ids, originator (codex_cli_rs, Codex Desktop, codex_work_desktop) and
 thread_source realtime_voice, session_index.jsonl, thread-writer-locks and hooks.json with
-hooks/list trust. The app targets (`claude-desktop`, `codex-desktop`) watch the desktop
+hooks/list trust. The app targets (`claude-desktop`, `codex-desktop`, `opencode-desktop`) watch the desktop
 apps' release feeds, docs and URL schemes (claude://resume?session=, codex://threads/),
 Claude desktop's own Claude Code (CLAUDE_CODE_ENTRYPOINT=claude-desktop) and its account
 (config.json lastKnownAccountUuid, claude-code-sessions/<account>/<org>/), and the Codex
@@ -279,3 +280,23 @@ makes `/cd` keep the thread id is an opportunity, not a break: report it as info
 version, so hopsesh can ask the user to type it in an open session as it does for Claude
 Code. A change to `thread/resume`'s cwd, to `thread_settings_applied`, or to `resume_cwd` /
 `ResumeCwdMode` is a risk. Cover `TestCodexChangeDirThroughAppServer`.
+
+OpenCode (Experimental; `agents/opencode`): hopsesh reads OpenCode 2.x's SQLite database
+read only, through an allowlist of tables behind a column gate (`schema.go`), and never
+writes it: every change is OpenCode's own program (`session import|export|delete`,
+`opencode api …`), with `--standalone` when `opencode service status` says the shared
+background service is stopped. hopsesh never starts, stops or restarts that service, and
+resumes with a program of the running service's version (the desktop app's bundled or
+staged `opencode-cli`), because the TUI replaces a service of another version. Read
+`snapshots/opencode/` first: the migration ids of a database the latest OpenCode made and its
+OpenAPI document, against last week's. A new migration that renames or drops a column the
+gate names, or a removed API path among those `TestRealOpenCodeSchemaAndAPI` checks, is a
+break; an added migration or path is info. `TestRealOpenCodeMatchesStandIn` compares the
+stand-in (`internal/testkit/fakeopencode`) with the latest OpenCode command by command: a
+difference there means the stand-in, and so every OpenCode test, no longer plays OpenCode.
+Watch `mismatch`, `--standalone`, `serve --service` and `service.json` (the service's
+behaviour), transfer and import shapes (`session import` keeps ids, exits 0 on "Session
+already exists"), the plugin API (`Plugin.define`, `execute.before`, permission `evaluate`,
+the session prompt hook, instruction entries, plugin storage; formats/opencode.tsv), the
+XDG folders and `OPENCODE_DB`, and the desktop app's staged CLIs. The nightly job runs the
+same tests against a pinned 2.x; the release line 1.x is not supported.

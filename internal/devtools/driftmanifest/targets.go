@@ -235,14 +235,24 @@ var agentWatch = map[agent.ID]target{
 					"packages/util/src/session-title-fallback.ts", "packages/util/src/global-roots.ts",
 					"packages/schema/src/session-legacy.ts", "packages/core/src/session/execution.ts", "packages/core/src/models-dev.ts",
 					"packages/core/src/plugin/supervisor.ts", "packages/core/src/plugin/host.ts", "packages/core/src/plugin/source-directory.ts", "packages/core/src/config/plugin/source.ts",
-					"packages/plugin/src/promise/adapter.ts", "packages/schema/src/session-event.ts"},
+					"packages/plugin/src/promise/adapter.ts", "packages/schema/src/session-event.ts",
+					"packages/plugin/src/promise/tool.ts", "packages/plugin/src/promise/session.ts", "packages/plugin/src/promise/plugin.ts", "packages/plugin/src/host.ts", "packages/core/src/permission.ts"},
 				Canaries: []string{"session_v2", "session_part", "isSettled", "withParts", "time_suspended", "fork_boundary", "SessionAlreadyProjected", "mismatch", "OPENCODE_DB", "isExactRootFallback",
-					"providerResultState", "providerContext", "claimOnCommit", "models-dev:v2:catalog"},
+					"providerResultState", "providerContext", "claimOnCommit", "models-dev:v2:catalog",
+					// The plugin API hopsesh's protection plugin uses.
+					"Plugin.define", "execute.before", "entry.put"},
 			},
+			// Real OpenCode, no model: the schema gate on a database it made, every API call
+			// hopsesh makes in its OpenAPI document, the stand-in's answers against its own,
+			// and a session imported, read, renamed, moved, continued into and undone. They
+			// also write the database's migration ids and the OpenAPI document as snapshots,
+			// which the probe compares with last week's.
+			Tests: "TestRealOpenCode",
 			Formats: []format{
 				{ID: "opencode-session", What: "session_v2 rows: a session's folder, title, version, parent (subagents), fork, archive and turn times", Fields: []string{"session_v2", "directory", "parent_id", "fork_session_id", "fork_boundary", "time_archived", "time_busy", "time_idle", "time_suspended", "time_compacting", "version"}, Readers: []string{"agents/opencode/sql.go", "agents/opencode/schema.go"}},
 				{ID: "opencode-message", What: "session_message rows and their session_part rows (parts first, then inline content), filtered as session export filters them", Fields: []string{"session_message", "session_part", "ordinal", "seq", "completed", "running", "content"}, Readers: []string{"agents/opencode/sql.go", "agents/opencode/model.go"}},
 				{ID: "opencode-catalog", What: "kv's cached models.dev catalog: a model's context and input limits", Fields: []string{"models-dev", "catalog", "limit", "context", "input"}, Readers: []string{"agents/opencode/sql.go", "agents/opencode/capacity.go"}},
+				{ID: "opencode-plugin", What: "the plugin API hopsesh's protection plugin uses: Plugin.define, the tool, permission and session hooks, the session events, session.get, instruction entries and plugin storage", Fields: []string{"Plugin.define", "execute.before", "evaluate", "prompt", "session.created", "session.moved", "session.forked", "session.get", "instructions", "entry.put", "storage"}, Readers: []string{"agents/opencode/plugin/index.js", "agents/opencode/plugin/hopsesh.js"}},
 			},
 		},
 		Floors: []floor{
@@ -297,6 +307,27 @@ var apps = []target{
 				{ID: "claude-desktop-identity", What: "Desktop's config.json and its Code sessions folder: the account it is signed in to, ids only", Fields: []string{"lastKnownAccountUuid", "claude-code-sessions"}, Readers: []string{"agents/claude/desktop.go", "agents/claude/account.go"}},
 				{ID: "claude-desktop-runtime", What: "the bundle, its version and the Claude Code it runs (Application Support/Claude/claude-code/<version>/)", Fields: []string{"claudefordesktop", "CFBundleShortVersionString", "Application Support", "claude-code", "CLAUDE_CODE_ENTRYPOINT"}, Readers: []string{"agents/claude/desktop.go", "agents/claude/account.go"}},
 				{ID: "claude-desktop-link", What: "the URL that focuses a running Desktop session", Fields: []string{"claude://resume", "session="}, Readers: []string{"agents/claude/claude.go"}},
+			},
+		},
+	},
+	{
+		ID: "opencode-desktop", Name: "OpenCode desktop", Kind: "app", Group: "local", Vendor: "Anomaly",
+		Surface: "OpenCode desktop (Electron, bundle ai.opencode.desktop, /Applications/OpenCode.app), which shares the CLI's database and background service: " +
+			"its version (Info.plist), the CLI it bundles at Contents/Resources/opencode-cli with opencode-cli.version and the CLIs it stages under " +
+			"Application Support/ai.opencode.desktop/cli/<version>-<arch>/opencode-cli, which hopsesh picks to resume a session with the running service's version, " +
+			"its process names (OpenCode, OpenCode Helper…) for presence, and its opencode:// scheme, which hopsesh only detects (no session link exists)",
+		Priority: "high",
+		Latest:   latest{From: "none"},
+		Watch: watch{
+			Docs:  prefixed("https://raw.githubusercontent.com/anomalyco/opencode/dev/services/site/src/docs/content/", ".mdx", []string{"index", "troubleshooting"}),
+			Feeds: []feed{{Kind: "releases", Repo: "anomalyco/opencode", Tag: "v"}},
+			Grep:  `desktop|Desktop|electron|opencode-cli|opencode://|deep.link|bundle|ai\.opencode|Application Support|stag|service|mismatch|replace|deprecat|remov|rename|breaking`,
+			Code: &code{Repo: "anomalyco/opencode", Paths: []string{"packages/desktop/src/main", "packages/desktop/src/renderer/startup/deep-links.ts"},
+				Canaries: []string{"opencode-cli", "ai.opencode.desktop", "opencode-cli.version", "mismatch"}},
+			Formats: []format{
+				{ID: "opencode-desktop-bundle", What: "the app bundle: its identifier and version, and the CLI it bundles with that CLI's version", Fields: []string{"ai.opencode.desktop", "CFBundleShortVersionString", "opencode-cli.version", "opencode-cli"}, Readers: []string{"agents/opencode/opencode.go", "agents/opencode/service.go", "agents/opencode/paths.go"}},
+				{ID: "opencode-desktop-staged", What: "the CLIs the app stages, one folder per version and architecture", Fields: []string{"Application Support", "ai.opencode.desktop", "cli"}, Readers: []string{"agents/opencode/paths.go"}},
+				{ID: "opencode-desktop-process", What: "the app's processes, which presence counts as OpenCode desktop (its staged CLI's service is never a session's host)", Fields: []string{"OpenCode", "OpenCode Helper", "opencode-cli"}, Readers: []string{"internal/core/presence/presence.go"}},
 			},
 		},
 	},

@@ -82,3 +82,41 @@ func TestMovementRows(t *testing.T) {
 		}
 	}
 }
+
+// OpenCode is a source and a target of every operation between machines, in each of its
+// five pairings, and of no cloud row; -agents leaves it out, giving the two-agent rows.
+func TestOpenCodeRows(t *testing.T) {
+	rows := pairwise(1)
+	ops, pairs := map[string]bool{}, map[string]bool{}
+	for _, r := range rows {
+		if r.From != "opencode" && r.To != "opencode" {
+			continue
+		}
+		if cloudOp(r.Op) || r.Op == "skill" || r.Repo == "worktree" && r.From == "opencode" {
+			t.Fatalf("row %s", r)
+		}
+		ops[r.Op], pairs[r.From+">"+r.To] = true, true
+	}
+	for _, op := range []string{"move", "continue", "bounded", "push", "roundtrip", "quiet-roundtrip", "new-session", "conflict", "undo-used"} {
+		if !ops[op] {
+			t.Errorf("no OpenCode %s row", op)
+		}
+	}
+	for _, p := range []string{"opencode>opencode", "claude>opencode", "opencode>claude", "codex>opencode", "opencode>codex"} {
+		if !pairs[p] {
+			t.Errorf("no %s row", p)
+		}
+	}
+	if err := setAgents("claude,codex"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = setAgents("") }()
+	for _, r := range pairwise(1) {
+		if r.From == "opencode" || r.To == "opencode" {
+			t.Fatalf("-agents claude,codex gave %s", r)
+		}
+	}
+	if err := setAgents("claude,gemini"); err == nil {
+		t.Fatal("an unknown agent must be refused")
+	}
+}

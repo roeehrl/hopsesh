@@ -44,7 +44,7 @@ func ocTurn(t *testing.T, l location, sid agent.SessionID, prompt, reply string)
 	}
 	defer db.Close()
 	now := time.Now().UnixMilli()
-	id := "msg_ffffffffffff" + strings.Repeat("a", 10) + time.Now().Format("150405.000")[7:]
+	id := ocMessageID("a")
 	if _, err := db.Exec(`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
 		VALUES (?, ?, 'assistant', (SELECT max(seq) + 1 FROM session_message WHERE session_id = ?), ?, ?,
 		json_object('time', json_object('created', ?, 'completed', ?), 'agent', 'build', 'model', json_object('id', 'qwen', 'providerID', 'omlx'),
@@ -643,5 +643,72 @@ func TestBringCloudWorkIntoOpenCode(t *testing.T) {
 	defer inv3.Close()
 	if _, err := inv3.Find(app.ParseRef("opencode/" + sid)); err == nil {
 		t.Fatal("undo left the brought session")
+	}
+}
+
+// ocCompaction adds a completed compaction to an OpenCode session, as OpenCode's own
+// compaction leaves it: its summary, which the next turns build on.
+func ocCompaction(t *testing.T, l location, sid agent.SessionID, summary string) {
+	t.Helper()
+	db, err := fakeopencode.Open(ocDB(l))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UnixMilli()
+	id := ocMessageID("c")
+	if _, err := db.Exec(`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data)
+		VALUES (?, ?, 'compaction', (SELECT max(seq) + 1 FROM session_message WHERE session_id = ?), ?, ?,
+		json_object('time', json_object('created', ?, 'completed', ?), 'status', 'completed', 'reason', 'auto', 'summary', ?))`,
+		id, string(sid), string(sid), now, now, now, now, summary); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE session_v2 SET time_updated = max(time_updated + 1, ?) WHERE id = ?`, now, string(sid)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A test sets OpenCode desktop's folders by placing them in its own home: with the
+// service running another version, the resume after a continuation uses the CLI the
+// desktop app staged for that version under the test's home (Application Support, as on
+// a Mac), and without it the resume is refused. This machine's /Applications is never
+// read (HOPSESH_APP_RUNTIMES=off), so the result is the same on every machine.
+func TestContinueIntoOpenCodeUsesStagedDesktopCLI(t *testing.T) {
+	ctx := context.Background()
+	for _, staged := range []bool{true, false} {
+		t.Run(map[bool]string{true: "staged", false: "none"}[staged], func(t *testing.T) {
+			_, box, here := ocWorld(t)
+			seed(t, box)
+			here.m.Facts.OS, here.m.Facts.Arch = "darwin", "arm64" // where the desktop app stages its CLIs
+			hereOC := ocInstall(here)
+			os.MkdirAll(hereOC.Root("data"), 0o700)
+			cli := filepath.Join(here.m.Facts.Home, "Library", "Application Support", "ai.opencode.desktop", "cli", "2.2.7-arm64", "opencode-cli")
+			if staged {
+				if err := os.MkdirAll(filepath.Dir(cli), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(cli, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("FAKE_OPENCODE_SERVICE", "running")
+			t.Setenv("FAKE_OPENCODE_SERVICE_VERSION", "2.2.7")
+			in := move.Input{Source: move.Side{Machine: box.m, Module: claude.New(), Install: box.in}, Session: list(t, box)[sid],
+				Target: move.Side{Machine: here.m, Module: opencode.New(), Install: hereOC}}
+			p, err := move.Build(ctx, in, move.Options{TargetDir: here.repo})
+			if err != nil || len(p.Blockers) > 0 {
+				t.Fatalf("plan: %v %v", err, p.Blockers)
+			}
+			res, err := move.Apply(ctx, p, in, move.Env{StateDir: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if staged && (len(res.Run.Argv) == 0 || res.Run.Argv[0] != cli) {
+				t.Fatalf("the resume should run the staged %s: %v %q", cli, res.Run.Argv, res.Warnings)
+			}
+			if !staged && len(res.Run.Argv) != 0 {
+				t.Fatalf("with no program of the service's version the resume is refused: %v", res.Run.Argv)
+			}
+		})
 	}
 }
