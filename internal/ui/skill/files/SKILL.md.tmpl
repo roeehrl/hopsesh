@@ -5,7 +5,7 @@ description: >-
   one here, or continues it in another agent, with the hopsesh CLI: paths are rewritten and
   the repository, worktree and code are set up. Use when the user wants to continue, pull,
   hand off, bring back or resume a session from another computer, to continue a session in a
-  different agent ("continue this in Codex", "take my Claude session to Codex"), to hand a
+  different agent ("continue this in Codex", "take my Claude session to OpenCode"), to hand a
   session off to an agent's cloud ("hand this off to Claude Code cloud", "hand this off to
   Codex cloud"), to bring a cloud session or Codex cloud task back, asks which
   sessions are open elsewhere, or mentions hopsesh.
@@ -32,8 +32,8 @@ It moves a session here in the same agent, or continues it in another agent. Run
    Give the user the `command` from the result to run in a new terminal tab.
 4. **Do not change hopsesh's setup for the user**: `hosts allow`, `hosts add`, `hosts auth`,
    `hosts setup-key`, `clouds allow`, `clouds deny`, setting an environment with `clouds env`,
-   `terminals --use` or `--resume`, `trust`, `skill`, `undo` and `update` are the user's to
-   run. Tell them the exact command instead.
+   `terminals --use` or `--resume`, `trust`, `skill`, `notices`, `undo` and `update` are the
+   user's to run. Tell them the exact command instead.
 5. **Never ask for, accept or pass a password.** Do not use `--password-stdin`. If the user types
    a password into the conversation, do not use it; suggest they change it.
 
@@ -65,7 +65,9 @@ It moves a session here in the same agent, or continues it in another agent. Run
    (`repo.action`: `use`, `clone`, `needs-clone`), `sync` (code),
    `warnings` and `blockers`. For another agent also `continue.relation` (`new`, or `append`
    when only the new work goes to an earlier copy there) and `continue.report.summary` (what
-   does not carry over, such as hidden reasoning).
+   does not carry over, such as hidden reasoning). OpenCode cannot add to a session it has,
+   so into OpenCode an `append` becomes `new`: a new session that continues the copy there
+   (a warning says so).
 2. Resolve blockers by asking the user, then plan again with the matching flag:
    - repository not here: `--clone` or `--to <dir>`;
    - the session is open here: `--stop-local`;
@@ -90,7 +92,7 @@ briefing the other agent reads.
 
 `{{.Bin}} hosts status --json` lists every machine's checks (`hopsesh`, `receiving`,
 `login`, `cli`, `copies` (every hopsesh there one version; `installs` lists them), and each
-agent folder's `hook` and `skill`), each with a `state` (ok, warn,
+agent folder's `hook` (OpenCode's is a plugin) and `skill`), each with a `state` (ok, warn,
 error, off, unknown), a `reason`, and a `fix` when one exists. When a move's plan says the
 original can't be blocked (`cannotProtect`), these say why; tell the user the fix (an
 update is `hopsesh hosts setup <machine>`, which is theirs to run).

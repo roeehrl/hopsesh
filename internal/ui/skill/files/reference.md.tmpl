@@ -92,4 +92,5 @@ lists each repository's Codex cloud environment.
 hopsesh reads other machines over SSH and writes into the agents' data folders, which agent
 sandboxes usually block. `{{.Bin}} skill install --add-rules` adds approval rules for each agent:
 the read-only commands run without asking (and, in Codex, outside its sandbox), while `pull`,
-`push`, `handoff`, `undo`, `clouds cleanup` and `clouds continue` always ask.
+`push`, `handoff`, `undo`, `clouds cleanup` and `clouds continue` always ask. In OpenCode the
+rules work through hopsesh's plugin, which `{{.Bin}} notices install` adds.
