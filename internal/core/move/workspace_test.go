@@ -138,6 +138,15 @@ func TestPlainFolderMovesUnderThisHome(t *testing.T) {
 	if cwd, _ = planRepo(context.Background(), p, in, Options{}); cwd != want || len(p.Blockers) != 0 {
 		t.Fatalf("an existing folder: cwd %s, blockers %q", cwd, p.Blockers)
 	}
+	if p.Repo.NoRemote {
+		t.Fatalf("a plain folder is not a repository without a remote: %+v", p.Repo)
+	}
+	// A git repository without a remote is planned the same way, and says what it is.
+	in.Git = &repos.GitState{Dir: in.Session.CWD, Exists: true, IsRepo: true, Toplevel: in.Session.CWD, Branch: "main"}
+	p = &Plan{}
+	if cwd, _ = planRepo(context.Background(), p, in, Options{}); cwd != want || p.Repo.Action != RepoNone || !p.Repo.NoRemote {
+		t.Fatalf("a repository without a remote: cwd %s, repo %+v", cwd, p.Repo)
+	}
 	if got := underHome("/srv/data", "/Users/sam", home); got != "/srv/data" {
 		t.Errorf("outside the home: %s", got)
 	}

@@ -1440,7 +1440,11 @@ func (m *model) viewPlanBody(b *strings.Builder) {
 	case move.RepoNeedsClone:
 		fmt.Fprintf(b, "  repo  %s is not here — press c to clone into %s\n", r.Identity, r.LocalPath)
 	case move.RepoNone:
-		b.WriteString("  dir   not a git repository\n")
+		if r.NoRemote {
+			b.WriteString("  dir   a git repository without a remote\n")
+		} else {
+			b.WriteString("  dir   not a git repository\n")
+		}
 	case move.RepoWorkspace:
 		fmt.Fprintf(b, "  dir   %s, a folder of %d repositories\n", r.LocalPath, len(r.Members))
 		for _, mb := range r.Members {
