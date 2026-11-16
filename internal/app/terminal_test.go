@@ -264,7 +264,13 @@ func TestCheckTicketTakesNpmShims(t *testing.T) {
 			t.Errorf("%s: %v", prog, err)
 		}
 	}
-	for _, prog := range []string{`C:\Windows\System32\cmd.exe`, `C:\npm\claude.ps1`, `C:\npm\claude-evil.cmd`} {
+	// OpenCode's desktop app bundles its program as opencode-cli, which a resume may pick.
+	for _, prog := range []string{"/Applications/OpenCode.app/Contents/Resources/opencode-cli", "/Users/a/Library/Application Support/ai.opencode.desktop/cli/2.2.7-arm64/opencode-cli"} {
+		if err := a.checkTicket(termapp.Ticket{Kind: termapp.KindSession, Argv: []string{prog, "-s", "ses_x"}, Dir: dir}); err != nil {
+			t.Errorf("%s: %v", prog, err)
+		}
+	}
+	for _, prog := range []string{`C:\Windows\System32\cmd.exe`, `C:\npm\claude.ps1`, `C:\npm\claude-evil.cmd`, "/tmp/opencode-cli-evil"} {
 		if err := a.checkTicket(termapp.Ticket{Kind: termapp.KindSession, Argv: []string{prog}, Dir: dir}); err == nil {
 			t.Errorf("%s passed for an agent's program", prog)
 		}

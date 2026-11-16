@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- Opening an OpenCode session on a Mac whose OpenCode desktop app runs the service now
+  works: the tab ran the desktop app's own CLI (`opencode-cli`) and refused it as "not an
+  agent's program". `hopsesh open` also checks the command before it opens a tab, so a
+  refusal is reported instead of an empty tab.
+
 ## [0.9.0] - 2026-11-15
 
 OpenCode joins Claude Code and Codex, as an experimental third agent: hopsesh lists, moves

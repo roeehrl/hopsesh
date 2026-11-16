@@ -89,6 +89,8 @@ func (*Module) Spec() agent.Spec {
 				"windows": {"~/AppData/Roaming/npm/opencode.cmd"},
 			},
 			VersionArgs: []string{"--version"},
+			// The desktop app's own CLI: a resume picks it when it matches the service.
+			Programs: []string{"opencode-cli"},
 		}},
 		Roots: []agent.Root{
 			{Name: rootData, EnvSub: []agent.EnvSub{{Env: "XDG_DATA_HOME", Sub: "opencode"}}, Default: map[string]string{"*": "~/.local/share/opencode"}},
