@@ -26,11 +26,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {label: linux triples, os: ubuntu-24.04, t: 3}
-          - {label: macos triples, os: macos-15, t: 3}
-          # Windows runs a row in about 40 s: two halves stay well inside the job limit.
-          - {label: windows triples 1/2, os: windows-2025, t: 3, shard: 1/2}
-          - {label: windows triples 2/2, os: windows-2025, t: 3, shard: 2/2}
+          # With OpenCode the triples are 487 rows: one Linux or macOS job ran past 120 minutes
+          # and Windows halves took up to 108, so every platform runs them in thirds, as the
+          # nightly's Linux triples do.
+          - {label: linux triples 1/3, os: ubuntu-24.04, t: 3, shard: 1/3}
+          - {label: linux triples 2/3, os: ubuntu-24.04, t: 3, shard: 2/3}
+          - {label: linux triples 3/3, os: ubuntu-24.04, t: 3, shard: 3/3}
+          - {label: macos triples 1/3, os: macos-15, t: 3, shard: 1/3}
+          - {label: macos triples 2/3, os: macos-15, t: 3, shard: 2/3}
+          - {label: macos triples 3/3, os: macos-15, t: 3, shard: 3/3}
+          - {label: windows triples 1/3, os: windows-2025, t: 3, shard: 1/3}
+          - {label: windows triples 2/3, os: windows-2025, t: 3, shard: 2/3}
+          - {label: windows triples 3/3, os: windows-2025, t: 3, shard: 3/3}
           - {label: windows 2022, os: windows-2022, t: 2}
           - {label: macos 26, os: macos-26, t: 2}
           - {label: linux arm64, os: ubuntu-24.04-arm, t: 2}
