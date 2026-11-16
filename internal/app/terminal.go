@@ -138,6 +138,11 @@ func (a *App) DropTicket(id string) { a.termStore().Drop(id) }
 // macOS denies hopsesh control of it. When nothing opens, the error wraps
 // termapp.ErrNoTerminal (copy the command instead).
 func (a *App) OpenInTerminal(ctx context.Context, prog string, t termapp.Terminal, l Launch) (termapp.Opened, error) {
+	// The tab checks its ticket again; checking here first reports a refusal to the caller
+	// instead of in a tab that opened.
+	if err := a.checkTicket(termapp.Ticket{Kind: l.Kind, Argv: l.Run.Argv, Dir: l.Run.Dir}); err != nil {
+		return termapp.Opened{}, fmt.Errorf("hopsesh cannot open this: %w", err)
+	}
 	id, err := a.NewTicket(l)
 	if err != nil {
 		return termapp.Opened{}, err
@@ -317,6 +322,9 @@ func (a *App) checkTicket(t termapp.Ticket) error {
 	for _, s := range a.Specs() {
 		for _, b := range s.Binaries {
 			ok = ok || strings.EqualFold(b.Name, base)
+			for _, p := range b.Programs {
+				ok = ok || strings.EqualFold(p, base)
+			}
 		}
 	}
 	if !ok {

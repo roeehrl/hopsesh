@@ -192,6 +192,9 @@ type Binary struct {
 	// home folder.
 	Candidates  map[string][]string
 	VersionArgs []string // ["--version"]
+	// Programs are other names the agent's own program goes by, which a resume may run
+	// (OpenCode's desktop app bundles it as opencode-cli); detection still looks for Name.
+	Programs []string
 }
 
 // Root is one data folder of the agent.
