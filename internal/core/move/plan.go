@@ -596,6 +596,15 @@ func markUnprotected(p *Plan, in Input, opt Options) {
 	}
 }
 
+// UnprotectedReason is why the original can't be blocked or warned, for one line: the
+// guard's own reasons (a hook not installed, protection off there), else no hopsesh there.
+func UnprotectedReason(p *Plan) string {
+	if len(p.CannotProtect) > 0 {
+		return strings.Join(p.CannotProtect, "; ")
+	}
+	return "no hopsesh on " + p.Source.Location
+}
+
 func planWarnings(p *Plan, in Input, opt Options) {
 	spec := in.Target.Module.Spec()
 	markUnprotected(p, in, opt)

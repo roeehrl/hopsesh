@@ -28,6 +28,9 @@ func TestGuardDecidesProtection(t *testing.T) {
 	if p := plan(&Guard{Why: why}, true, false); !p.Unprotected || len(p.CannotProtect) != 1 || !strings.Contains(p.Warnings[0], "0.5.0") {
 		t.Fatalf("not ready, asked: %+v", p)
 	}
+	if r := UnprotectedReason(plan(&Guard{Why: why}, true, false)); r != why[0] {
+		t.Fatalf("the reason is the guard's, not \"no hopsesh\": %q", r)
+	}
 	if p := plan(&Guard{Why: why}, false, false); p.Unprotected || len(p.CannotProtect) != 1 || len(p.Warnings) > 0 {
 		t.Fatalf("not ready, not asked: the reasons are there, no warning: %+v", p)
 	}
@@ -41,5 +44,8 @@ func TestGuardDecidesProtection(t *testing.T) {
 	src.Facts.Binaries = nil
 	if p := plan(nil, true, false); !p.Unprotected || p.CannotProtect[0] != "hopsesh isn't installed there" {
 		t.Fatalf("no hopsesh: %+v", p)
+	}
+	if r := UnprotectedReason(&Plan{Source: Endpoint{Location: "macbook"}}); r != "no hopsesh on macbook" {
+		t.Fatalf("no reasons: %q", r)
 	}
 }

@@ -119,7 +119,7 @@ func Apply(ctx context.Context, p *Plan, in Input, env Env) (result *Result, fai
 			if p.Options.Fork {
 				result.Notice = fmt.Sprintf("A separate conversation was prepared in %s on %s. This one is not blocked and stays available.", p.Agent, p.Target.Location)
 			} else if p.Unprotected {
-				result.Notice = fmt.Sprintf("Prepared in %s on %s. The copy left behind on %s is not protected: without hopsesh there, nothing blocks or warns it.", p.Agent, p.Target.Location, p.Source.Location)
+				result.Notice = fmt.Sprintf("Prepared in %s on %s. The copy left behind on %s is not protected (%s): nothing blocks or warns it.", p.Agent, p.Target.Location, p.Source.Location, UnprotectedReason(p))
 			}
 		}
 	}()

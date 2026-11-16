@@ -43,6 +43,9 @@ type RepoPlan struct {
 	Worktree     string   `json:"worktree,omitempty"` // to create
 	SourceHead   string   `json:"sourceHead,omitempty"`
 	HasUpstream  bool     `json:"sourceUpstream,omitempty"`
+	// NoRemote: the session's folder is a git repository without a remote (Action
+	// RepoNone), which hopsesh cannot match or clone either.
+	NoRemote bool `json:"noRemote,omitempty"`
 	// Members are the repositories of a workspace folder (Action RepoWorkspace), each found
 	// here or cloned into the folder.
 	Members []RepoPlan `json:"members,omitempty"`
@@ -75,6 +78,7 @@ func planRepo(ctx context.Context, p *Plan, in Input, opt Options) (string, erro
 	}
 	if g == nil || !g.IsRepo || g.Identity == "" {
 		p.Repo.Action = RepoNone
+		p.Repo.NoRemote = g != nil && g.IsRepo
 		if in.Source.Machine.Name == in.Target.Machine.Name {
 			return s.CWD, nil
 		}

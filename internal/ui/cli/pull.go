@@ -362,7 +362,7 @@ func (r *run) renderPlan(p *move.Plan) {
 		guard += " (" + r.app.Cfg.OriginalGuard() + ")"
 	}
 	if p.Unprotected {
-		guard = "not protected: no hopsesh on " + p.Source.Location
+		guard = "not protected: " + move.UnprotectedReason(p)
 	}
 	r.printf("  original  %s\n", map[bool]string{true: guard, false: "left alone"}[p.Options.Notify])
 	switch p.Repo.Action {
@@ -377,7 +377,11 @@ func (r *run) renderPlan(p *move.Plan) {
 	case move.RepoWorkspace:
 		r.printf("  repos     a folder of %d, in %s", len(p.Repo.Members), p.Repo.LocalPath)
 	default:
-		r.printf("  repo      none (not a git repository)")
+		if p.Repo.NoRemote {
+			r.printf("  repo      none (a git repository without a remote)")
+		} else {
+			r.printf("  repo      none (not a git repository)")
+		}
 	}
 	if p.Repo.Worktree != "" {
 		r.printf(", worktree %s", p.Repo.Worktree)

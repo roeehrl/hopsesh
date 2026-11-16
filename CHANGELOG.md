@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- A plan or continuation whose original can't be protected now says why (for example, the
+  agent's hook isn't installed) instead of "no hopsesh on" a machine that has it.
+- A session folder that is a git repository without a remote shows as that, not as "not a
+  git repository".
+
 ## [0.9.0] - 2026-11-15
 
 OpenCode joins Claude Code and Codex, as an experimental third agent: hopsesh lists, moves
